@@ -9,7 +9,10 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- 1. DROP EXISTING TABLES (Reverse Dependency Order - Cả tiền tố mới và tên cũ)
 DROP TABLE IF EXISTS "tbl_ACC_JournalEntryLine" CASCADE;
 DROP TABLE IF EXISTS "tbl_ACC_JournalEntry" CASCADE;
-DROP TABLE IF EXISTS "tbl_ACC_Account" CASCADE;
+DROP TABLE IF EXISTS "tbl_SALE_InvoiceItem" CASCADE;
+DROP TABLE IF EXISTS "tbl_SALE_Invoice" CASCADE;
+DROP TABLE IF EXISTS "tbl_SALE_OrderItem" CASCADE;
+DROP TABLE IF EXISTS "tbl_SALE_Order" CASCADE;
 DROP TABLE IF EXISTS "tbl_SALES_InvoiceItem" CASCADE;
 DROP TABLE IF EXISTS "tbl_SALES_Invoice" CASCADE;
 DROP TABLE IF EXISTS "tbl_WMS_StockIssueItem" CASCADE;
@@ -376,7 +379,7 @@ CREATE INDEX idx_tbl_acc_jel_account ON "tbl_ACC_JournalEntryLine"(account_id);
 -- 7. DDL - MODULE SALES: BÁN HÀNG & HÓA ĐƠN POS (SALES & INVOICING)
 -- =========================================================================================
 
-CREATE TABLE "tbl_SALES_Invoice" (
+CREATE TABLE "tbl_SALE_Invoice" (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     invoice_number VARCHAR(50) NOT NULL UNIQUE,
     invoice_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -404,12 +407,12 @@ CREATE TABLE "tbl_SALES_Invoice" (
     deleted_by VARCHAR(100),
     tenant_id UUID
 );
-CREATE INDEX idx_tbl_sales_inv_date ON "tbl_SALES_Invoice"(invoice_date);
-CREATE INDEX idx_tbl_sales_inv_branch ON "tbl_SALES_Invoice"(branch_id);
+CREATE INDEX idx_tbl_sale_inv_date ON "tbl_SALE_Invoice"(invoice_date);
+CREATE INDEX idx_tbl_sale_inv_branch ON "tbl_SALE_Invoice"(branch_id);
 
-CREATE TABLE "tbl_SALES_InvoiceItem" (
+CREATE TABLE "tbl_SALE_InvoiceItem" (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    sales_invoice_id UUID NOT NULL REFERENCES "tbl_SALES_Invoice"(id) ON DELETE CASCADE,
+    sales_invoice_id UUID NOT NULL REFERENCES "tbl_SALE_Invoice"(id) ON DELETE CASCADE,
     item_id UUID NOT NULL REFERENCES "tbl_WMS_Item"(id) ON DELETE RESTRICT,
     quantity DECIMAL(18, 4) NOT NULL DEFAULT 0,
     unit_price DECIMAL(18, 4) NOT NULL DEFAULT 0,
@@ -418,8 +421,8 @@ CREATE TABLE "tbl_SALES_InvoiceItem" (
     cost_price DECIMAL(18, 4) NOT NULL DEFAULT 0
 );
 
--- 7.2. ĐƠN ĐẶT HÀNG BÁN (SALES ORDERS)
-CREATE TABLE "tbl_SALES_Order" (
+-- 7.2. ĐƠN ĐẶT HÀNG BÁN (SALE ORDERS)
+CREATE TABLE "tbl_SALE_Order" (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     order_number VARCHAR(50) NOT NULL UNIQUE,
     order_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -442,12 +445,12 @@ CREATE TABLE "tbl_SALES_Order" (
     deleted_by VARCHAR(100),
     tenant_id UUID
 );
-CREATE INDEX idx_tbl_sales_ord_branch ON "tbl_SALES_Order"(branch_id);
-CREATE INDEX idx_tbl_sales_ord_date ON "tbl_SALES_Order"(order_date);
+CREATE INDEX idx_tbl_sale_ord_branch ON "tbl_SALE_Order"(branch_id);
+CREATE INDEX idx_tbl_sale_ord_date ON "tbl_SALE_Order"(order_date);
 
-CREATE TABLE "tbl_SALES_OrderItem" (
+CREATE TABLE "tbl_SALE_OrderItem" (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    sales_order_id UUID NOT NULL REFERENCES "tbl_SALES_Order"(id) ON DELETE CASCADE,
+    sales_order_id UUID NOT NULL REFERENCES "tbl_SALE_Order"(id) ON DELETE CASCADE,
     item_id UUID NOT NULL REFERENCES "tbl_WMS_Item"(id) ON DELETE RESTRICT,
     item_code VARCHAR(50) NOT NULL,
     item_name VARCHAR(255) NOT NULL,

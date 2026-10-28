@@ -367,10 +367,10 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // 5. SALES - Invoicing
+        // 5. SALE - Invoicing
         modelBuilder.Entity<SalesInvoice>(entity =>
         {
-            entity.ToTable("tbl_SALES_Invoice");
+            entity.ToTable("tbl_SALE_Invoice");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.InvoiceNumber).HasMaxLength(50).IsRequired();
             entity.Property(e => e.CustomerName).HasMaxLength(255).IsRequired();
@@ -414,7 +414,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
 
         modelBuilder.Entity<SalesInvoiceItem>(entity =>
         {
-            entity.ToTable("tbl_SALES_InvoiceItem");
+            entity.ToTable("tbl_SALE_InvoiceItem");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Quantity).HasPrecision(18, 4);
             entity.Property(e => e.UnitPrice).HasPrecision(18, 4);
@@ -433,10 +433,10 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // 5.1 SALES - Orders
+        // 5.1 SALE - Orders
         modelBuilder.Entity<SalesOrder>(entity =>
         {
-            entity.ToTable("tbl_SALES_Order");
+            entity.ToTable("tbl_SALE_Order");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.OrderNumber).HasMaxLength(50).IsRequired();
             entity.Property(e => e.CustomerName).HasMaxLength(255).IsRequired();
@@ -464,7 +464,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
 
         modelBuilder.Entity<SalesOrderItem>(entity =>
         {
-            entity.ToTable("tbl_SALES_OrderItem");
+            entity.ToTable("tbl_SALE_OrderItem");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.ItemCode).HasMaxLength(50).IsRequired();
             entity.Property(e => e.ItemName).HasMaxLength(255).IsRequired();
