@@ -1,0 +1,68 @@
+## ====================================================================
+## ERPm-BE (.NET 8 Clean Architecture + PostgreSQL) .gitignore
+## Repository: https://github.com/I3Solution/ERPm-BE
+## ====================================================================
+
+# Build results
+[Bb]in/
+[Oo]bj/
+publish/
+dist/
+out/
+TestResults/
+[Aa]rtifacts/
+*.nupkg
+*.snupkg
+
+# User-specific & temporary files
+*.suo
+*.user
+*.user.*
+*.userosscache
+*.sln.docstates
+*.userprefs
+*.pidb
+*.booproj
+*.svclog
+*.coverage
+*.coveragexml
+*.vsix
+*.ide/
+*.opendb
+*.dbmdl
+
+# Visual Studio Cache & Tools
+.vs/
+.vsts/
+Generated_Files/
+_ReSharper*/
+*.ReSharper*
+*.DotSettings.user
+
+# Visual Studio Code & JetBrains Rider
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.sln.iml
+
+# Secrets & Environment Local Configs
+.env
+.env.*
+!.env.example
+appsettings*.local.json
+*.local.json
+secrets.json
+
+# Operating System Files
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+*~
