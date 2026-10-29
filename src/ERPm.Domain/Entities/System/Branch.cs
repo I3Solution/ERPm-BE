@@ -10,6 +10,7 @@ public class Branch : BaseAuditableEntity
     public string Code { get; set; } = string.Empty;       // e.g. "root", "CN_HN", "CN_HCM"
     public string Name { get; set; } = string.Empty;       // Branch display name
     public int? ParentId { get; set; }                     // Hierarchical parent branch ID
+    public int? CompanyId { get; set; }                    // Owning legal entity (optional until configured)
     public string? Address { get; set; }
     public string? Phone { get; set; }
     public string? Email { get; set; }
@@ -18,6 +19,7 @@ public class Branch : BaseAuditableEntity
 
     // Navigation
     public virtual Branch? Parent { get; set; }
+    public virtual Company? Company { get; set; }
     public virtual ICollection<Branch> Children { get; set; } = new List<Branch>();
     public virtual ICollection<Warehouse> Warehouses { get; set; } = new List<Warehouse>();
     public virtual ICollection<SalesInvoice> SalesInvoices { get; set; } = new List<SalesInvoice>();

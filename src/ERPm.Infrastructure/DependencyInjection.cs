@@ -7,9 +7,15 @@ using ERPm.Application.Features.Localization;
 using ERPm.Application.Features.Partner;
 using ERPm.Application.Features.Sales;
 using ERPm.Application.Features.System;
+using ERPm.Application.DTOs.HumanResource;
+using ERPm.Application.DTOs.System;
+using ERPm.Application.Features.HumanResource;
+using ERPm.Domain.Entities.HumanResource;
+using ERPm.Domain.Entities.System;
 using ERPm.Infrastructure.Persistence;
 using ERPm.Infrastructure.Services;
 using ERPm.Infrastructure.Services.Common;
+using ERPm.Infrastructure.Services.HumanResource;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -54,6 +60,15 @@ public static class DependencyInjection
         services.AddScoped<ISalesInvoiceService, SalesInvoiceService>();
         services.AddScoped<IPartnerService, PartnerService>();
         services.AddScoped<IDashboardService, DashboardService>();
+
+        // SYS organization & HRM: closed registrations override the open generic Base CRUD service
+        services.AddScoped<IBaseCrudService<Company, CompanyDto, CreateCompanyRequest, UpdateCompanyRequest>, CompanyService>();
+        services.AddScoped<IBaseCrudService<OrgStructure, OrgStructureDto, CreateOrgStructureRequest, UpdateOrgStructureRequest>, OrgStructureService>();
+        services.AddScoped<IBaseCrudService<Employee, EmployeeDto, CreateEmployeeRequest, UpdateEmployeeRequest>, EmployeeService>();
+        services.AddScoped<IBaseCrudService<WorkHistory, WorkHistoryDto, CreateWorkHistoryRequest, UpdateWorkHistoryRequest>, WorkHistoryService>();
+        services.AddScoped<IBaseCrudService<Shift, ShiftDto, CreateShiftRequest, UpdateShiftRequest>, ShiftService>();
+        services.AddScoped<IBaseCrudService<HrmDataPermission, HrmDataPermissionDto, CreateHrmDataPermissionRequest, UpdateHrmDataPermissionRequest>, HrmDataPermissionService>();
+        services.AddScoped<IHrmDataScopeService, HrmDataScopeService>();
 
         return services;
     }

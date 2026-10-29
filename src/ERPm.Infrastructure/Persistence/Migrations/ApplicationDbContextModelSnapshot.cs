@@ -719,6 +719,399 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     b.ToTable("tbl_WMS_UnitOfMeasure", (string)null);
                 });
 
+            modelBuilder.Entity("ERPm.Domain.Entities.HumanResource.Employee", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("created_by");
+
+                    b.Property<DateOnly?>("DateOfBirth")
+                        .HasColumnType("date")
+                        .HasColumnName("date_of_birth");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at_utc");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("deleted_by");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("email");
+
+                    b.Property<Guid>("ExternalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("external_id");
+
+                    b.Property<int>("Gender")
+                        .HasColumnType("integer")
+                        .HasColumnName("gender");
+
+                    b.Property<DateOnly?>("HireDate")
+                        .HasColumnType("date")
+                        .HasColumnName("hire_date");
+
+                    b.Property<string>("IdentityNumber")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("identity_number");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
+                    b.Property<DateTime?>("LastModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_modified_at_utc");
+
+                    b.Property<string>("LastModifiedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("last_modified_by");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("phone");
+
+                    b.Property<int?>("TenantId")
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_hrm_employee");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_hrm_employee_code");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_hrm_employee_external_id");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id", "IsDeleted" });
+
+                    b.HasIndex("UserId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_hrm_employee_user_id")
+                        .HasFilter("user_id IS NOT NULL AND NOT is_deleted");
+
+                    b.ToTable("tbl_HRM_Employee", (string)null);
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.HumanResource.HrmDataPermission", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("CompanyId")
+                        .HasColumnType("integer")
+                        .HasColumnName("company_id");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("created_by");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at_utc");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("deleted_by");
+
+                    b.Property<Guid>("ExternalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("external_id");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
+                    b.Property<DateTime?>("LastModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_modified_at_utc");
+
+                    b.Property<string>("LastModifiedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("last_modified_by");
+
+                    b.Property<int?>("OrgStructureId")
+                        .HasColumnType("integer")
+                        .HasColumnName("org_structure_id");
+
+                    b.Property<int?>("TenantId")
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_hrm_data_permission");
+
+                    b.HasIndex("CompanyId")
+                        .HasDatabaseName("ix_tbl_hrm_data_permission_company_id");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_hrm_data_permission_external_id");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id", "IsDeleted" });
+
+                    b.HasIndex("OrgStructureId")
+                        .HasDatabaseName("ix_tbl_hrm_data_permission_org_structure_id");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_tbl_hrm_data_permission_user_id");
+
+                    b.ToTable("tbl_HRM_DataPermission", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_tbl_hrm_data_permission_dimension", "org_structure_id IS NOT NULL OR company_id IS NOT NULL");
+                        });
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.HumanResource.Shift", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("BreakMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("break_minutes");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("created_by");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at_utc");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("deleted_by");
+
+                    b.Property<TimeOnly>("EndTime")
+                        .HasColumnType("time without time zone")
+                        .HasColumnName("end_time");
+
+                    b.Property<Guid>("ExternalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("external_id");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
+                    b.Property<DateTime?>("LastModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_modified_at_utc");
+
+                    b.Property<string>("LastModifiedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("last_modified_by");
+
+                    b.Property<int>("LateGraceMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("late_grace_minutes");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("name");
+
+                    b.Property<TimeOnly>("StartTime")
+                        .HasColumnType("time without time zone")
+                        .HasColumnName("start_time");
+
+                    b.Property<int?>("TenantId")
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<int>("WorkDays")
+                        .HasColumnType("integer")
+                        .HasColumnName("work_days");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_hrm_shift");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_hrm_shift_code");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_hrm_shift_external_id");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id", "IsDeleted" });
+
+                    b.ToTable("tbl_HRM_Shift", (string)null);
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.HumanResource.WorkHistory", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("CompanyId")
+                        .HasColumnType("integer")
+                        .HasColumnName("company_id");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("created_by");
+
+                    b.Property<DateOnly>("DateEffective")
+                        .HasColumnType("date")
+                        .HasColumnName("date_effective");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at_utc");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("deleted_by");
+
+                    b.Property<int>("EmployeeId")
+                        .HasColumnType("integer")
+                        .HasColumnName("employee_id");
+
+                    b.Property<Guid>("ExternalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("external_id");
+
+                    b.Property<bool>("IsApproved")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_approved");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
+                    b.Property<bool>("IsTermination")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_termination");
+
+                    b.Property<string>("JobTitle")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("job_title");
+
+                    b.Property<DateTime?>("LastModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_modified_at_utc");
+
+                    b.Property<string>("LastModifiedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("last_modified_by");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("notes");
+
+                    b.Property<int?>("OrgStructureId")
+                        .HasColumnType("integer")
+                        .HasColumnName("org_structure_id");
+
+                    b.Property<int?>("TenantId")
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_hrm_work_history");
+
+                    b.HasIndex("CompanyId")
+                        .HasDatabaseName("ix_tbl_hrm_work_history_company_id");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_hrm_work_history_external_id");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id", "IsDeleted" });
+
+                    b.HasIndex("OrgStructureId")
+                        .HasDatabaseName("ix_tbl_hrm_work_history_org_structure_id");
+
+                    b.HasIndex("EmployeeId", "DateEffective")
+                        .HasDatabaseName("ix_tbl_hrm_work_history_employee_id_date_effective");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("EmployeeId", "DateEffective"), new[] { "OrgStructureId", "CompanyId", "IsTermination", "IsApproved" });
+
+                    b.ToTable("tbl_HRM_WorkHistory", (string)null);
+                });
+
             modelBuilder.Entity("ERPm.Domain.Entities.Inventory.StockBalance", b =>
                 {
                     b.Property<int>("Id")
@@ -2240,6 +2633,10 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(50)")
                         .HasColumnName("code");
 
+                    b.Property<int?>("CompanyId")
+                        .HasColumnType("integer")
+                        .HasColumnName("company_id");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
@@ -2311,6 +2708,9 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("ix_tbl_sys_branch_code");
 
+                    b.HasIndex("CompanyId")
+                        .HasDatabaseName("ix_tbl_sys_branch_company_id");
+
                     b.HasIndex("ExternalId")
                         .IsUnique()
                         .HasDatabaseName("ix_tbl_sys_branch_external_id");
@@ -2321,6 +2721,205 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_tbl_sys_branch_parent_id");
 
                     b.ToTable("tbl_SYS_Branch", (string)null);
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.System.Company", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Address")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("address");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("created_by");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at_utc");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("deleted_by");
+
+                    b.Property<Guid>("ExternalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("external_id");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
+                    b.Property<DateTime?>("LastModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_modified_at_utc");
+
+                    b.Property<string>("LastModifiedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("last_modified_by");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("phone");
+
+                    b.Property<string>("SocialInsuranceCode")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("social_insurance_code");
+
+                    b.Property<string>("TaxCode")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("tax_code");
+
+                    b.Property<int?>("TenantId")
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_sys_company");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_sys_company_code");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_sys_company_external_id");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id", "IsDeleted" });
+
+                    b.ToTable("tbl_SYS_Company", (string)null);
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.System.OrgStructure", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("BranchId")
+                        .HasColumnType("integer")
+                        .HasColumnName("branch_id");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("code");
+
+                    b.Property<int?>("CompanyId")
+                        .HasColumnType("integer")
+                        .HasColumnName("company_id");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("created_by");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at_utc");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("deleted_by");
+
+                    b.Property<Guid>("ExternalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("external_id");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
+                    b.Property<DateTime?>("LastModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_modified_at_utc");
+
+                    b.Property<string>("LastModifiedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("last_modified_by");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("name");
+
+                    b.Property<int?>("ParentId")
+                        .HasColumnType("integer")
+                        .HasColumnName("parent_id");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer")
+                        .HasColumnName("sort_order");
+
+                    b.Property<int?>("TenantId")
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_sys_org_structure");
+
+                    b.HasIndex("BranchId")
+                        .HasDatabaseName("ix_tbl_sys_org_structure_branch_id");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_sys_org_structure_code");
+
+                    b.HasIndex("CompanyId")
+                        .HasDatabaseName("ix_tbl_sys_org_structure_company_id");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_sys_org_structure_external_id");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id", "IsDeleted" });
+
+                    b.HasIndex("ParentId")
+                        .HasDatabaseName("ix_tbl_sys_org_structure_parent_id");
+
+                    b.ToTable("tbl_SYS_OrgStructure", (string)null);
                 });
 
             modelBuilder.Entity("ERPm.Domain.Entities.Accounting.Account", b =>
@@ -2421,6 +3020,73 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_tbl_wms_item_attribute_tbl_wms_category_category_id");
 
                     b.Navigation("Category");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.HumanResource.Employee", b =>
+                {
+                    b.HasOne("ERPm.Domain.Entities.System.AppUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_hrm_employee_tbl_sys_user_user_id");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.HumanResource.HrmDataPermission", b =>
+                {
+                    b.HasOne("ERPm.Domain.Entities.System.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_hrm_data_permission_tbl_sys_company_company_id");
+
+                    b.HasOne("ERPm.Domain.Entities.System.OrgStructure", "OrgStructure")
+                        .WithMany()
+                        .HasForeignKey("OrgStructureId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_hrm_data_permission_tbl_sys_org_structure_org_structure_id");
+
+                    b.HasOne("ERPm.Domain.Entities.System.AppUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_hrm_data_permission_tbl_sys_user_user_id");
+
+                    b.Navigation("Company");
+
+                    b.Navigation("OrgStructure");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.HumanResource.WorkHistory", b =>
+                {
+                    b.HasOne("ERPm.Domain.Entities.System.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_hrm_work_history_tbl_sys_company_company_id");
+
+                    b.HasOne("ERPm.Domain.Entities.HumanResource.Employee", "Employee")
+                        .WithMany("WorkHistories")
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_hrm_work_history_tbl_hrm_employee_employee_id");
+
+                    b.HasOne("ERPm.Domain.Entities.System.OrgStructure", "OrgStructure")
+                        .WithMany()
+                        .HasForeignKey("OrgStructureId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_hrm_work_history_tbl_sys_org_structure_org_structure_id");
+
+                    b.Navigation("Company");
+
+                    b.Navigation("Employee");
+
+                    b.Navigation("OrgStructure");
                 });
 
             modelBuilder.Entity("ERPm.Domain.Entities.Inventory.StockBalance", b =>
@@ -2726,11 +3392,46 @@ namespace ERPm.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("ERPm.Domain.Entities.System.Branch", b =>
                 {
+                    b.HasOne("ERPm.Domain.Entities.System.Company", "Company")
+                        .WithMany("Branches")
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_sys_branch_companies_company_id");
+
                     b.HasOne("ERPm.Domain.Entities.System.Branch", "Parent")
                         .WithMany("Children")
                         .HasForeignKey("ParentId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_tbl_sys_branch_tbl_sys_branch_parent_id");
+
+                    b.Navigation("Company");
+
+                    b.Navigation("Parent");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.System.OrgStructure", b =>
+                {
+                    b.HasOne("ERPm.Domain.Entities.System.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_sys_org_structure_tbl_sys_branch_branch_id");
+
+                    b.HasOne("ERPm.Domain.Entities.System.Company", "Company")
+                        .WithMany("OrgStructures")
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_sys_org_structure_tbl_sys_company_company_id");
+
+                    b.HasOne("ERPm.Domain.Entities.System.OrgStructure", "Parent")
+                        .WithMany("Children")
+                        .HasForeignKey("ParentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_sys_org_structure_tbl_sys_org_structure_parent_id");
+
+                    b.Navigation("Branch");
+
+                    b.Navigation("Company");
 
                     b.Navigation("Parent");
                 });
@@ -2755,6 +3456,11 @@ namespace ERPm.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("ERPm.Domain.Entities.Catalog.UnitOfMeasure", b =>
                 {
                     b.Navigation("Items");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.HumanResource.Employee", b =>
+                {
+                    b.Navigation("WorkHistories");
                 });
 
             modelBuilder.Entity("ERPm.Domain.Entities.Inventory.StockIssue", b =>
@@ -2800,6 +3506,18 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     b.Navigation("StockReceipts");
 
                     b.Navigation("Warehouses");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.System.Company", b =>
+                {
+                    b.Navigation("Branches");
+
+                    b.Navigation("OrgStructures");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.System.OrgStructure", b =>
+                {
+                    b.Navigation("Children");
                 });
 #pragma warning restore 612, 618
         }

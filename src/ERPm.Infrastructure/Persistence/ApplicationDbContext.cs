@@ -5,6 +5,7 @@ using ERPm.Application.Common.Interfaces;
 using ERPm.Domain.Common;
 using ERPm.Domain.Entities.Accounting;
 using ERPm.Domain.Entities.Catalog;
+using ERPm.Domain.Entities.HumanResource;
 using ERPm.Domain.Entities.Inventory;
 using ERPm.Domain.Entities.Localization;
 using ERPm.Domain.Entities.Partner;
@@ -52,6 +53,12 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<JournalEntry> JournalEntries => Set<JournalEntry>();
     public DbSet<JournalEntryLine> JournalEntryLines => Set<JournalEntryLine>();
+    public DbSet<Company> Companies => Set<Company>();
+    public DbSet<OrgStructure> OrgStructures => Set<OrgStructure>();
+    public DbSet<Employee> Employees => Set<Employee>();
+    public DbSet<WorkHistory> WorkHistories => Set<WorkHistory>();
+    public DbSet<Shift> Shifts => Set<Shift>();
+    public DbSet<HrmDataPermission> HrmDataPermissions => Set<HrmDataPermission>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -99,6 +106,11 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.HasOne(e => e.Parent)
                 .WithMany(e => e.Children)
                 .HasForeignKey(e => e.ParentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Company)
+                .WithMany(c => c.Branches)
+                .HasForeignKey(e => e.CompanyId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasIndex(e => e.Code).IsUnique();
@@ -634,6 +646,86 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
                 .WithMany()
                 .HasForeignKey(e => e.PartnerId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // 6. SYS - Legal entities & organization structure (shared master data)
+        modelBuilder.Entity<Company>(entity =>
+        {
+            entity.ToTable("tbl_SYS_Company");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.TaxCode).HasMaxLength(20);
+            entity.Property(e => e.SocialInsuranceCode).HasMaxLength(20);
+            entity.Property(e => e.Address).HasMaxLength(500);
+            entity.Property(e => e.Phone).HasMaxLength(50);
+            entity.HasIndex(e => e.Code).IsUnique();
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<OrgStructure>(entity =>
+        {
+            entity.ToTable("tbl_SYS_OrgStructure");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(255).IsRequired();
+            entity.HasOne(e => e.Parent).WithMany(e => e.Children).HasForeignKey(e => e.ParentId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Company).WithMany(c => c.OrgStructures).HasForeignKey(e => e.CompanyId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => e.Code).IsUnique();
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        // 7. HRM - Human resources
+        modelBuilder.Entity<Employee>(entity =>
+        {
+            entity.ToTable("tbl_HRM_Employee");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.IdentityNumber).HasMaxLength(20);
+            entity.Property(e => e.Phone).HasMaxLength(50);
+            entity.Property(e => e.Email).HasMaxLength(100);
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => e.Code).IsUnique();
+            entity.HasIndex(e => e.UserId).IsUnique().HasFilter("user_id IS NOT NULL AND NOT is_deleted");
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<WorkHistory>(entity =>
+        {
+            entity.ToTable("tbl_HRM_WorkHistory");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.JobTitle).HasMaxLength(255);
+            entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.HasOne(e => e.Employee).WithMany(p => p.WorkHistories).HasForeignKey(e => e.EmployeeId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.OrgStructure).WithMany().HasForeignKey(e => e.OrgStructureId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Company).WithMany().HasForeignKey(e => e.CompanyId).OnDelete(DeleteBehavior.Restrict);
+            // Timeline loads read approved rows per employee in date order.
+            entity.HasIndex(e => new { e.EmployeeId, e.DateEffective }).IncludeProperties(e => new { e.OrgStructureId, e.CompanyId, e.IsTermination, e.IsApproved });
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<Shift>(entity =>
+        {
+            entity.ToTable("tbl_HRM_Shift");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.Code).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(255).IsRequired();
+            entity.HasIndex(e => e.Code).IsUnique();
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<HrmDataPermission>(entity =>
+        {
+            entity.ToTable("tbl_HRM_DataPermission");
+            ConfigureDualKeyAuditable(entity);
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.OrgStructure).WithMany().HasForeignKey(e => e.OrgStructureId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Company).WithMany().HasForeignKey(e => e.CompanyId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => e.UserId);
+            entity.ToTable(t => t.HasCheckConstraint("ck_tbl_hrm_data_permission_dimension", "org_structure_id IS NOT NULL OR company_id IS NOT NULL"));
+            entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
         // A user's branch grants are enforced independently of client-side filtering.

@@ -184,4 +184,19 @@ foreach (var (days, since, visible) in new[] { (30, 20, true), (30, 30, false), 
         "days outside employment are not counted and unfinished shifts are future");
 }
 
+// ---------------------------------------------------------------------------------------------
+// Database-backed checks (same connection sources as ERPm.Verification); skipped when none is configured
+// ---------------------------------------------------------------------------------------------
+var connection = Environment.GetEnvironmentVariable("ERPM_TEST_CONNECTION");
+var localSettings = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../src/ERPm.API/appsettings.local.json"));
+if (string.IsNullOrEmpty(connection) && File.Exists(localSettings))
+{
+    using var settings = System.Text.Json.JsonDocument.Parse(File.ReadAllText(localSettings));
+    connection = settings.RootElement.GetProperty("ConnectionStrings").GetProperty("DefaultConnection").GetString();
+}
+if (string.IsNullOrEmpty(connection) || args.Contains("--no-db"))
+    Console.WriteLine("SKIPPED: database checks (set ERPM_TEST_CONNECTION or appsettings.local.json)");
+else
+    await DatabaseChecks.RunAsync(connection, Check);
+
 Console.WriteLine($"VERIFIED {checks} HRM checks.");

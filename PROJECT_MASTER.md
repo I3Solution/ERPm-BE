@@ -109,6 +109,7 @@ Nhằm giúp tối ưu tốc độ phát triển (giảm thời gian viết boil
    - **SALES** (Bán hàng): `Entities/SALES/`, `Controllers/SALES/` -> `tbl_SALES_...`
    - **PURCHASE** (Mua hàng): `Entities/PURCHASE/`, `Controllers/PURCHASE/` -> `tbl_PURCHASE_...`
    - **ACC** (Kế toán Sổ cái): `Entities/ACC/`, `Controllers/ACC/` -> `tbl_ACC_...`
+   - **HRM** (Nhân sự): `Entities/HumanResource/`, `DTOs/HumanResource/`, `Services/HumanResource/`, `Controllers/HRM/` (route `api/v1/hrm/...`) -> `tbl_HRM_...`. Luật nghiệp vụ thuần (QTCT, phạm vi dữ liệu, tính công) ở `ERPm.Domain/Services/HumanResource/`, kiểm chứng bằng `tests/ERPm.Hrm.Verification`.
 
 ---
 
@@ -125,11 +126,12 @@ Nhằm giúp tối ưu tốc độ phát triển (giảm thời gian viết boil
    - Mã module viết HOA (VD: `SYS`, `WMS`, `CRM`, `SALES`, `ACC`).
    - Tên thực thể dạng PascalCase (VD: `Item`, `Branch`, `Invoice`).
    - *Bảng danh sách chuẩn:*
-     - **SYS:** `"tbl_SYS_Branch"`, `"tbl_SYS_Language"`, `"tbl_SYS_Dictionary"`.
+     - **SYS:** `"tbl_SYS_Branch"`, `"tbl_SYS_Language"`, `"tbl_SYS_Dictionary"`, `"tbl_SYS_Company"` (pháp nhân; `tbl_SYS_Branch.company_id`), `"tbl_SYS_OrgStructure"` (cơ cấu tổ chức dạng cây, độc lập với chi nhánh).
      - **WMS:** `"tbl_WMS_Item"`, `"tbl_WMS_Category"`, `"tbl_WMS_UnitOfMeasure"`, `"tbl_WMS_Warehouse"`, `"tbl_WMS_StockBalance"`, `"tbl_WMS_StockReceipt"`, `"tbl_WMS_StockReceiptItem"`, `"tbl_WMS_StockIssue"`, `"tbl_WMS_StockIssueItem"`.
      - **CRM:** `"tbl_CRM_Partner"`.
      - **SALES:** `"tbl_SALES_Invoice"`, `"tbl_SALES_InvoiceItem"`.
      - **ACC:** `"tbl_ACC_Account"`, `"tbl_ACC_JournalEntry"`, `"tbl_ACC_JournalEntryLine"`.
+     - **HRM:** `"tbl_HRM_Employee"`, `"tbl_HRM_WorkHistory"` (QTCT), `"tbl_HRM_Shift"`, `"tbl_HRM_DataPermission"` (phạm vi dữ liệu HRM theo phòng ban/pháp nhân, tách khỏi phạm vi chi nhánh của bán hàng/kho).
 3. **Tiền tệ & Số lượng:**
    - Tiền tệ: `decimal(18, 4)` hoặc `numeric(18, 4)` (Tuyệt đối không dùng `float` / `double`).
    - Số lượng: `decimal(18, 4)` (để hỗ trợ đơn vị tính lẻ như kg, lít, mét).
