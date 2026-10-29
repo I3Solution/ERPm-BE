@@ -8,13 +8,13 @@ Chào bạn AI Assistant, bạn đang làm việc trên repository **ERPm-BE** -
 ## 📌 QUY TẮC HOẠT ĐỘNG BẮT BUỘC
 
 1. **Đọc tài liệu cốt lõi trước khi thực hiện nhiệm vụ:**
-   - [PROJECT_MASTER.md](file:///d:/WORKING%20PLACE/ERPm/ERPm-BE/PROJECT_MASTER.md): Kiến trúc Clean Architecture, quy ước đặt tên bảng/cột và mô hình dữ liệu.
-   - [.ai/roadmap.md](file:///d:/WORKING%20PLACE/ERPm/ERPm-BE/.ai/roadmap.md): Lộ trình phát triển API & nghiệp vụ Backend.
-   - [.ai/status.md](file:///d:/WORKING%20PLACE/ERPm/ERPm-BE/.ai/status.md): Trạng thái hiện tại của Backend và các công việc tiếp theo.
+   - [PROJECT_MASTER.md](PROJECT_MASTER.md): Kiến trúc Clean Architecture, quy ước đặt tên bảng/cột và mô hình dữ liệu.
+   - [.ai/roadmap.md](.ai/roadmap.md): Lộ trình phát triển API & nghiệp vụ Backend.
+   - [.ai/status.md](.ai/status.md): Trạng thái hiện tại của Backend và các công việc tiếp theo.
 
 2. **Quy chuẩn lưu vết từng Step vào thư mục `.ai/steps/`:**
    - Mỗi khi bạn hoàn thành một tính năng, controller, entity hoặc sửa đổi kiến trúc, bạn **PHẢI** tạo hoặc cập nhật file log:
-     `d:/WORKING PLACE/ERPm/ERPm-BE/.ai/steps/step-[số thứ tự]-[tên-ngắn-gọn].md`
+     `ERPm-BE/.ai/steps/step-[số thứ tự]-[tên-ngắn-gọn].md`
    - File log cần nêu rõ:
      - Mục tiêu của step.
      - Danh sách file đã tạo / chỉnh sửa.
