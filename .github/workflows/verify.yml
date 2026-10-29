@@ -21,4 +21,5 @@ jobs:
         with:
           global-json-file: global.json
       - run: dotnet build ERPm.sln
+      - run: dotnet run --project tests/ERPm.Hrm.Verification --no-build
       - run: dotnet run --project tests/ERPm.Verification --no-build
