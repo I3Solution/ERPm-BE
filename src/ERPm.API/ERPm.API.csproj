@@ -4,6 +4,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Local DB credentials live in user-secrets (dev) or env var ConnectionStrings__DefaultConnection (prod). -->
+    <UserSecretsId>erpm-api-dev</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
