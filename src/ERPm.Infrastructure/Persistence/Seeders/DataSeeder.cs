@@ -12,8 +12,8 @@ public static class DataSeeder
 {
     public static async Task SeedAsync(ApplicationDbContext context)
     {
-        // 0. Seed Multi-level Hierarchical Branch Tree (Tổng Công Ty & Chi nhánh con/cháu)
-        var rootId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        // 0. Seed Multi-level Hierarchical Branch Tree (Head Office & regional sub-branches)
+        const int rootId = 1;
         var rootBranch = await context.Branches.FirstOrDefaultAsync(b => b.Code == "root" || b.Id == rootId);
         if (rootBranch == null)
         {
@@ -31,28 +31,28 @@ public static class DataSeeder
             await context.SaveChangesAsync();
         }
 
-        var kmbId = Guid.Parse("00000000-0000-0000-0000-000000000010");
+        const int kmbId = 10;
         if (!await context.Branches.AnyAsync(b => b.Id == kmbId))
         {
             var branchesToSeed = new List<Branch>
             {
-                // Khối Miền Bắc & con cháu
+                // Northern region & child branches
                 new() { Id = kmbId, Code = "KMB", Name = "Khối Miền Bắc", ParentId = rootId, IsActive = true },
-                new() { Id = Guid.Parse("00000000-0000-0000-0000-000000000011"), Code = "CN-HN", Name = "Chi nhánh Hà Nội (HQ)", ParentId = kmbId, Address = "Số 1 Phố Huế, Hoàn Kiếm", IsActive = true },
-                new() { Id = Guid.Parse("00000000-0000-0000-0000-000000000012"), Code = "CH-HK", Name = "Cửa hàng Hoàn Kiếm", ParentId = Guid.Parse("00000000-0000-0000-0000-000000000011"), Address = "Tràng Tiền, Hà Nội", IsActive = true },
-                new() { Id = Guid.Parse("00000000-0000-0000-0000-000000000013"), Code = "CH-CG", Name = "Cửa hàng Cầu Giấy", ParentId = Guid.Parse("00000000-0000-0000-0000-000000000011"), Address = "Xuân Thủy, Cầu Giấy", IsActive = true },
-                new() { Id = Guid.Parse("00000000-0000-0000-0000-000000000014"), Code = "CN-HP", Name = "Chi nhánh Hải Phòng", ParentId = kmbId, Address = "Lê Hồng Phong, Hải Phòng", IsActive = true },
+                new() { Id = 11, Code = "CN-HN", Name = "Chi nhánh Hà Nội (HQ)", ParentId = kmbId, Address = "Số 1 Phố Huế, Hoàn Kiếm", IsActive = true },
+                new() { Id = 12, Code = "CH-HK", Name = "Cửa hàng Hoàn Kiếm", ParentId = 11, Address = "Tràng Tiền, Hà Nội", IsActive = true },
+                new() { Id = 13, Code = "CH-CG", Name = "Cửa hàng Cầu Giấy", ParentId = 11, Address = "Xuân Thủy, Cầu Giấy", IsActive = true },
+                new() { Id = 14, Code = "CN-HP", Name = "Chi nhánh Hải Phòng", ParentId = kmbId, Address = "Lê Hồng Phong, Hải Phòng", IsActive = true },
 
-                // Khối Miền Nam & con cháu
-                new() { Id = Guid.Parse("00000000-0000-0000-0000-000000000020"), Code = "KMN", Name = "Khối Miền Nam", ParentId = rootId, IsActive = true },
-                new() { Id = Guid.Parse("00000000-0000-0000-0000-000000000021"), Code = "CN-HCM", Name = "Chi nhánh TP. Hồ Chí Minh", ParentId = Guid.Parse("00000000-0000-0000-0000-000000000020"), Address = "Nguyễn Huệ, Quận 1, TP.HCM", IsActive = true },
-                new() { Id = Guid.Parse("00000000-0000-0000-0000-000000000022"), Code = "CH-Q1", Name = "Cửa hàng Quận 1", ParentId = Guid.Parse("00000000-0000-0000-0000-000000000021"), Address = "Lê Lợi, Quận 1", IsActive = true },
-                new() { Id = Guid.Parse("00000000-0000-0000-0000-000000000023"), Code = "CH-TD", Name = "Cửa hàng Thủ Đức", ParentId = Guid.Parse("00000000-0000-0000-0000-000000000021"), Address = "Võ Văn Ngân, Thủ Đức", IsActive = true },
-                new() { Id = Guid.Parse("00000000-0000-0000-0000-000000000024"), Code = "CN-CT", Name = "Chi nhánh Cần Thơ", ParentId = Guid.Parse("00000000-0000-0000-0000-000000000020"), Address = "Ninh Kiều, Cần Thơ", IsActive = true },
+                // Southern region & child branches
+                new() { Id = 20, Code = "KMN", Name = "Khối Miền Nam", ParentId = rootId, IsActive = true },
+                new() { Id = 21, Code = "CN-HCM", Name = "Chi nhánh TP. Hồ Chí Minh", ParentId = 20, Address = "Nguyễn Huệ, Quận 1, TP.HCM", IsActive = true },
+                new() { Id = 22, Code = "CH-Q1", Name = "Cửa hàng Quận 1", ParentId = 21, Address = "Lê Lợi, Quận 1", IsActive = true },
+                new() { Id = 23, Code = "CH-TD", Name = "Cửa hàng Thủ Đức", ParentId = 21, Address = "Võ Văn Ngân, Thủ Đức", IsActive = true },
+                new() { Id = 24, Code = "CN-CT", Name = "Chi nhánh Cần Thơ", ParentId = 20, Address = "Ninh Kiều, Cần Thơ", IsActive = true },
 
-                // Khối Miền Trung
-                new() { Id = Guid.Parse("00000000-0000-0000-0000-000000000030"), Code = "KMT", Name = "Khối Miền Trung", ParentId = rootId, IsActive = true },
-                new() { Id = Guid.Parse("00000000-0000-0000-0000-000000000031"), Code = "CN-DN", Name = "Chi nhánh Đà Nẵng", ParentId = Guid.Parse("00000000-0000-0000-0000-000000000030"), Address = "Bạch Đằng, Đà Nẵng", IsActive = true }
+                // Central region
+                new() { Id = 30, Code = "KMT", Name = "Khối Miền Trung", ParentId = rootId, IsActive = true },
+                new() { Id = 31, Code = "CN-DN", Name = "Chi nhánh Đà Nẵng", ParentId = 30, Address = "Bạch Đằng, Đà Nẵng", IsActive = true }
             };
             await context.Branches.AddRangeAsync(branchesToSeed);
             await context.SaveChangesAsync();
@@ -123,7 +123,7 @@ public static class DataSeeder
         {
             defaultWarehouse = new Warehouse
             {
-                Id = Guid.Parse("00000000-0000-0000-0000-000000000001"),
+                Id = 1,
                 BranchId = rootBranch.Id,
                 Code = "KHO01",
                 Name = "Kho Tổng Trung Tâm",

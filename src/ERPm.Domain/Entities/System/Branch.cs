@@ -7,13 +7,13 @@ namespace ERPm.Domain.Entities.System;
 
 public class Branch : BaseAuditableEntity
 {
-    public string Code { get; set; } = string.Empty;       // "root", "CN_HN", "CN_HCM"
-    public string Name { get; set; } = string.Empty;       // "Tổng Công Ty", "Chi nhánh Hà Nội"
-    public Guid? ParentId { get; set; }                    // Phân cấp chi nhánh (hierarchical)
+    public string Code { get; set; } = string.Empty;       // e.g. "root", "CN_HN", "CN_HCM"
+    public string Name { get; set; } = string.Empty;       // Branch display name
+    public int? ParentId { get; set; }                     // Hierarchical parent branch ID
     public string? Address { get; set; }
     public string? Phone { get; set; }
     public string? Email { get; set; }
-    public bool IsDefault { get; set; } = false;           // Chi nhánh mặc định (VD: root)
+    public bool IsDefault { get; set; } = false;           // Default head office branch
     public bool IsActive { get; set; } = true;
 
     // Navigation

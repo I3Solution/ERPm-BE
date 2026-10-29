@@ -5,11 +5,11 @@ namespace ERPm.Domain.Entities.Inventory;
 
 public class Warehouse : BaseAuditableEntity
 {
-    public string Code { get; set; } = string.Empty;       // KHO01
-    public string Name { get; set; } = string.Empty;       // Kho Tổng
-    public Dictionary<string, string> Translations { get; set; } = new(); // {"vi": "Kho Tổng", "en": "Main Warehouse"}
+    public string Code { get; set; } = string.Empty;       // e.g. KHO01
+    public string Name { get; set; } = string.Empty;       // Warehouse name
+    public Dictionary<string, string> Translations { get; set; } = new(); // Multi-lingual names
     
-    public Guid BranchId { get; set; }                     // Chi nhánh sở hữu kho
+    public int BranchId { get; set; }                      // Owning branch ID
     public string? Address { get; set; }
     public bool IsDefault { get; set; } = false;
     public bool IsActive { get; set; } = true;

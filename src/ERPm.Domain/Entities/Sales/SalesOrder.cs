@@ -7,14 +7,14 @@ namespace ERPm.Domain.Entities.Sales;
 
 public class SalesOrder : BaseAuditableEntity
 {
-    public string OrderNumber { get; set; } = string.Empty; // SO0001
+    public string OrderNumber { get; set; } = string.Empty; // e.g. SO0001
     public DateTime OrderDate { get; set; } = DateTime.UtcNow;
 
-    public Guid BranchId { get; set; }                     // Chi nhánh lập đơn
-    public Guid? CustomerId { get; set; }
+    public int BranchId { get; set; }                      // Ordering branch ID
+    public int? CustomerId { get; set; }
     public string CustomerName { get; set; } = "Khách lẻ";
 
-    // Tiền tệ decimal(18, 4)
+    // Monetary fields in decimal(18, 4)
     public decimal SubTotal { get; set; } = 0m;
     public decimal DiscountAmount { get; set; } = 0m;
     public decimal TaxAmount { get; set; } = 0m;
@@ -30,15 +30,10 @@ public class SalesOrder : BaseAuditableEntity
     public virtual ICollection<SalesOrderItem> Items { get; set; } = new List<SalesOrderItem>();
 }
 
-public class SalesOrderItem : BaseEntity<Guid>
+public class SalesOrderItem : BaseEntity
 {
-    public SalesOrderItem()
-    {
-        Id = Guid.NewGuid();
-    }
-
-    public Guid SalesOrderId { get; set; }
-    public Guid ItemId { get; set; }
+    public int SalesOrderId { get; set; }
+    public int ItemId { get; set; }
     public string ItemCode { get; set; } = string.Empty;
     public string ItemName { get; set; } = string.Empty;
     public string? UnitName { get; set; }

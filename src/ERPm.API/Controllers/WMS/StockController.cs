@@ -15,14 +15,14 @@ public class StockController : BaseApiController
     }
 
     [HttpGet("warehouses")]
-    public async Task<ActionResult<ApiResponse<List<WarehouseDto>>>> GetWarehouses([FromQuery] Guid? branchId, CancellationToken cancellationToken)
+    public async Task<ActionResult<ApiResponse<List<WarehouseDto>>>> GetWarehouses([FromQuery] int? branchId, CancellationToken cancellationToken)
     {
         var result = await _stockService.GetWarehousesAsync(branchId, cancellationToken);
         return Ok(ApiResponse<List<WarehouseDto>>.Ok(result));
     }
 
     [HttpGet("balances")]
-    public async Task<ActionResult<ApiResponse<List<StockBalanceDto>>>> GetStockBalances([FromQuery] Guid? warehouseId, [FromQuery] Guid? branchId, CancellationToken cancellationToken)
+    public async Task<ActionResult<ApiResponse<List<StockBalanceDto>>>> GetStockBalances([FromQuery] int? warehouseId, [FromQuery] int? branchId, CancellationToken cancellationToken)
     {
         var result = await _stockService.GetStockBalancesAsync(warehouseId, branchId, cancellationToken);
         return Ok(ApiResponse<List<StockBalanceDto>>.Ok(result));

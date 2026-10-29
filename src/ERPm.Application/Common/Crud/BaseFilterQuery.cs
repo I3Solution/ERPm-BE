@@ -1,7 +1,7 @@
 namespace ERPm.Application.Common.Crud;
 
 /// <summary>
-/// Query lọc chuẩn dành cho các danh mục và màn hình danh sách ERP
+/// Standard pagination, sorting, and filtering query for ERP list endpoints.
 /// </summary>
 public class BaseFilterQuery
 {

@@ -8,13 +8,13 @@ namespace ERPm.Domain.Entities.Inventory;
 
 public class StockReceipt : BaseAuditableEntity
 {
-    public string Code { get; set; } = string.Empty;       // PNK0001
+    public string Code { get; set; } = string.Empty;       // e.g. PNK0001
     public DateTime ReceiptDate { get; set; } = DateTime.UtcNow;
-    public Guid BranchId { get; set; }                     // Chi nhánh nhập kho
-    public Guid WarehouseId { get; set; }
-    public Guid? SupplierId { get; set; }                  // Nhà cung cấp
+    public int BranchId { get; set; }                      // Receiving branch ID
+    public int WarehouseId { get; set; }
+    public int? SupplierId { get; set; }                   // Supplier partner ID
 
-    public decimal TotalAmount { get; set; } = 0m;         // Tổng giá trị nhập kho
+    public decimal TotalAmount { get; set; } = 0m;         // Total receipt value
     public VoucherStatus Status { get; set; } = VoucherStatus.Posted;
     public string? Notes { get; set; }
 
@@ -25,19 +25,14 @@ public class StockReceipt : BaseAuditableEntity
     public virtual ICollection<StockReceiptItem> Items { get; set; } = new List<StockReceiptItem>();
 }
 
-public class StockReceiptItem : BaseEntity<Guid>
+public class StockReceiptItem : BaseEntity
 {
-    public StockReceiptItem()
-    {
-        Id = Guid.NewGuid();
-    }
+    public int StockReceiptId { get; set; }
+    public int ItemId { get; set; }
 
-    public Guid StockReceiptId { get; set; }
-    public Guid ItemId { get; set; }
-
-    public decimal Quantity { get; set; } = 0m;            // Số lượng nhập
-    public decimal UnitPrice { get; set; } = 0m;           // Đơn giá nhập
-    public decimal Amount { get; set; } = 0m;              // Thành tiền
+    public decimal Quantity { get; set; } = 0m;            // Received quantity
+    public decimal UnitPrice { get; set; } = 0m;           // Unit receipt price
+    public decimal Amount { get; set; } = 0m;              // Line total amount
 
     // Navigation
     public virtual StockReceipt? StockReceipt { get; set; }

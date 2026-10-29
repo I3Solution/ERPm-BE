@@ -67,7 +67,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<Branch>(entity =>
         {
             entity.ToTable("tbl_SYS_Branch");
-            entity.HasKey(e => e.Id);
+            ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
             entity.Property(e => e.Name).HasMaxLength(255).IsRequired();
             entity.Property(e => e.Address).HasMaxLength(500);
@@ -88,6 +88,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.ToTable("tbl_SYS_Language");
             entity.HasKey(e => e.Code);
             entity.Ignore(e => e.Id);
+            entity.Ignore(e => e.ExternalId);
             entity.Property(e => e.Code).HasMaxLength(10);
             entity.Property(e => e.Name).HasMaxLength(50).IsRequired();
             entity.Property(e => e.FlagIcon).HasMaxLength(50);
@@ -96,7 +97,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<AppDictionary>(entity =>
         {
             entity.ToTable("tbl_SYS_Dictionary");
-            entity.HasKey(e => e.Id);
+            ConfigureDualKeyEntity(entity);
             entity.Property(e => e.LanguageCode).HasMaxLength(10).IsRequired();
             entity.Property(e => e.Category).HasMaxLength(50).IsRequired();
             entity.Property(e => e.Key).HasMaxLength(150).IsRequired();
@@ -114,7 +115,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<UnitOfMeasure>(entity =>
         {
             entity.ToTable("tbl_WMS_UnitOfMeasure");
-            entity.HasKey(e => e.Id);
+            ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.Code).HasMaxLength(20).IsRequired();
             entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
             entity.Property(e => e.Translations)
@@ -131,7 +132,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<Category>(entity =>
         {
             entity.ToTable("tbl_WMS_Category");
-            entity.HasKey(e => e.Id);
+            ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
             entity.Property(e => e.Name).HasMaxLength(200).IsRequired();
             entity.Property(e => e.Translations)
@@ -153,7 +154,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<Item>(entity =>
         {
             entity.ToTable("tbl_WMS_Item");
-            entity.HasKey(e => e.Id);
+            ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
             entity.Property(e => e.Barcode).HasMaxLength(100);
             entity.Property(e => e.Name).HasMaxLength(255).IsRequired();
@@ -194,7 +195,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<ItemAttribute>(entity =>
         {
             entity.ToTable("tbl_WMS_ItemAttribute");
-            entity.HasKey(e => e.Id);
+            ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
             entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
             entity.Property(e => e.Unit).HasMaxLength(20);
@@ -219,7 +220,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<Partner>(entity =>
         {
             entity.ToTable("tbl_CRM_Partner");
-            entity.HasKey(e => e.Id);
+            ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
             entity.Property(e => e.Name).HasMaxLength(255).IsRequired();
             entity.Property(e => e.Phone).HasMaxLength(50);
@@ -237,7 +238,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<Warehouse>(entity =>
         {
             entity.ToTable("tbl_WMS_Warehouse");
-            entity.HasKey(e => e.Id);
+            ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
             entity.Property(e => e.Name).HasMaxLength(200).IsRequired();
             entity.Property(e => e.Translations)
@@ -259,7 +260,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<StockBalance>(entity =>
         {
             entity.ToTable("tbl_WMS_StockBalance");
-            entity.HasKey(e => e.Id);
+            ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.QuantityOnHand).HasPrecision(18, 4);
             entity.Property(e => e.AverageCostPrice).HasPrecision(18, 4);
 
@@ -280,7 +281,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<StockReceipt>(entity =>
         {
             entity.ToTable("tbl_WMS_StockReceipt");
-            entity.HasKey(e => e.Id);
+            ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
             entity.Property(e => e.TotalAmount).HasPrecision(18, 4);
 
@@ -306,7 +307,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<StockReceiptItem>(entity =>
         {
             entity.ToTable("tbl_WMS_StockReceiptItem");
-            entity.HasKey(e => e.Id);
+            ConfigureDualKeyEntity(entity);
             entity.Property(e => e.Quantity).HasPrecision(18, 4);
             entity.Property(e => e.UnitPrice).HasPrecision(18, 4);
             entity.Property(e => e.Amount).HasPrecision(18, 4);
@@ -325,7 +326,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<StockIssue>(entity =>
         {
             entity.ToTable("tbl_WMS_StockIssue");
-            entity.HasKey(e => e.Id);
+            ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
             entity.Property(e => e.TotalCostAmount).HasPrecision(18, 4);
 
@@ -351,7 +352,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<StockIssueItem>(entity =>
         {
             entity.ToTable("tbl_WMS_StockIssueItem");
-            entity.HasKey(e => e.Id);
+            ConfigureDualKeyEntity(entity);
             entity.Property(e => e.Quantity).HasPrecision(18, 4);
             entity.Property(e => e.UnitCost).HasPrecision(18, 4);
             entity.Property(e => e.TotalCost).HasPrecision(18, 4);
@@ -371,7 +372,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<SalesInvoice>(entity =>
         {
             entity.ToTable("tbl_SALE_Invoice");
-            entity.HasKey(e => e.Id);
+            ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.InvoiceNumber).HasMaxLength(50).IsRequired();
             entity.Property(e => e.CustomerName).HasMaxLength(255).IsRequired();
 
@@ -415,7 +416,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<SalesInvoiceItem>(entity =>
         {
             entity.ToTable("tbl_SALE_InvoiceItem");
-            entity.HasKey(e => e.Id);
+            ConfigureDualKeyEntity(entity);
             entity.Property(e => e.Quantity).HasPrecision(18, 4);
             entity.Property(e => e.UnitPrice).HasPrecision(18, 4);
             entity.Property(e => e.DiscountPercent).HasPrecision(18, 4);
@@ -437,7 +438,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<SalesOrder>(entity =>
         {
             entity.ToTable("tbl_SALE_Order");
-            entity.HasKey(e => e.Id);
+            ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.OrderNumber).HasMaxLength(50).IsRequired();
             entity.Property(e => e.CustomerName).HasMaxLength(255).IsRequired();
             entity.Property(e => e.Status).HasMaxLength(50).IsRequired();
@@ -465,7 +466,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<SalesOrderItem>(entity =>
         {
             entity.ToTable("tbl_SALE_OrderItem");
-            entity.HasKey(e => e.Id);
+            ConfigureDualKeyEntity(entity);
             entity.Property(e => e.ItemCode).HasMaxLength(50).IsRequired();
             entity.Property(e => e.ItemName).HasMaxLength(255).IsRequired();
             entity.Property(e => e.UnitName).HasMaxLength(50);
@@ -490,7 +491,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<PurchaseOrder>(entity =>
         {
             entity.ToTable("tbl_PURCHASE_Order");
-            entity.HasKey(e => e.Id);
+            ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.OrderNumber).HasMaxLength(50).IsRequired();
             entity.Property(e => e.SupplierName).HasMaxLength(255).IsRequired();
             entity.Property(e => e.Status).HasMaxLength(50).IsRequired();
@@ -517,7 +518,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<PurchaseOrderItem>(entity =>
         {
             entity.ToTable("tbl_PURCHASE_OrderItem");
-            entity.HasKey(e => e.Id);
+            ConfigureDualKeyEntity(entity);
             entity.Property(e => e.ItemCode).HasMaxLength(50).IsRequired();
             entity.Property(e => e.ItemName).HasMaxLength(255).IsRequired();
             entity.Property(e => e.UnitName).HasMaxLength(50);
@@ -541,7 +542,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<Account>(entity =>
         {
             entity.ToTable("tbl_ACC_Account");
-            entity.HasKey(e => e.Id);
+            ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
             entity.Property(e => e.Name).HasMaxLength(255).IsRequired();
             entity.Property(e => e.Translations)
@@ -563,7 +564,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<JournalEntry>(entity =>
         {
             entity.ToTable("tbl_ACC_JournalEntry");
-            entity.HasKey(e => e.Id);
+            ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.VoucherNumber).HasMaxLength(50).IsRequired();
             entity.Property(e => e.VoucherType).HasMaxLength(50).IsRequired();
 
@@ -580,7 +581,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<JournalEntryLine>(entity =>
         {
             entity.ToTable("tbl_ACC_JournalEntryLine");
-            entity.HasKey(e => e.Id);
+            ConfigureDualKeyEntity(entity);
 
             entity.Property(e => e.DebitAmount).HasPrecision(18, 4);
             entity.Property(e => e.CreditAmount).HasPrecision(18, 4);
@@ -603,8 +604,49 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         });
     }
 
+    /// <summary>
+    /// Configures dual-key architecture for auditable entities:
+    /// - Id: PostgreSQL auto-increment INT IDENTITY primary key
+    /// - ExternalId: Unique B-Tree covering index on UUIDv7 with INCLUDE (Id, IsDeleted) for Index-Only Scans
+    /// </summary>
+    private static void ConfigureDualKeyAuditable<TEntity>(Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<TEntity> entity)
+        where TEntity : BaseAuditableEntity
+    {
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.Id).UseIdentityByDefaultColumn();
+        entity.Property(e => e.ExternalId).IsRequired();
+        entity.HasIndex(e => e.ExternalId)
+            .IsUnique()
+            .IncludeProperties(e => new { e.Id, e.IsDeleted });
+    }
+
+    /// <summary>
+    /// Configures dual-key architecture for non-auditable detail/lookup entities:
+    /// - Id: PostgreSQL auto-increment INT IDENTITY primary key
+    /// - ExternalId: Unique B-Tree covering index on UUIDv7 with INCLUDE (Id) for Index-Only Scans
+    /// </summary>
+    private static void ConfigureDualKeyEntity<TEntity>(Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<TEntity> entity)
+        where TEntity : BaseEntity
+    {
+        entity.HasKey(e => e.Id);
+        entity.Property(e => e.Id).UseIdentityByDefaultColumn();
+        entity.Property(e => e.ExternalId).IsRequired();
+        entity.HasIndex(e => e.ExternalId)
+            .IsUnique()
+            .IncludeProperties(e => e.Id);
+    }
+
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
+        var baseEntries = ChangeTracker.Entries<BaseEntity>();
+        foreach (var entry in baseEntries)
+        {
+            if (entry.State == EntityState.Added && entry.Entity.ExternalId == Guid.Empty)
+            {
+                entry.Entity.ExternalId = Uuid7Generator.NewUuid7();
+            }
+        }
+
         var entries = ChangeTracker.Entries<IAuditable>();
         var now = DateTime.UtcNow;
 

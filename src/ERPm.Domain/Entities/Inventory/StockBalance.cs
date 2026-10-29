@@ -5,10 +5,10 @@ namespace ERPm.Domain.Entities.Inventory;
 
 public class StockBalance : BaseAuditableEntity
 {
-    public Guid WarehouseId { get; set; }
-    public Guid ItemId { get; set; }
+    public int WarehouseId { get; set; }
+    public int ItemId { get; set; }
 
-    // Số lượng tồn & Đơn giá vốn bình quân (Bắt buộc decimal(18, 4))
+    // On-hand quantity and weighted average cost (Required decimal(18, 4))
     public decimal QuantityOnHand { get; set; } = 0m;
     public decimal AverageCostPrice { get; set; } = 0m;
 

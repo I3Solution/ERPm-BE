@@ -7,8 +7,8 @@ using Microsoft.AspNetCore.Mvc;
 namespace ERPm.API.Controllers.WMS;
 
 /// <summary>
-/// Quản lý Đơn vị tính (WMS Module)
-/// Kế thừa BaseCrudController: Tự động có trọn bộ CRUD Paged, GetById, Create, Update, Delete.
+/// Manages units of measure (WMS Module).
+/// Inherits BaseCrudController for full type-safe CRUD endpoints.
 /// </summary>
 [Route("api/v1/wms/units-of-measure")]
 public class UnitsOfMeasureController : BaseCrudController<UnitOfMeasure, UnitOfMeasureDto, CreateUomRequest, UpdateUomRequest>

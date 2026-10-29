@@ -9,35 +9,35 @@ namespace ERPm.Domain.Entities.Sales;
 
 public enum PaymentMethod
 {
-    Cash = 1,           // Tiền mặt (111)
-    BankTransfer = 2,   // Chuyển khoản (112)
-    Debt = 3            // Ghi nợ công nợ (131)
+    Cash = 1,           // Cash on hand (Account 111)
+    BankTransfer = 2,   // Bank transfer (Account 112)
+    Debt = 3            // Accounts receivable (Account 131)
 }
 
 public class SalesInvoice : BaseAuditableEntity
 {
-    public string InvoiceNumber { get; set; } = string.Empty; // HD0001
+    public string InvoiceNumber { get; set; } = string.Empty; // e.g. HD0001
     public DateTime InvoiceDate { get; set; } = DateTime.UtcNow;
 
-    public Guid BranchId { get; set; }                     // Chi nhánh lập hóa đơn
-    public Guid? CustomerId { get; set; }
+    public int BranchId { get; set; }                      // Issuing branch ID
+    public int? CustomerId { get; set; }
     public string CustomerName { get; set; } = "Khách lẻ";
-    public Guid WarehouseId { get; set; }
+    public int WarehouseId { get; set; }
 
     public PaymentMethod PaymentMethod { get; set; } = PaymentMethod.Cash;
     public VoucherStatus Status { get; set; } = VoucherStatus.Posted;
 
-    // Tiền tệ (Bắt buộc decimal(18, 4))
-    public decimal SubTotal { get; set; } = 0m;            // Tổng tiền hàng trước chiết khấu
-    public decimal DiscountAmount { get; set; } = 0m;      // Chiết khấu hóa đơn
-    public decimal TaxAmount { get; set; } = 0m;           // Thuế VAT
-    public decimal TotalAmount { get; set; } = 0m;         // Tổng thanh toán
-    public decimal PaidAmount { get; set; } = 0m;          // Khách đã trả
-    public decimal RemainingDebt { get; set; } = 0m;       // Còn nợ (tính vào 131)
+    // Monetary fields (Required decimal(18, 4))
+    public decimal SubTotal { get; set; } = 0m;            // Gross subtotal before discount
+    public decimal DiscountAmount { get; set; } = 0m;      // Invoice discount amount
+    public decimal TaxAmount { get; set; } = 0m;           // VAT amount
+    public decimal TotalAmount { get; set; } = 0m;         // Net total payable
+    public decimal PaidAmount { get; set; } = 0m;          // Amount paid by customer
+    public decimal RemainingDebt { get; set; } = 0m;       // Remaining receivable (Account 131)
 
-    // Liên kết Kế toán & Xuất kho
-    public Guid? JournalEntryId { get; set; }              // Bút toán kép tương ứng
-    public Guid? StockIssueId { get; set; }                // Phiếu xuất kho tương ứng
+    // Linked accounting journal entry & stock issue
+    public int? JournalEntryId { get; set; }               // Corresponding double-entry journal ID
+    public int? StockIssueId { get; set; }                 // Corresponding stock issue ID
     public string? Notes { get; set; }
 
     // Navigation
@@ -49,21 +49,16 @@ public class SalesInvoice : BaseAuditableEntity
     public virtual ICollection<SalesInvoiceItem> Items { get; set; } = new List<SalesInvoiceItem>();
 }
 
-public class SalesInvoiceItem : BaseEntity<Guid>
+public class SalesInvoiceItem : BaseEntity
 {
-    public SalesInvoiceItem()
-    {
-        Id = Guid.NewGuid();
-    }
-
-    public Guid SalesInvoiceId { get; set; }
-    public Guid ItemId { get; set; }
+    public int SalesInvoiceId { get; set; }
+    public int ItemId { get; set; }
 
     public decimal Quantity { get; set; } = 0m;
-    public decimal UnitPrice { get; set; } = 0m;           // Đơn giá bán
+    public decimal UnitPrice { get; set; } = 0m;           // Unit selling price
     public decimal DiscountPercent { get; set; } = 0m;
-    public decimal Amount { get; set; } = 0m;              // Thành tiền sau chiết khấu
-    public decimal CostPrice { get; set; } = 0m;           // Giá vốn tại thời điểm bán (để tính COGS)
+    public decimal Amount { get; set; } = 0m;              // Net line total after discount
+    public decimal CostPrice { get; set; } = 0m;           // Unit cost at time of sale for COGS
 
     // Navigation
     public virtual SalesInvoice? SalesInvoice { get; set; }

@@ -3,22 +3,17 @@ using PartnerEntity = ERPm.Domain.Entities.Partner.Partner;
 
 namespace ERPm.Domain.Entities.Accounting;
 
-public class JournalEntryLine : BaseEntity<Guid>
+public class JournalEntryLine : BaseEntity
 {
-    public JournalEntryLine()
-    {
-        Id = Guid.NewGuid();
-    }
+    public int JournalEntryId { get; set; }
+    public int AccountId { get; set; }
 
-    public Guid JournalEntryId { get; set; }
-    public Guid AccountId { get; set; }
+    // Debit and Credit amounts (Required decimal(18, 4))
+    public decimal DebitAmount { get; set; } = 0m;     // Debit amount
+    public decimal CreditAmount { get; set; } = 0m;    // Credit amount
 
-    // Số tiền Nợ & Có (Bắt buộc decimal(18, 4))
-    public decimal DebitAmount { get; set; } = 0m;     // Phát sinh Nợ
-    public decimal CreditAmount { get; set; } = 0m;    // Phát sinh Có
-
-    public string? Description { get; set; }           // Diễn giải dòng bút toán
-    public Guid? PartnerId { get; set; }               // Đối tượng công nợ (Khách hàng / NCC) nếu có
+    public string? Description { get; set; }           // Line description
+    public int? PartnerId { get; set; }                // Associated partner (Customer / Supplier) if any
 
     // Navigation
     public virtual JournalEntry? JournalEntry { get; set; }

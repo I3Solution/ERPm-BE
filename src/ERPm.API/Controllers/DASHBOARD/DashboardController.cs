@@ -15,7 +15,7 @@ public class DashboardController : BaseApiController
     }
 
     [HttpGet("metrics")]
-    public async Task<ActionResult<ApiResponse<DashboardMetricsDto>>> GetMetrics([FromQuery] Guid? branchId, CancellationToken cancellationToken)
+    public async Task<ActionResult<ApiResponse<DashboardMetricsDto>>> GetMetrics([FromQuery] int? branchId, CancellationToken cancellationToken)
     {
         var result = await _dashboardService.GetMetricsAsync(branchId, cancellationToken);
         return Ok(ApiResponse<DashboardMetricsDto>.Ok(result));

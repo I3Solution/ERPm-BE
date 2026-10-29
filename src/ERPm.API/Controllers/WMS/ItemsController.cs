@@ -15,7 +15,7 @@ public class ItemsController : BaseApiController
     }
 
     /// <summary>
-    /// Lấy danh sách hàng hóa phân trang, có lọc theo từ khóa, danh mục, loại hàng
+    /// Gets a paginated list of items filtered by keyword, category, and item type.
     /// </summary>
     [HttpGet]
     public async Task<ActionResult<ApiResponse<PagedResult<ItemDto>>>> GetItems([FromQuery] ItemFilterQuery query, CancellationToken cancellationToken)
@@ -25,10 +25,10 @@ public class ItemsController : BaseApiController
     }
 
     /// <summary>
-    /// Lấy thông tin chi tiết một sản phẩm theo ID (kèm Translations JSONB)
+    /// Gets details of a single item by its internal integer ID (including JSONB Translations and Attributes).
     /// </summary>
-    [HttpGet("{id:guid}")]
-    public async Task<ActionResult<ApiResponse<ItemDto>>> GetItemById(Guid id, CancellationToken cancellationToken)
+    [HttpGet("{id:int}")]
+    public async Task<ActionResult<ApiResponse<ItemDto>>> GetItemById(int id, CancellationToken cancellationToken)
     {
         var result = await _itemService.GetItemByIdAsync(id, cancellationToken);
         if (result == null)
@@ -39,7 +39,7 @@ public class ItemsController : BaseApiController
     }
 
     /// <summary>
-    /// Tạo mới một sản phẩm / dịch vụ
+    /// Creates a new item or service.
     /// </summary>
     [HttpPost]
     public async Task<ActionResult<ApiResponse<ItemDto>>> CreateItem([FromBody] CreateItemRequest request, CancellationToken cancellationToken)
@@ -54,10 +54,10 @@ public class ItemsController : BaseApiController
     }
 
     /// <summary>
-    /// Cập nhật thông tin sản phẩm
+    /// Updates an existing item by its internal integer ID.
     /// </summary>
-    [HttpPut("{id:guid}")]
-    public async Task<ActionResult<ApiResponse<ItemDto>>> UpdateItem(Guid id, [FromBody] UpdateItemRequest request, CancellationToken cancellationToken)
+    [HttpPut("{id:int}")]
+    public async Task<ActionResult<ApiResponse<ItemDto>>> UpdateItem(int id, [FromBody] UpdateItemRequest request, CancellationToken cancellationToken)
     {
         var result = await _itemService.UpdateItemAsync(id, request, cancellationToken);
         if (result == null)
@@ -68,10 +68,10 @@ public class ItemsController : BaseApiController
     }
 
     /// <summary>
-    /// Xóa mềm một sản phẩm (Soft-delete)
+    /// Soft-deletes an item by its internal integer ID.
     /// </summary>
-    [HttpDelete("{id:guid}")]
-    public async Task<ActionResult<ApiResponse<bool>>> DeleteItem(Guid id, CancellationToken cancellationToken)
+    [HttpDelete("{id:int}")]
+    public async Task<ActionResult<ApiResponse<bool>>> DeleteItem(int id, CancellationToken cancellationToken)
     {
         var success = await _itemService.DeleteItemAsync(id, cancellationToken);
         if (!success)

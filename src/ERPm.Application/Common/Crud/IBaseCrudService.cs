@@ -1,7 +1,7 @@
 namespace ERPm.Application.Common.Crud;
 
 /// <summary>
-/// Interface Generic Base CRUD chuẩn, định kiểu tĩnh (Strongly-typed), type-safe 100%
+/// Generic strongly-typed Base CRUD service interface.
 /// </summary>
 public interface IBaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
     where TEntity : class
@@ -14,10 +14,10 @@ public interface IBaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
 }
 
 /// <summary>
-/// Shorthand Interface mặc định với Primary Key là Guid
+/// Shorthand Base CRUD interface defaulting to int primary key.
 /// </summary>
 public interface IBaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto>
-    : IBaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, Guid>
+    : IBaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, int>
     where TEntity : class
 {
 }

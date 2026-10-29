@@ -3,7 +3,7 @@ using ERPm.Infrastructure;
 using ERPm.Infrastructure.Persistence;
 using ERPm.Infrastructure.Persistence.Seeders;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -32,7 +32,7 @@ builder.Services.AddSwaggerGen(c =>
     {
         Title = "ERPm API - Sales, Inventory & Accounting System",
         Version = "v1",
-        Description = "Core Backend RESTful API for ERPm (PostgreSQL, .NET 8, Clean Architecture, i18n & Double-Entry ready)"
+        Description = "Core Backend RESTful API for ERPm (PostgreSQL, .NET 10, Clean Architecture, i18n & Double-Entry ready)"
     });
 });
 
@@ -70,7 +70,7 @@ using (var scope = app.Services.CreateScope())
         {
             logger.LogInformation("Database connected. Applying migrations...");
             await context.Database.MigrateAsync();
-            // await DataSeeder.SeedAsync(context); // Tạm thời không seed data theo yêu cầu
+            // await DataSeeder.SeedAsync(context); // Seed data disabled on startup by default
             logger.LogInformation("Database migration check completed successfully.");
         }
         else

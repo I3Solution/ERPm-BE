@@ -30,8 +30,8 @@ public class ItemAttributesController : BaseCrudController<ItemAttribute, ItemAt
     /// Gets all dynamic attributes applicable to a given category plus global attributes (CategoryId == null).
     /// </summary>
     [HttpGet("by-category")]
-    [HttpGet("by-category/{categoryId:guid}")]
-    public async Task<IActionResult> GetByCategory([FromRoute] Guid? categoryId, CancellationToken cancellationToken = default)
+    [HttpGet("by-category/{categoryId:int}")]
+    public async Task<IActionResult> GetByCategory([FromRoute] int? categoryId, CancellationToken cancellationToken = default)
     {
         var attributes = await _context.ItemAttributes
             .Include(a => a.Category)

@@ -2,8 +2,8 @@ namespace ERPm.Application.DTOs.Sales;
 
 public class SalesOrderItemDto
 {
-    public Guid Id { get; set; }
-    public Guid ItemId { get; set; }
+    public int Id { get; set; }
+    public int ItemId { get; set; }
     public string ItemCode { get; set; } = string.Empty;
     public string ItemName { get; set; } = string.Empty;
     public string? UnitName { get; set; }
@@ -15,11 +15,11 @@ public class SalesOrderItemDto
 
 public class SalesOrderDto
 {
-    public Guid Id { get; set; }
+    public int Id { get; set; }
     public string OrderNumber { get; set; } = string.Empty;
     public DateTime OrderDate { get; set; }
-    public Guid BranchId { get; set; }
-    public Guid? CustomerId { get; set; }
+    public int BranchId { get; set; }
+    public int? CustomerId { get; set; }
     public string CustomerName { get; set; } = string.Empty;
 
     public decimal SubTotal { get; set; }
@@ -35,7 +35,7 @@ public class SalesOrderDto
 
 public class CreateSalesOrderItemRequest
 {
-    public Guid ItemId { get; set; }
+    public int ItemId { get; set; }
     public string ItemCode { get; set; } = string.Empty;
     public string ItemName { get; set; } = string.Empty;
     public string? UnitName { get; set; }
@@ -49,8 +49,8 @@ public class CreateSalesOrderRequest
 {
     public string? OrderNumber { get; set; }
     public DateTime? OrderDate { get; set; }
-    public Guid BranchId { get; set; }
-    public Guid? CustomerId { get; set; }
+    public int BranchId { get; set; }
+    public int? CustomerId { get; set; }
     public string CustomerName { get; set; } = "Khách lẻ";
 
     public decimal DiscountAmount { get; set; } = 0m;

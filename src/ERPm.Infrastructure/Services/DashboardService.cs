@@ -17,12 +17,12 @@ public class DashboardService : IDashboardService
         _branchService = branchService;
     }
 
-    public async Task<DashboardMetricsDto> GetMetricsAsync(Guid? branchId = null, CancellationToken cancellationToken = default)
+    public async Task<DashboardMetricsDto> GetMetricsAsync(int? branchId = null, CancellationToken cancellationToken = default)
     {
         var today = DateTime.UtcNow.Date;
-        List<Guid>? targetBranchIds = null;
+        List<int>? targetBranchIds = null;
 
-        if (branchId.HasValue && branchId.Value != Guid.Empty)
+        if (branchId.HasValue && branchId.Value > 0)
         {
             targetBranchIds = await _branchService.GetBranchAndDescendantIdsAsync(branchId.Value, cancellationToken);
         }

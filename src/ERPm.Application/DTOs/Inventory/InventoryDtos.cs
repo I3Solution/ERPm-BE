@@ -2,8 +2,8 @@ namespace ERPm.Application.DTOs.Inventory;
 
 public class WarehouseDto
 {
-    public Guid Id { get; set; }
-    public Guid BranchId { get; set; }
+    public int Id { get; set; }
+    public int BranchId { get; set; }
     public string? BranchName { get; set; }
     public string Code { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
@@ -14,9 +14,9 @@ public class WarehouseDto
 
 public class StockBalanceDto
 {
-    public Guid WarehouseId { get; set; }
+    public int WarehouseId { get; set; }
     public string WarehouseName { get; set; } = string.Empty;
-    public Guid ItemId { get; set; }
+    public int ItemId { get; set; }
     public string ItemCode { get; set; } = string.Empty;
     public string ItemName { get; set; } = string.Empty;
     public string? Barcode { get; set; }
@@ -29,16 +29,16 @@ public class StockBalanceDto
 
 public class CreateStockReceiptRequest
 {
-    public Guid? BranchId { get; set; }
-    public Guid WarehouseId { get; set; }
-    public Guid? SupplierId { get; set; }
+    public int? BranchId { get; set; }
+    public int WarehouseId { get; set; }
+    public int? SupplierId { get; set; }
     public string? Notes { get; set; }
     public List<StockReceiptItemRequest> Items { get; set; } = new();
 }
 
 public class StockReceiptItemRequest
 {
-    public Guid ItemId { get; set; }
+    public int ItemId { get; set; }
     public decimal Quantity { get; set; }
     public decimal UnitPrice { get; set; }
 }

@@ -8,9 +8,8 @@ using Microsoft.AspNetCore.Mvc;
 namespace ERPm.API.Controllers.SALES;
 
 /// <summary>
-/// Quản lý Đơn đặt hàng bán (SALES Module)
-/// Kế thừa BaseCrudController: Tự động có trọn bộ CRUD Paged, GetById, Create, Update, Delete.
-/// Đồng thời dễ dàng bổ sung các Action nghiệp vụ mở rộng (như duyệt đơn, hủy đơn).
+/// Manages customer sales orders (SD Module).
+/// Inherits BaseCrudController for full type-safe CRUD endpoints.
 /// </summary>
 [Route("api/v1/sales/orders")]
 public class SalesOrdersController : BaseCrudController<SalesOrder, SalesOrderDto, CreateSalesOrderRequest, UpdateSalesOrderRequest>
@@ -21,10 +20,10 @@ public class SalesOrdersController : BaseCrudController<SalesOrder, SalesOrderDt
     }
 
     /// <summary>
-    /// Ví dụ mở rộng Endpoint nghiệp vụ: Xác nhận đơn đặt hàng bán
+    /// Custom domain action: Confirms a sales order by its internal integer ID.
     /// </summary>
-    [HttpPost("{id:guid}/confirm")]
-    public async Task<ActionResult<ApiResponse<SalesOrderDto>>> ConfirmOrder(Guid id, CancellationToken cancellationToken)
+    [HttpPost("{id:int}/confirm")]
+    public async Task<ActionResult<ApiResponse<SalesOrderDto>>> ConfirmOrder(int id, CancellationToken cancellationToken)
     {
         var existing = await Service.GetByIdAsync(id, cancellationToken);
         if (existing == null)

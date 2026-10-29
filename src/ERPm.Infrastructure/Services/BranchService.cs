@@ -77,17 +77,17 @@ public class BranchService : IBranchService
         return rootBranches;
     }
 
-    public async Task<List<Guid>> GetBranchAndDescendantIdsAsync(Guid branchId, CancellationToken cancellationToken = default)
+    public async Task<List<int>> GetBranchAndDescendantIdsAsync(int branchId, CancellationToken cancellationToken = default)
     {
         var allBranches = await _context.Branches.AsNoTracking().ToListAsync(cancellationToken);
         var targetBranch = allBranches.FirstOrDefault(b => b.Id == branchId);
         if (targetBranch == null)
         {
-            return new List<Guid> { branchId };
+            return new List<int> { branchId };
         }
 
-        var result = new HashSet<Guid> { branchId };
-        var queue = new Queue<Guid>();
+        var result = new HashSet<int> { branchId };
+        var queue = new Queue<int>();
         queue.Enqueue(branchId);
 
         // Traverse down the infinite recursive hierarchy (BFS)
@@ -107,7 +107,7 @@ public class BranchService : IBranchService
         return result.ToList();
     }
 
-    public async Task<BranchDto?> GetBranchByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    public async Task<BranchDto?> GetBranchByIdAsync(int id, CancellationToken cancellationToken = default)
     {
         var b = await _context.Branches
             .Include(x => x.Parent)

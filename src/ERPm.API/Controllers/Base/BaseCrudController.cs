@@ -5,8 +5,8 @@ using Microsoft.AspNetCore.Mvc;
 namespace ERPm.API.Controllers.Base;
 
 /// <summary>
-/// Generic Base CRUD Controller cung cấp sẵn 5 endpoints RESTful chuẩn (GET Paged, GET by ID, POST, PUT, DELETE).
-/// 100% Type-Safe, hỗ trợ OpenAPI/Swagger schema đầy đủ, không sử dụng reflection runtime.
+/// Generic Base CRUD Controller providing standard RESTful endpoints (GET Paged, GET by ID, POST, PUT, DELETE).
+/// 100% Type-Safe with full OpenAPI/Swagger schema support and zero runtime reflection.
 /// </summary>
 public abstract class BaseCrudController<TEntity, TDto, TCreateDto, TUpdateDto, TKey> : BaseApiController
     where TEntity : class
@@ -19,7 +19,7 @@ public abstract class BaseCrudController<TEntity, TDto, TCreateDto, TUpdateDto, 
     }
 
     /// <summary>
-    /// Lấy danh sách phân trang có hỗ trợ tìm kiếm từ khóa, lọc trạng thái và sắp xếp
+    /// Gets a paginated list of records supporting keyword search, active status filter, and sorting.
     /// </summary>
     [HttpGet]
     public virtual async Task<ActionResult<ApiResponse<PagedResult<TDto>>>> GetPaged([FromQuery] BaseFilterQuery query, CancellationToken cancellationToken)
@@ -29,7 +29,7 @@ public abstract class BaseCrudController<TEntity, TDto, TCreateDto, TUpdateDto, 
     }
 
     /// <summary>
-    /// Lấy thông tin chi tiết một bản ghi theo ID
+    /// Gets details of a single record by its internal integer ID.
     /// </summary>
     [HttpGet("{id}")]
     public virtual async Task<ActionResult<ApiResponse<TDto>>> GetById(TKey id, CancellationToken cancellationToken)
@@ -44,7 +44,7 @@ public abstract class BaseCrudController<TEntity, TDto, TCreateDto, TUpdateDto, 
     }
 
     /// <summary>
-    /// Thêm mới một bản ghi
+    /// Creates a new record.
     /// </summary>
     [HttpPost]
     public virtual async Task<ActionResult<ApiResponse<TDto>>> Create([FromBody] TCreateDto dto, CancellationToken cancellationToken)
@@ -54,7 +54,7 @@ public abstract class BaseCrudController<TEntity, TDto, TCreateDto, TUpdateDto, 
     }
 
     /// <summary>
-    /// Cập nhật thông tin bản ghi theo ID
+    /// Updates an existing record by its internal integer ID.
     /// </summary>
     [HttpPut("{id}")]
     public virtual async Task<ActionResult<ApiResponse<TDto>>> Update(TKey id, [FromBody] TUpdateDto dto, CancellationToken cancellationToken)
@@ -69,7 +69,7 @@ public abstract class BaseCrudController<TEntity, TDto, TCreateDto, TUpdateDto, 
     }
 
     /// <summary>
-    /// Xóa bản ghi theo ID (Tự động Soft-Delete nếu thực thể có hỗ trợ)
+    /// Deletes a record by its internal integer ID (automatically soft-deletes if supported).
     /// </summary>
     [HttpDelete("{id}")]
     public virtual async Task<ActionResult<ApiResponse<bool>>> Delete(TKey id, CancellationToken cancellationToken)
@@ -85,13 +85,13 @@ public abstract class BaseCrudController<TEntity, TDto, TCreateDto, TUpdateDto, 
 }
 
 /// <summary>
-/// Shorthand Base CRUD Controller với khóa chính mặc định là Guid
+/// Shorthand Base CRUD Controller defaulting to int primary key.
 /// </summary>
 public abstract class BaseCrudController<TEntity, TDto, TCreateDto, TUpdateDto>
-    : BaseCrudController<TEntity, TDto, TCreateDto, TUpdateDto, Guid>
+    : BaseCrudController<TEntity, TDto, TCreateDto, TUpdateDto, int>
     where TEntity : class
 {
-    protected BaseCrudController(IBaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, Guid> service) : base(service)
+    protected BaseCrudController(IBaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, int> service) : base(service)
     {
     }
 }

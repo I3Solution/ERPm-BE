@@ -8,8 +8,8 @@ using Microsoft.AspNetCore.Mvc;
 namespace ERPm.API.Controllers.PURCHASE;
 
 /// <summary>
-/// Quản lý Đơn đặt mua hàng từ Nhà cung cấp (PURCHASE Module)
-/// Kế thừa BaseCrudController: Tự động có trọn bộ CRUD Paged, GetById, Create, Update, Delete.
+/// Manages supplier purchase orders (PURCHASE Module).
+/// Inherits BaseCrudController for full type-safe CRUD endpoints.
 /// </summary>
 [Route("api/v1/purchase/orders")]
 public class PurchaseOrdersController : BaseCrudController<PurchaseOrder, PurchaseOrderDto, CreatePurchaseOrderRequest, UpdatePurchaseOrderRequest>
@@ -20,10 +20,10 @@ public class PurchaseOrdersController : BaseCrudController<PurchaseOrder, Purcha
     }
 
     /// <summary>
-    /// Ví dụ mở rộng Endpoint nghiệp vụ: Xác nhận đơn mua hàng
+    /// Custom domain action: Confirms a purchase order by its internal integer ID.
     /// </summary>
-    [HttpPost("{id:guid}/confirm")]
-    public async Task<ActionResult<ApiResponse<PurchaseOrderDto>>> ConfirmOrder(Guid id, CancellationToken cancellationToken)
+    [HttpPost("{id:int}/confirm")]
+    public async Task<ActionResult<ApiResponse<PurchaseOrderDto>>> ConfirmOrder(int id, CancellationToken cancellationToken)
     {
         var existing = await Service.GetByIdAsync(id, cancellationToken);
         if (existing == null)

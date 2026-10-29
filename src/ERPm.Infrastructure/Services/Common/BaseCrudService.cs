@@ -9,8 +9,8 @@ using Microsoft.EntityFrameworkCore;
 namespace ERPm.Infrastructure.Services.Common;
 
 /// <summary>
-/// Generic Base CRUD Service cài đặt sẵn toàn bộ logic EF Core, Paging, Soft-delete và Mapster.
-/// Cung cấp các Extension Hooks ảo (Virtual Hooks) cho phép mở rộng nghiệp vụ tùy ý mà không cần viết lại CRUD.
+/// Generic Base CRUD Service implementing EF Core persistence, paging, soft-delete, and Mapster mapping.
+/// Provides virtual extension hooks for custom domain business logic without rewriting CRUD boilerplate.
 /// </summary>
 public class BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
     : IBaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
@@ -29,21 +29,21 @@ public class BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
     {
         var queryable = DbSet.AsNoTracking();
 
-        // 1. Tự động lọc Soft-Delete nếu thực thể kế thừa ISoftDelete
+        // 1. Automatically filter soft-deleted entities if TEntity implements ISoftDelete
         if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
         {
             queryable = queryable.Where(e => !((ISoftDelete)e).IsDeleted);
         }
 
-        // 2. Áp dụng bộ lọc tùy chỉnh
+        // 2. Apply custom filters
         queryable = ApplyFilters(queryable, query);
 
         var totalCount = await queryable.CountAsync(cancellationToken);
 
-        // 3. Sắp xếp
+        // 3. Apply sorting
         queryable = ApplySorting(queryable, query);
 
-        // 4. Phân trang
+        // 4. Apply pagination
         var pageIndex = Math.Max(1, query.PageIndex);
         var pageSize = Math.Max(1, query.PageSize);
 
@@ -75,14 +75,15 @@ public class BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
     {
         var entity = MapToEntity(dto);
 
-        // Gán thời gian tạo nếu là BaseAuditableEntity
+        // Populate audit timestamp and time-ordered UUIDv7 ExternalId while letting DB generate int Id
+        if (entity is BaseEntity baseEntity && baseEntity.ExternalId == Guid.Empty)
+        {
+            baseEntity.ExternalId = Uuid7Generator.NewUuid7();
+        }
+
         if (entity is BaseAuditableEntity auditable)
         {
             auditable.CreatedAtUtc = DateTime.UtcNow;
-            if (auditable.Id == Guid.Empty)
-            {
-                auditable.Id = Guid.NewGuid();
-            }
         }
 
         await BeforeCreateAsync(entity, dto, cancellationToken);
@@ -143,7 +144,7 @@ public class BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
     #region Virtual Hooks & Mapping Methods
 
     /// <summary>
-    /// Tìm entity theo khóa chính, tự động bỏ qua nếu đã bị soft-delete
+    /// Finds an entity by primary key and ignores it if soft-deleted.
     /// </summary>
     protected virtual async Task<TEntity?> FindEntityAsync(TKey id, CancellationToken cancellationToken)
     {
@@ -156,7 +157,7 @@ public class BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
     }
 
     /// <summary>
-    /// Lọc nâng cao theo Keyword hoặc IsActive (Các lớp con có thể override để thêm điều kiện tìm kiếm)
+    /// Applies keyword or active status filters (subclasses can override to add custom filter predicates).
     /// </summary>
     protected virtual IQueryable<TEntity> ApplyFilters(IQueryable<TEntity> query, BaseFilterQuery filter)
     {
@@ -178,11 +179,11 @@ public class BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
     }
 
     /// <summary>
-    /// Sắp xếp mặc định hoặc theo trường người dùng yêu cầu
+    /// Applies default sorting or user-requested sort column.
     /// </summary>
     protected virtual IQueryable<TEntity> ApplySorting(IQueryable<TEntity> query, BaseFilterQuery filter)
     {
-        // Mặc định sắp xếp theo CreatedAtUtc giảm dần nếu có
+        // Default to sorting by CreatedAtUtc descending if present
         var createdAtProp = typeof(TEntity).GetProperty("CreatedAtUtc");
         if (createdAtProp != null && string.IsNullOrWhiteSpace(filter.SortBy))
         {
@@ -198,7 +199,7 @@ public class BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
     }
 
     /// <summary>
-    /// Chuyển Entity sang DTO (Mặc định dùng Mapster)
+    /// Maps an Entity to DTO using Mapster.
     /// </summary>
     protected virtual TDto MapToDto(TEntity entity)
     {
@@ -206,7 +207,7 @@ public class BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
     }
 
     /// <summary>
-    /// Chuyển CreateDTO sang Entity mới (Mặc định dùng Mapster)
+    /// Maps a CreateDTO to a new Entity instance using Mapster.
     /// </summary>
     protected virtual TEntity MapToEntity(TCreateDto dto)
     {
@@ -214,14 +215,14 @@ public class BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
     }
 
     /// <summary>
-    /// Áp dụng dữ liệu từ UpdateDTO vào Entity đang tồn tại
+    /// Applies changes from UpdateDTO to an existing Entity instance.
     /// </summary>
     protected virtual void MapUpdateToEntity(TUpdateDto dto, TEntity entity)
     {
         dto.Adapt(entity);
     }
 
-    // Các hooks mở rộng nghiệp vụ trước và sau khi lưu DB
+    // Business lifecycle hooks executed before and after database persistence
     protected virtual Task BeforeCreateAsync(TEntity entity, TCreateDto dto, CancellationToken cancellationToken) => Task.CompletedTask;
     protected virtual Task AfterCreateAsync(TEntity entity, TCreateDto dto, CancellationToken cancellationToken) => Task.CompletedTask;
     protected virtual Task BeforeUpdateAsync(TEntity entity, TUpdateDto dto, CancellationToken cancellationToken) => Task.CompletedTask;
@@ -233,10 +234,10 @@ public class BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
 }
 
 /// <summary>
-/// Shorthand Base CRUD Service với Id là Guid
+/// Shorthand Base CRUD Service defaulting to int primary key.
 /// </summary>
 public class BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto>
-    : BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, Guid>,
+    : BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, int>,
       IBaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto>
     where TEntity : class
 {

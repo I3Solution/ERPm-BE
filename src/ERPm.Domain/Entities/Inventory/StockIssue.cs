@@ -8,14 +8,14 @@ namespace ERPm.Domain.Entities.Inventory;
 
 public class StockIssue : BaseAuditableEntity
 {
-    public string Code { get; set; } = string.Empty;       // PXK0001
+    public string Code { get; set; } = string.Empty;       // e.g. PXK0001
     public DateTime IssueDate { get; set; } = DateTime.UtcNow;
-    public Guid BranchId { get; set; }                     // Chi nhánh xuất kho
-    public Guid WarehouseId { get; set; }
-    public Guid? CustomerId { get; set; }
+    public int BranchId { get; set; }                      // Issuing branch ID
+    public int WarehouseId { get; set; }
+    public int? CustomerId { get; set; }
 
-    public string? Reason { get; set; }                    // Xuất bán hàng, Xuất hao hụt...
-    public decimal TotalCostAmount { get; set; } = 0m;     // Tổng giá trị xuất kho (Giá vốn)
+    public string? Reason { get; set; }                    // Issue reason (e.g. Sales, Adjustment)
+    public decimal TotalCostAmount { get; set; } = 0m;     // Total COGS amount
     public VoucherStatus Status { get; set; } = VoucherStatus.Posted;
     public string? Notes { get; set; }
 
@@ -26,15 +26,10 @@ public class StockIssue : BaseAuditableEntity
     public virtual ICollection<StockIssueItem> Items { get; set; } = new List<StockIssueItem>();
 }
 
-public class StockIssueItem : BaseEntity<Guid>
+public class StockIssueItem : BaseEntity
 {
-    public StockIssueItem()
-    {
-        Id = Guid.NewGuid();
-    }
-
-    public Guid StockIssueId { get; set; }
-    public Guid ItemId { get; set; }
+    public int StockIssueId { get; set; }
+    public int ItemId { get; set; }
 
     public decimal Quantity { get; set; } = 0m;
     public decimal UnitCost { get; set; } = 0m;

@@ -4,9 +4,9 @@ namespace ERPm.Domain.Entities.Catalog;
 
 public class UnitOfMeasure : BaseAuditableEntity
 {
-    public string Code { get; set; } = string.Empty;   // CAI, HOP, KG
-    public string Name { get; set; } = string.Empty;   // Cái
-    public Dictionary<string, string> Translations { get; set; } = new(); // {"vi": "Cái", "en": "Piece"}
+    public string Code { get; set; } = string.Empty;   // e.g. CAI, HOP, KG
+    public string Name { get; set; } = string.Empty;   // Unit display name
+    public Dictionary<string, string> Translations { get; set; } = new(); // Multi-lingual names
     public bool IsActive { get; set; } = true;
 
     // Navigation

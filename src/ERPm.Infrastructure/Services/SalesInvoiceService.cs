@@ -20,7 +20,7 @@ public class SalesInvoiceService : ISalesInvoiceService
         _branchService = branchService;
     }
 
-    public async Task<List<SalesInvoiceDto>> GetInvoicesAsync(Guid? branchId = null, CancellationToken cancellationToken = default)
+    public async Task<List<SalesInvoiceDto>> GetInvoicesAsync(int? branchId = null, CancellationToken cancellationToken = default)
     {
         var query = _context.SalesInvoices
             .Include(i => i.Branch)
@@ -28,7 +28,7 @@ public class SalesInvoiceService : ISalesInvoiceService
                 .ThenInclude(it => it.Item)
             .AsNoTracking();
 
-        if (branchId.HasValue && branchId.Value != Guid.Empty)
+        if (branchId.HasValue && branchId.Value > 0)
         {
             var targetBranchIds = await _branchService.GetBranchAndDescendantIdsAsync(branchId.Value, cancellationToken);
             query = query.Where(i => targetBranchIds.Contains(i.BranchId));
@@ -73,19 +73,19 @@ public class SalesInvoiceService : ISalesInvoiceService
         var issueCode = $"PXK{count + 1:D5}";
         var journalCode = $"PKT{count + 1:D5}";
 
-        // Xác định chi nhánh phát sinh đơn hàng
+        // Determine the originating branch for the invoice
         var branchId = request.BranchId;
-        if (!branchId.HasValue || branchId == Guid.Empty)
+        if (!branchId.HasValue || branchId <= 0)
         {
             var wh = await _context.Warehouses.FirstOrDefaultAsync(w => w.Id == request.WarehouseId, cancellationToken);
-            if (wh != null && wh.BranchId != Guid.Empty)
+            if (wh != null && wh.BranchId > 0)
             {
                 branchId = wh.BranchId;
             }
             else
             {
                 var rootBranch = await _context.Branches.FirstOrDefaultAsync(b => b.Code == "root" || b.IsDefault, cancellationToken);
-                branchId = rootBranch?.Id ?? Guid.Parse("00000000-0000-0000-0000-000000000001");
+                branchId = rootBranch?.Id ?? 1;
             }
         }
 
@@ -165,7 +165,7 @@ public class SalesInvoiceService : ISalesInvoiceService
         await _context.StockIssues.AddAsync(stockIssue, cancellationToken);
         invoice.StockIssue = stockIssue;
 
-        // 2. Auto-Generate Double-Entry Journal Entry (Bút toán kế toán ngầm)
+        // 2. Auto-Generate Double-Entry Journal Entry
         var acc111 = await _context.Accounts.FirstOrDefaultAsync(a => a.Code == "111", cancellationToken);
         var acc112 = await _context.Accounts.FirstOrDefaultAsync(a => a.Code == "112", cancellationToken);
         var acc131 = await _context.Accounts.FirstOrDefaultAsync(a => a.Code == "131", cancellationToken);
@@ -186,8 +186,8 @@ public class SalesInvoiceService : ISalesInvoiceService
                 Status = VoucherStatus.Posted
             };
 
-            // Bút toán Doanh thu:
-            // Nợ 111 / 112 / 131
+            // Revenue entry:
+            // Debit 111 / 112 / 131
             var debitAccId = request.PaymentMethod == PaymentMethod.Cash ? (acc111?.Id ?? acc131?.Id) :
                              request.PaymentMethod == PaymentMethod.BankTransfer ? (acc112?.Id ?? acc131?.Id) :
                              acc131?.Id;
@@ -203,7 +203,7 @@ public class SalesInvoiceService : ISalesInvoiceService
                     PartnerId = request.CustomerId
                 });
 
-                // Có 511 (Doanh thu)
+                // Credit 511 (Sales Revenue)
                 journal.Lines.Add(new JournalEntryLine
                 {
                     AccountId = acc511.Id,
@@ -214,7 +214,7 @@ public class SalesInvoiceService : ISalesInvoiceService
                 });
             }
 
-            // Bút toán Giá vốn: Nợ 632 / Có 156
+            // COGS entry: Debit 632 / Credit 156
             if (acc632 != null && acc156 != null && totalCost > 0)
             {
                 journal.Lines.Add(new JournalEntryLine

@@ -4,7 +4,7 @@ namespace ERPm.Application.DTOs.Partner;
 
 public class PartnerDto
 {
-    public Guid Id { get; set; }
+    public int Id { get; set; }
     public string Code { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public PartnerType PartnerType { get; set; }

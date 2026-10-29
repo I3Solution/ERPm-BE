@@ -15,7 +15,7 @@ public class SalesController : BaseApiController
     }
 
     [HttpGet("invoices")]
-    public async Task<ActionResult<ApiResponse<List<SalesInvoiceDto>>>> GetInvoices([FromQuery] Guid? branchId, CancellationToken cancellationToken)
+    public async Task<ActionResult<ApiResponse<List<SalesInvoiceDto>>>> GetInvoices([FromQuery] int? branchId, CancellationToken cancellationToken)
     {
         var result = await _salesService.GetInvoicesAsync(branchId, cancellationToken);
         return Ok(ApiResponse<List<SalesInvoiceDto>>.Ok(result));

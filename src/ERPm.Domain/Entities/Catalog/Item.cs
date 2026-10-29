@@ -11,8 +11,8 @@ public class Item : BaseAuditableEntity
 
     public ItemType ItemType { get; set; } = ItemType.Goods;
 
-    public Guid? CategoryId { get; set; }
-    public Guid BaseUomId { get; set; }
+    public int? CategoryId { get; set; }
+    public int BaseUomId { get; set; }
 
     // Pricing and stock thresholds (Required decimal(18, 4) per accounting discipline)
     public decimal SalePrice { get; set; } = 0m;

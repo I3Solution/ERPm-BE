@@ -15,7 +15,7 @@ public class BranchesController : BaseApiController
     }
 
     /// <summary>
-    /// Lấy danh sách tất cả các chi nhánh công ty
+    /// Gets a flat list of all company branches.
     /// </summary>
     [HttpGet]
     public async Task<ActionResult<ApiResponse<List<BranchDto>>>> GetBranches(CancellationToken cancellationToken)
@@ -25,7 +25,7 @@ public class BranchesController : BaseApiController
     }
 
     /// <summary>
-    /// Lấy cây phân cấp chi nhánh (hierarchical tree)
+    /// Gets the hierarchical branch tree.
     /// </summary>
     [HttpGet("tree")]
     public async Task<ActionResult<ApiResponse<List<BranchDto>>>> GetBranchTree(CancellationToken cancellationToken)
@@ -35,10 +35,10 @@ public class BranchesController : BaseApiController
     }
 
     /// <summary>
-    /// Lấy chi tiết một chi nhánh theo ID
+    /// Gets details of a single branch by its internal integer ID.
     /// </summary>
-    [HttpGet("{id:guid}")]
-    public async Task<ActionResult<ApiResponse<BranchDto>>> GetBranchById(Guid id, CancellationToken cancellationToken)
+    [HttpGet("{id:int}")]
+    public async Task<ActionResult<ApiResponse<BranchDto>>> GetBranchById(int id, CancellationToken cancellationToken)
     {
         var result = await _branchService.GetBranchByIdAsync(id, cancellationToken);
         if (result == null)
@@ -49,17 +49,17 @@ public class BranchesController : BaseApiController
     }
 
     /// <summary>
-    /// Lấy danh sách ID của chi nhánh được chọn và tất cả chi nhánh con cháu (descendants)
+    /// Gets the list of IDs for the selected branch and all of its descendants.
     /// </summary>
-    [HttpGet("{id:guid}/descendants")]
-    public async Task<ActionResult<ApiResponse<List<Guid>>>> GetBranchDescendants(Guid id, CancellationToken cancellationToken)
+    [HttpGet("{id:int}/descendants")]
+    public async Task<ActionResult<ApiResponse<List<int>>>> GetBranchDescendants(int id, CancellationToken cancellationToken)
     {
         var result = await _branchService.GetBranchAndDescendantIdsAsync(id, cancellationToken);
-        return Ok(ApiResponse<List<Guid>>.Ok(result));
+        return Ok(ApiResponse<List<int>>.Ok(result));
     }
 
     /// <summary>
-    /// Tạo mới một chi nhánh
+    /// Creates a new branch.
     /// </summary>
     [HttpPost]
     public async Task<ActionResult<ApiResponse<BranchDto>>> CreateBranch([FromBody] CreateBranchRequest request, CancellationToken cancellationToken)

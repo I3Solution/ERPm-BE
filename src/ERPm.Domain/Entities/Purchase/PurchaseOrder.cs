@@ -7,14 +7,14 @@ namespace ERPm.Domain.Entities.Purchase;
 
 public class PurchaseOrder : BaseAuditableEntity
 {
-    public string OrderNumber { get; set; } = string.Empty; // PO0001
+    public string OrderNumber { get; set; } = string.Empty; // e.g. PO0001
     public DateTime OrderDate { get; set; } = DateTime.UtcNow;
 
-    public Guid BranchId { get; set; }                     // Chi nhánh lập đơn mua
-    public Guid? SupplierId { get; set; }
+    public int BranchId { get; set; }                      // Purchasing branch ID
+    public int? SupplierId { get; set; }
     public string SupplierName { get; set; } = string.Empty;
 
-    // Tiền tệ decimal(18, 4)
+    // Monetary fields in decimal(18, 4)
     public decimal SubTotal { get; set; } = 0m;
     public decimal TaxAmount { get; set; } = 0m;
     public decimal TotalAmount { get; set; } = 0m;
@@ -29,15 +29,10 @@ public class PurchaseOrder : BaseAuditableEntity
     public virtual ICollection<PurchaseOrderItem> Items { get; set; } = new List<PurchaseOrderItem>();
 }
 
-public class PurchaseOrderItem : BaseEntity<Guid>
+public class PurchaseOrderItem : BaseEntity
 {
-    public PurchaseOrderItem()
-    {
-        Id = Guid.NewGuid();
-    }
-
-    public Guid PurchaseOrderId { get; set; }
-    public Guid ItemId { get; set; }
+    public int PurchaseOrderId { get; set; }
+    public int ItemId { get; set; }
     public string ItemCode { get; set; } = string.Empty;
     public string ItemName { get; set; } = string.Empty;
     public string? UnitName { get; set; }

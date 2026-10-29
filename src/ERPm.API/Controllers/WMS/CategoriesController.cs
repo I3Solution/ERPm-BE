@@ -7,8 +7,8 @@ using Microsoft.AspNetCore.Mvc;
 namespace ERPm.API.Controllers.WMS;
 
 /// <summary>
-/// Quản lý Danh mục hàng hóa (WMS Module)
-/// Kế thừa BaseCrudController: Tự động có trọn bộ CRUD Paged, GetById, Create, Update, Delete chuẩn 100% Type-Safe.
+/// Manages item categories (WMS Module).
+/// Inherits BaseCrudController for full type-safe CRUD endpoints.
 /// </summary>
 [Route("api/v1/wms/categories")]
 public class CategoriesController : BaseCrudController<Category, CategoryDto, CreateCategoryRequest, UpdateCategoryRequest>

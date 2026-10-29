@@ -19,14 +19,14 @@ public class StockService : IStockService
         _branchService = branchService;
     }
 
-    public async Task<List<WarehouseDto>> GetWarehousesAsync(Guid? branchId = null, CancellationToken cancellationToken = default)
+    public async Task<List<WarehouseDto>> GetWarehousesAsync(int? branchId = null, CancellationToken cancellationToken = default)
     {
         var query = _context.Warehouses
             .Include(w => w.Branch)
             .Where(w => w.IsActive)
             .AsNoTracking();
 
-        if (branchId.HasValue && branchId.Value != Guid.Empty)
+        if (branchId.HasValue && branchId.Value > 0)
         {
             var targetBranchIds = await _branchService.GetBranchAndDescendantIdsAsync(branchId.Value, cancellationToken);
             query = query.Where(w => targetBranchIds.Contains(w.BranchId));
@@ -48,7 +48,7 @@ public class StockService : IStockService
             .ToListAsync(cancellationToken);
     }
 
-    public async Task<List<StockBalanceDto>> GetStockBalancesAsync(Guid? warehouseId, Guid? branchId = null, CancellationToken cancellationToken = default)
+    public async Task<List<StockBalanceDto>> GetStockBalancesAsync(int? warehouseId, int? branchId = null, CancellationToken cancellationToken = default)
     {
         var query = _context.StockBalances
             .Include(b => b.Warehouse)
@@ -56,12 +56,12 @@ public class StockService : IStockService
                 .ThenInclude(i => i!.BaseUom)
             .AsNoTracking();
 
-        if (warehouseId.HasValue)
+        if (warehouseId.HasValue && warehouseId.Value > 0)
         {
             query = query.Where(b => b.WarehouseId == warehouseId.Value);
         }
 
-        if (branchId.HasValue && branchId.Value != Guid.Empty)
+        if (branchId.HasValue && branchId.Value > 0)
         {
             var targetBranchIds = await _branchService.GetBranchAndDescendantIdsAsync(branchId.Value, cancellationToken);
             query = query.Where(b => b.Warehouse != null && targetBranchIds.Contains(b.Warehouse.BranchId));
@@ -92,19 +92,19 @@ public class StockService : IStockService
         var count = await _context.StockReceipts.CountAsync(cancellationToken);
         var code = $"PNK{count + 1:D5}";
 
-        // Xác định chi nhánh nhập kho
+        // Determine the receiving branch for the stock receipt
         var branchId = request.BranchId;
-        if (!branchId.HasValue || branchId == Guid.Empty)
+        if (!branchId.HasValue || branchId <= 0)
         {
             var wh = await _context.Warehouses.FirstOrDefaultAsync(w => w.Id == request.WarehouseId, cancellationToken);
-            if (wh != null && wh.BranchId != Guid.Empty)
+            if (wh != null && wh.BranchId > 0)
             {
                 branchId = wh.BranchId;
             }
             else
             {
                 var rootBranch = await _context.Branches.FirstOrDefaultAsync(b => b.Code == "root" || b.IsDefault, cancellationToken);
-                branchId = rootBranch?.Id ?? Guid.Parse("00000000-0000-0000-0000-000000000001");
+                branchId = rootBranch?.Id ?? 1;
             }
         }
 

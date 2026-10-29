@@ -15,7 +15,7 @@ public class LocalizationController : BaseApiController
     }
 
     /// <summary>
-    /// Lấy danh sách tất cả ngôn ngữ đang hoạt động (vd: vi, en)
+    /// Gets all active system languages (e.g. vi, en).
     /// </summary>
     [HttpGet("languages")]
     public async Task<ActionResult<ApiResponse<List<LanguageDto>>>> GetLanguages(CancellationToken cancellationToken)
@@ -25,7 +25,7 @@ public class LocalizationController : BaseApiController
     }
 
     /// <summary>
-    /// Tải toàn bộ bundle từ điển tĩnh phục vụ client cache
+    /// Loads the full static dictionary bundle for client caching.
     /// </summary>
     [HttpGet("{langCode}")]
     public async Task<ActionResult<ApiResponse<DictionaryBundleDto>>> GetDictionaryBundle(string langCode, CancellationToken cancellationToken)
@@ -35,7 +35,7 @@ public class LocalizationController : BaseApiController
     }
 
     /// <summary>
-    /// Thêm hoặc cập nhật một cặp từ điển key-value
+    /// Inserts or updates a dictionary key-value pair.
     /// </summary>
     [HttpPost]
     public async Task<ActionResult<ApiResponse<bool>>> UpsertDictionaryEntry([FromBody] UpsertDictionaryRequest request, CancellationToken cancellationToken)

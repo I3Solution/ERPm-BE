@@ -87,7 +87,7 @@ public class ItemService : IItemService
         };
     }
 
-    public async Task<ItemDto?> GetItemByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    public async Task<ItemDto?> GetItemByIdAsync(int id, CancellationToken cancellationToken = default)
     {
         var item = await _context.Items
             .Include(i => i.Category)
@@ -147,7 +147,7 @@ public class ItemService : IItemService
         return (await GetItemByIdAsync(item.Id, cancellationToken))!;
     }
 
-    public async Task<ItemDto?> UpdateItemAsync(Guid id, UpdateItemRequest request, CancellationToken cancellationToken = default)
+    public async Task<ItemDto?> UpdateItemAsync(int id, UpdateItemRequest request, CancellationToken cancellationToken = default)
     {
         var item = await _context.Items.FirstOrDefaultAsync(i => i.Id == id, cancellationToken);
         if (item == null) return null;
@@ -178,12 +178,12 @@ public class ItemService : IItemService
         return await GetItemByIdAsync(item.Id, cancellationToken);
     }
 
-    public async Task<bool> DeleteItemAsync(Guid id, CancellationToken cancellationToken = default)
+    public async Task<bool> DeleteItemAsync(int id, CancellationToken cancellationToken = default)
     {
         var item = await _context.Items.FirstOrDefaultAsync(i => i.Id == id, cancellationToken);
         if (item == null) return false;
 
-        // Soft delete theo chuẩn dự án
+        // Soft delete according to project standard
         item.IsDeleted = true;
         item.DeletedAtUtc = DateTime.UtcNow;
 

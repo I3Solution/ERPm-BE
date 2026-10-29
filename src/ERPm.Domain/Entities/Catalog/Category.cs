@@ -4,11 +4,11 @@ namespace ERPm.Domain.Entities.Catalog;
 
 public class Category : BaseAuditableEntity
 {
-    public string Code { get; set; } = string.Empty;   // DM01
-    public string Name { get; set; } = string.Empty;   // Bút viết
-    public Dictionary<string, string> Translations { get; set; } = new(); // {"vi": "Bút viết", "en": "Pens"}
+    public string Code { get; set; } = string.Empty;   // e.g. DM01
+    public string Name { get; set; } = string.Empty;   // Category name
+    public Dictionary<string, string> Translations { get; set; } = new(); // Multi-lingual names
     
-    public Guid? ParentId { get; set; }
+    public int? ParentId { get; set; }
     public bool IsActive { get; set; } = true;
     public int SortOrder { get; set; } = 0;
 

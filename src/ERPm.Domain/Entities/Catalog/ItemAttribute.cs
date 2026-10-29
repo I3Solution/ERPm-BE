@@ -16,7 +16,7 @@ public enum AttributeDataType
 /// </summary>
 public class ItemAttribute : BaseAuditableEntity
 {
-    public Guid? CategoryId { get; set; } // Nullable: applies to all items if null
+    public int? CategoryId { get; set; } // Nullable: applies to all items if null
     public string Code { get; set; } = string.Empty; // e.g. "color", "size", "ram", "warranty_months"
     public string Name { get; set; } = string.Empty; // Display label
     public AttributeDataType DataType { get; set; } = AttributeDataType.Text;

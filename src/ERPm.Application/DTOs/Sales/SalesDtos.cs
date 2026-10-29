@@ -4,10 +4,10 @@ namespace ERPm.Application.DTOs.Sales;
 
 public class CreateSalesInvoiceRequest
 {
-    public Guid? BranchId { get; set; }                    // Chi nhánh phát sinh đơn hàng
-    public Guid? CustomerId { get; set; }
+    public int? BranchId { get; set; }                     // Originating branch ID
+    public int? CustomerId { get; set; }
     public string CustomerName { get; set; } = "Khách lẻ";
-    public Guid WarehouseId { get; set; }
+    public int WarehouseId { get; set; }
     public PaymentMethod PaymentMethod { get; set; } = PaymentMethod.Cash;
     public decimal DiscountAmount { get; set; } = 0m;
     public decimal PaidAmount { get; set; } = 0m;
@@ -17,7 +17,7 @@ public class CreateSalesInvoiceRequest
 
 public class SalesInvoiceItemRequest
 {
-    public Guid ItemId { get; set; }
+    public int ItemId { get; set; }
     public decimal Quantity { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal DiscountPercent { get; set; } = 0m;
@@ -25,10 +25,10 @@ public class SalesInvoiceItemRequest
 
 public class SalesInvoiceDto
 {
-    public Guid Id { get; set; }
+    public int Id { get; set; }
     public string InvoiceNumber { get; set; } = string.Empty;
     public DateTime InvoiceDate { get; set; }
-    public Guid BranchId { get; set; }
+    public int BranchId { get; set; }
     public string? BranchCode { get; set; }
     public string? BranchName { get; set; }
     public string CustomerName { get; set; } = string.Empty;
@@ -43,7 +43,7 @@ public class SalesInvoiceDto
 
 public class SalesInvoiceItemDto
 {
-    public Guid ItemId { get; set; }
+    public int ItemId { get; set; }
     public string ItemCode { get; set; } = string.Empty;
     public string ItemName { get; set; } = string.Empty;
     public decimal Quantity { get; set; }
