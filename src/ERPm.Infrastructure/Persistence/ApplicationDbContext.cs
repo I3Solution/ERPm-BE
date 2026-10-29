@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using ERPm.Application.Common;
 using ERPm.Application.Common.Interfaces;
 using ERPm.Domain.Common;
 using ERPm.Domain.Entities.Accounting;
@@ -16,10 +18,17 @@ namespace ERPm.Infrastructure.Persistence;
 
 public class ApplicationDbContext : DbContext, IApplicationDbContext
 {
-    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
+    private readonly ICurrentUser? _currentUser;
+    public bool IsUnrestricted => _currentUser == null || _currentUser.IsSystem || _currentUser.IsAdmin;
+    public int[] AllowedBranchIds => _currentUser?.BranchIds ?? [];
+    internal bool AllowCancellation { get; set; }
+
+    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options, ICurrentUser? currentUser = null) : base(options)
     {
+        _currentUser = currentUser;
     }
 
+    public DbSet<AppUser> AppUsers => Set<AppUser>();
     public DbSet<Branch> Branches => Set<Branch>();
     public DbSet<AppLanguage> AppLanguages => Set<AppLanguage>();
     public DbSet<AppDictionary> AppDictionaries => Set<AppDictionary>();
@@ -54,9 +63,22 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             c => new Dictionary<string, string>(c));
 
         var objectDictionaryComparer = new ValueComparer<Dictionary<string, object>>(
-            (c1, c2) => c1 != null && c2 != null && c1.Count == c2.Count,
-            c => c.Aggregate(0, (a, v) => HashCode.Combine(a, v.Key.GetHashCode())),
-            c => new Dictionary<string, object>(c));
+            (c1, c2) => JsonNode.DeepEquals(JsonSerializer.SerializeToNode(c1, (JsonSerializerOptions?)null), JsonSerializer.SerializeToNode(c2, (JsonSerializerOptions?)null)),
+            c => 0,
+            c => JsonSerializer.Deserialize<Dictionary<string, object>>(JsonSerializer.Serialize(c, (JsonSerializerOptions?)null), (JsonSerializerOptions?)null)!);
+
+        modelBuilder.HasSequence<long>("erpm_document_number");
+        modelBuilder.Entity<AppUser>(entity =>
+        {
+            entity.ToTable("tbl_SYS_User");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.UserName).HasMaxLength(100).IsRequired();
+            entity.HasIndex(e => e.UserName).IsUnique();
+            entity.Property(e => e.DisplayName).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.Role).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.BranchIds).HasColumnType("jsonb");
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
 
         var stringListComparer = new ValueComparer<List<string>>(
             (c1, c2) => c1 != null && c2 != null && c1.SequenceEqual(c2),
@@ -189,6 +211,8 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
 
             entity.HasIndex(e => e.Code).IsUnique();
             entity.HasIndex(e => e.Barcode);
+            entity.HasIndex(e => e.Attributes).HasMethod("gin");
+            entity.HasIndex(e => e.Translations).HasMethod("gin");
             entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
@@ -263,6 +287,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.QuantityOnHand).HasPrecision(18, 4);
             entity.Property(e => e.AverageCostPrice).HasPrecision(18, 4);
+            entity.Property(e => e.InventoryValue).HasPrecision(18, 4);
 
             entity.HasOne(e => e.Warehouse)
                 .WithMany()
@@ -284,6 +309,8 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
             entity.Property(e => e.TotalAmount).HasPrecision(18, 4);
+            entity.HasIndex(e => e.RequestId).IsUnique();
+            entity.HasOne(e => e.JournalEntry).WithMany().HasForeignKey(e => e.JournalEntryId).OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(e => e.Branch)
                 .WithMany(b => b.StockReceipts)
@@ -381,6 +408,9 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.Property(e => e.TaxAmount).HasPrecision(18, 4);
             entity.Property(e => e.TotalAmount).HasPrecision(18, 4);
             entity.Property(e => e.PaidAmount).HasPrecision(18, 4);
+            entity.Property(e => e.TenderedAmount).HasPrecision(18, 4);
+            entity.Property(e => e.ChangeAmount).HasPrecision(18, 4);
+            entity.HasIndex(e => e.RequestId).IsUnique();
             entity.Property(e => e.RemainingDebt).HasPrecision(18, 4);
 
             entity.HasOne(e => e.Branch)
@@ -422,6 +452,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.Property(e => e.DiscountPercent).HasPrecision(18, 4);
             entity.Property(e => e.Amount).HasPrecision(18, 4);
             entity.Property(e => e.CostPrice).HasPrecision(18, 4);
+            entity.Property(e => e.CostAmount).HasPrecision(18, 4);
 
             entity.HasOne(e => e.SalesInvoice)
                 .WithMany(i => i.Items)
@@ -574,6 +605,8 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasIndex(e => e.VoucherNumber).IsUnique();
+            entity.HasIndex(e => e.ReversesJournalEntryId).IsUnique();
+            entity.HasOne<JournalEntry>().WithMany().HasForeignKey(e => e.ReversesJournalEntryId).OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => e.PostingDate);
             entity.HasQueryFilter(e => !e.IsDeleted);
         });
@@ -594,7 +627,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.HasOne(e => e.Account)
                 .WithMany()
                 .HasForeignKey(e => e.AccountId)
-                .IsRequired(false)
+                .IsRequired()
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(e => e.Partner)
@@ -602,6 +635,23 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
                 .HasForeignKey(e => e.PartnerId)
                 .OnDelete(DeleteBehavior.SetNull);
         });
+
+        // A user's branch grants are enforced independently of client-side filtering.
+        modelBuilder.Entity<Branch>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.Id)));
+        modelBuilder.Entity<Warehouse>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)));
+        modelBuilder.Entity<SalesInvoice>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)));
+        modelBuilder.Entity<StockReceipt>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)));
+        modelBuilder.Entity<StockIssue>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)));
+        modelBuilder.Entity<JournalEntry>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)));
+        modelBuilder.Entity<SalesOrder>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)));
+        modelBuilder.Entity<PurchaseOrder>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)));
+        modelBuilder.Entity<StockBalance>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.Warehouse!.BranchId)));
+        modelBuilder.Entity<SalesInvoiceItem>().HasQueryFilter(e => !e.SalesInvoice!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.SalesInvoice.BranchId)));
+        modelBuilder.Entity<StockReceiptItem>().HasQueryFilter(e => !e.StockReceipt!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.StockReceipt.BranchId)));
+        modelBuilder.Entity<StockIssueItem>().HasQueryFilter(e => !e.StockIssue!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.StockIssue.BranchId)));
+        modelBuilder.Entity<JournalEntryLine>().HasQueryFilter(e => !e.JournalEntry!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.JournalEntry.BranchId)));
+        modelBuilder.Entity<SalesOrderItem>().HasQueryFilter(e => !e.SalesOrder!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.SalesOrder.BranchId)));
+        modelBuilder.Entity<PurchaseOrderItem>().HasQueryFilter(e => !e.PurchaseOrder!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.PurchaseOrder.BranchId)));
     }
 
     /// <summary>
@@ -636,8 +686,37 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             .IncludeProperties(e => e.Id);
     }
 
-    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    public override int SaveChanges() => throw new NotSupportedException("Use SaveChangesAsync to run posting and audit guards.");
+    public override int SaveChanges(bool acceptAllChangesOnSuccess) => throw new NotSupportedException("Use SaveChangesAsync to run posting and audit guards.");
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) => SaveChangesAsync(true, cancellationToken);
+    public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
+        if (!AllowCancellation)
+        {
+            foreach (var entry in ChangeTracker.Entries().Where(e => e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted).ToArray())
+            {
+                var immutable = entry.Entity switch
+                {
+                    SalesInvoiceItem => await SalesInvoices.IgnoreQueryFilters().AnyAsync(i => i.Id == entry.OriginalValues.GetValue<int>("SalesInvoiceId") && i.Status != VoucherStatus.Draft, cancellationToken),
+                    StockReceiptItem => await StockReceipts.IgnoreQueryFilters().AnyAsync(i => i.Id == entry.OriginalValues.GetValue<int>("StockReceiptId") && i.Status != VoucherStatus.Draft, cancellationToken),
+                    StockIssueItem => await StockIssues.IgnoreQueryFilters().AnyAsync(i => i.Id == entry.OriginalValues.GetValue<int>("StockIssueId") && i.Status != VoucherStatus.Draft, cancellationToken),
+                    JournalEntryLine => await JournalEntries.IgnoreQueryFilters().AnyAsync(i => i.Id == entry.OriginalValues.GetValue<int>("JournalEntryId") && i.Status != VoucherStatus.Draft, cancellationToken),
+                    _ => false
+                };
+                if (immutable) throw new BusinessException("error.accounting.posted_immutable", 409);
+            }
+        }
+        foreach (var entry in ChangeTracker.Entries().Where(e => e.State is EntityState.Modified or EntityState.Deleted))
+        {
+            if (entry.Entity is SalesInvoice or StockReceipt or StockIssue or JournalEntry)
+            {
+                var originalStatus = entry.OriginalValues.GetValue<VoucherStatus>("Status");
+                if (originalStatus != VoucherStatus.Draft && !AllowCancellation)
+                    throw new BusinessException("error.accounting.posted_immutable", 409);
+            }
+        }
+        foreach (var journal in ChangeTracker.Entries<JournalEntry>().Where(e => e.State == EntityState.Added && e.Entity.Status == VoucherStatus.Posted))
+            ERPm.Infrastructure.Services.Common.PostingTransaction.ValidateJournal(journal.Entity);
         var baseEntries = ChangeTracker.Entries<BaseEntity>();
         foreach (var entry in baseEntries)
         {
@@ -655,13 +734,15 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             if (entry.State == EntityState.Added)
             {
                 entry.Entity.CreatedAtUtc = now;
+                entry.Entity.CreatedBy = _currentUser?.UserId ?? entry.Entity.CreatedBy;
             }
             else if (entry.State == EntityState.Modified)
             {
                 entry.Entity.LastModifiedAtUtc = now;
+                entry.Entity.LastModifiedBy = _currentUser?.UserId ?? entry.Entity.LastModifiedBy;
             }
         }
 
-        return base.SaveChangesAsync(cancellationToken);
+        return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 }

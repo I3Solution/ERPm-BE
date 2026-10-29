@@ -34,8 +34,8 @@ public class StockController : BaseApiController
         var success = await _stockService.CreateStockReceiptAsync(request, cancellationToken);
         if (!success)
         {
-            return BadRequest(ApiResponse<bool>.Fail("Cannot create stock receipt. Ensure items list is not empty."));
+            return BadRequest(ApiResponse<bool>.Fail("error.validation.reference"));
         }
-        return Ok(ApiResponse<bool>.Ok(true, "Stock receipt created and balances updated."));
+        return Ok(ApiResponse<bool>.Ok(true, "common.saved"));
     }
 }

@@ -1,5 +1,19 @@
 # 📘 PROJECT MASTER: ERPm - HỆ THỐNG KẾ TOÁN & QUẢN TRỊ BÁN HÀNG TỒN KHO HYBRID
 
+## Baseline triển khai đã xác minh — Step 19 (2026-10-29)
+
+- Backend .NET 10.0.403 / EF Core 10.0.14; PostgreSQL 18 local, workflow CI nhắm PostgreSQL 16. Frontend Angular 17.3 và Ionic 8. Capacitor, offline và Dapper reporting chưa được nghiệm thu.
+- FE có 10 submodule: ACC, SD, PUR, WMS, CRM, HRM, MFG, SCM, PM, dashboard. Luồng đang hoạt động chủ yếu ở SD/WMS/CRM/dashboard; module còn lại là khung hoặc backlog.
+- Danh mục hàng hóa nằm ở WMS, POS ở SD, đối tác ở CRM. Login/core/layout ở repo FE. Không tạo đường dẫn catalog/inventory/sales/partners theo sơ đồ cũ.
+- Nguồn schema chuẩn là EF migrations/snapshot; SQL trong database/ chỉ để tham chiếu, không dùng để reset hay triển khai trực tiếp. Nâng cấp UUID cũ bảo toàn ExternalId và các bảng legacy; DB tạo thủ công bằng script cũ cần quy trình adoption riêng.
+- Tài khoản nội bộ với opaque bearer token của ASP.NET Core, 1 giờ; Admin/Operator/Viewer và scope chi nhánh server-side. TenantId chưa phải cơ chế cách ly SaaS hoàn chỉnh.
+- Posting phải đi qua service nghiệp vụ trong transaction, advisory lock, mã sequence, RequestId/request hash, kiểm tra tài khoản/bút toán. Posted/Cancelled bất biến; hủy hóa đơn tạo reversal, không xóa lịch sử.
+- Quantity/price/value là decimal(18,4). InventoryValue là giá trị tồn lưu sổ; AverageCostPrice là đơn giá bình quân làm tròn. Khi xuất hết tồn, phân bổ toàn bộ giá trị còn lại vào CostAmount để không để lại số dư do làm tròn.
+- Form lưu dữ liệu dùng FormGroup và app-form-control/app-input-control; searchChange hỗ trợ lookup server. Shared controls và component nghiệp vụ dùng OnPush/Signals; không ghi signal trong computed/effect nếu chưa tách untracked đúng chỗ.
+- Không seed giao dịch hoặc trả số demo khi lỗi API. Từ điển hệ thống VI/EN được đồng bộ vào app_dictionaries; master data giữ JSONB translations.
+- Kết quả chạy và phần còn lại ở .ai/status.md và Step 19; không suy diễn toàn bộ phase đã hoàn thành từ việc có controller/entity.
+
+
 > **Tài liệu chuẩn kiến trúc & Quy tắc phát triển phần mềm dành cho Developers và AI Agents.**  
 > Mọi thay đổi, bổ sung code trong dự án **bắt buộc tuân thủ** các quy tắc trong tài liệu này.
 
@@ -21,7 +35,7 @@ Xây dựng một hệ thống phần mềm **Quản trị Bán hàng - Tồn kh
 | **Backend API** | **C# / .NET 10 (LTS)** | Hiệu năng cao, Type-safe mạnh, Clean Architecture, dễ bảo trì enterprise. |
 | **Database** | **PostgreSQL 16+** | Hỗ trợ JSONB linh hoạt, ACID chuẩn xác cho tài chính, miễn phí, hỗ trợ mở rộng partitioning sau này. |
 | **ORM & Data Access** | **EF Core 10 + Dapper** | EF Core cho nghiệp vụ Command/Transaction; Dapper cho Query báo cáo & Dashboard tốc độ cao. |
-| **Frontend Framework** | **Angular 18+ (Standalone Components)** | Cấu trúc module rõ ràng, Dependency Injection, Signals phản ứng nhanh, Type-safe tuyệt đối. |
+| **Frontend Framework** | **Angular 17.3 (Standalone Components)** | Cấu trúc module rõ ràng, Dependency Injection, Signals phản ứng nhanh, Type-safe tuyệt đối. |
 | **Hybrid UI Framework** | **Ionic Framework 8 + Capacitor** | Bộ UI tối ưu đồng thời cho Mobile & Desktop Web, tích hợp Camera quét mã vạch native, Single Codebase build Android/iOS. |
 | **Kiến trúc Mã nguồn** | **Clean Architecture (Domain-Driven)** | Tách biệt hoàn toàn Domain Logic, Application Layer, Infrastructure và Presentation. |
 
@@ -42,7 +56,7 @@ ERPm/
 │   │   └── Entities/Accounting/      # Account (Hệ thống TK), JournalEntry, JournalEntryLine
 │   │
 │   ├── ERPm.Application/             # Use Cases, CQRS/Service Layer, DTOs, Mappers, Validators
-│   │   ├── Common/                   # Interfaces (IDbContext, ICurrentUserService, IDateTime)
+│   │   ├── Common/                   # Interfaces (IDbContext, ICurrentUser, IDateTime)
 │   │   ├── Features/Catalog/         # Items CRUD, Category tree
 │   │   ├── Features/Sales/           # Lập đơn, Xuất hóa đơn, Tính tiền, Trừ kho
 │   │   ├── Features/Inventory/       # Nhập kho, Xuất kho, Kiểm kê, Tính giá vốn
@@ -170,10 +184,9 @@ client/
 │   │   │
 │   │   ├── modules/ (hoặc features/)
 │   │   │   ├── dashboard/           # Báo cáo tổng quan, biểu đồ Chart.js
-│   │   │   ├── catalog/             # Quản lý Items, Danh mục, Đơn vị tính
-│   │   │   ├── inventory/           # Tồn kho, Phiếu nhập, Phiếu xuất, Kiểm kê
-│   │   │   ├── sales/               # POS bán hàng, Tạo đơn, Danh sách hóa đơn
-│   │   │   └── partners/            # Khách hàng, Nhà cung cấp, Sổ công nợ
+│   │   │   ├── WMS/             # Quản lý Items, Danh mục, Đơn vị tính
+│   │   │   ├── SD/               # POS bán hàng, Tạo đơn, Danh sách hóa đơn
+│   │   │   └── CRM/            # Khách hàng, Nhà cung cấp, Sổ công nợ
 │   │   │
 │   │   └── app.routes.ts            # Standalone lazy routes
 │   └── theme/                       # SCSS variables, responsive utilities

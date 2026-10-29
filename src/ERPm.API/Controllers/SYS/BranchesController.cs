@@ -43,7 +43,7 @@ public class BranchesController : BaseApiController
         var result = await _branchService.GetBranchByIdAsync(id, cancellationToken);
         if (result == null)
         {
-            return NotFound(ApiResponse<BranchDto>.Fail($"Branch with ID '{id}' was not found."));
+            return NotFound(ApiResponse<BranchDto>.Fail("error.validation.reference"));
         }
         return Ok(ApiResponse<BranchDto>.Ok(result));
     }
@@ -61,10 +61,11 @@ public class BranchesController : BaseApiController
     /// <summary>
     /// Creates a new branch.
     /// </summary>
+    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Admin")]
     [HttpPost]
     public async Task<ActionResult<ApiResponse<BranchDto>>> CreateBranch([FromBody] CreateBranchRequest request, CancellationToken cancellationToken)
     {
         var result = await _branchService.CreateBranchAsync(request, cancellationToken);
-        return Ok(ApiResponse<BranchDto>.Ok(result, "Branch created successfully."));
+        return Ok(ApiResponse<BranchDto>.Ok(result, "common.saved"));
     }
 }

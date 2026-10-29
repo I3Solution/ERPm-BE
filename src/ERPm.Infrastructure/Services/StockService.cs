@@ -12,11 +12,13 @@ public class StockService : IStockService
 {
     private readonly IApplicationDbContext _context;
     private readonly IBranchService _branchService;
+    private readonly StockReceiptPostingService _receipts;
 
-    public StockService(IApplicationDbContext context, IBranchService branchService)
+    public StockService(IApplicationDbContext context, IBranchService branchService, StockReceiptPostingService receipts)
     {
         _context = context;
         _branchService = branchService;
+        _receipts = receipts;
     }
 
     public async Task<List<WarehouseDto>> GetWarehousesAsync(int? branchId = null, CancellationToken cancellationToken = default)
@@ -80,91 +82,12 @@ public class StockService : IStockService
                 UomName = b.Item != null && b.Item.BaseUom != null ? b.Item.BaseUom.Name : "Cái",
                 QuantityOnHand = b.QuantityOnHand,
                 AverageCostPrice = b.AverageCostPrice,
+                TotalValue = b.InventoryValue,
                 IsLowStock = b.Item != null && b.QuantityOnHand <= b.Item.MinStockAlert
             })
             .ToListAsync(cancellationToken);
     }
 
-    public async Task<bool> CreateStockReceiptAsync(CreateStockReceiptRequest request, CancellationToken cancellationToken = default)
-    {
-        if (request.Items.Count == 0) return false;
-
-        var count = await _context.StockReceipts.CountAsync(cancellationToken);
-        var code = $"PNK{count + 1:D5}";
-
-        // Determine the receiving branch for the stock receipt
-        var branchId = request.BranchId;
-        if (!branchId.HasValue || branchId <= 0)
-        {
-            var wh = await _context.Warehouses.FirstOrDefaultAsync(w => w.Id == request.WarehouseId, cancellationToken);
-            if (wh != null && wh.BranchId > 0)
-            {
-                branchId = wh.BranchId;
-            }
-            else
-            {
-                var rootBranch = await _context.Branches.FirstOrDefaultAsync(b => b.Code == "root" || b.IsDefault, cancellationToken);
-                branchId = rootBranch?.Id ?? 1;
-            }
-        }
-
-        var receipt = new StockReceipt
-        {
-            Code = code,
-            ReceiptDate = DateTime.UtcNow,
-            BranchId = branchId.Value,
-            WarehouseId = request.WarehouseId,
-            SupplierId = request.SupplierId,
-            Status = VoucherStatus.Posted,
-            Notes = request.Notes
-        };
-
-        decimal totalAmount = 0;
-
-        foreach (var itemReq in request.Items)
-        {
-            var amount = itemReq.Quantity * itemReq.UnitPrice;
-            totalAmount += amount;
-
-            receipt.Items.Add(new StockReceiptItem
-            {
-                ItemId = itemReq.ItemId,
-                Quantity = itemReq.Quantity,
-                UnitPrice = itemReq.UnitPrice,
-                Amount = amount
-            });
-
-            // Update or create StockBalance
-            var balance = await _context.StockBalances
-                .FirstOrDefaultAsync(b => b.WarehouseId == request.WarehouseId && b.ItemId == itemReq.ItemId, cancellationToken);
-
-            if (balance != null)
-            {
-                var newQty = balance.QuantityOnHand + itemReq.Quantity;
-                if (newQty > 0)
-                {
-                    // Weighted average cost
-                    balance.AverageCostPrice = ((balance.QuantityOnHand * balance.AverageCostPrice) + amount) / newQty;
-                }
-                balance.QuantityOnHand = newQty;
-            }
-            else
-            {
-                balance = new StockBalance
-                {
-                    WarehouseId = request.WarehouseId,
-                    ItemId = itemReq.ItemId,
-                    QuantityOnHand = itemReq.Quantity,
-                    AverageCostPrice = itemReq.UnitPrice
-                };
-                await _context.StockBalances.AddAsync(balance, cancellationToken);
-            }
-        }
-
-        receipt.TotalAmount = totalAmount;
-        await _context.StockReceipts.AddAsync(receipt, cancellationToken);
-        await _context.SaveChangesAsync(cancellationToken);
-
-        return true;
-    }
+    public Task<bool> CreateStockReceiptAsync(CreateStockReceiptRequest request, CancellationToken cancellationToken = default)
+        => _receipts.CreateAsync(request, cancellationToken);
 }

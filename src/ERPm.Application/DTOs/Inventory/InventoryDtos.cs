@@ -23,12 +23,14 @@ public class StockBalanceDto
     public string? UomName { get; set; }
     public decimal QuantityOnHand { get; set; }
     public decimal AverageCostPrice { get; set; }
-    public decimal TotalValue => QuantityOnHand * AverageCostPrice;
+    public decimal TotalValue { get; set; }
     public bool IsLowStock { get; set; }
 }
 
 public class CreateStockReceiptRequest
 {
+    public Guid RequestId { get; set; }
+    public bool IsOpeningBalance { get; set; }
     public int? BranchId { get; set; }
     public int WarehouseId { get; set; }
     public int? SupplierId { get; set; }

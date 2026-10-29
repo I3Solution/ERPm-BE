@@ -33,10 +33,18 @@ public static class DependencyInjection
         });
 
         services.AddScoped<IApplicationDbContext>(provider => provider.GetRequiredService<ApplicationDbContext>());
+        services.AddScoped<PostingTransaction>();
+        services.AddScoped<StockReceiptPostingService>();
 
         // Register Generic Base CRUD Service for open generic types (Type-safe & Zero boilerplate for Solo Dev)
         services.AddScoped(typeof(IBaseCrudService<,,,,>), typeof(BaseCrudService<,,,,>));
         services.AddScoped(typeof(IBaseCrudService<,,,>), typeof(BaseCrudService<,,,>));
+        services.AddScoped<SalesOrderService>();
+        services.AddScoped<PurchaseOrderService>();
+        services.AddScoped<IBaseCrudService<ERPm.Domain.Entities.Sales.SalesOrder, ERPm.Application.DTOs.Sales.SalesOrderDto, ERPm.Application.DTOs.Sales.CreateSalesOrderRequest, ERPm.Application.DTOs.Sales.UpdateSalesOrderRequest>>(p => p.GetRequiredService<SalesOrderService>());
+        services.AddScoped<IBaseCrudService<ERPm.Domain.Entities.Purchase.PurchaseOrder, ERPm.Application.DTOs.Purchase.PurchaseOrderDto, ERPm.Application.DTOs.Purchase.CreatePurchaseOrderRequest, ERPm.Application.DTOs.Purchase.UpdatePurchaseOrderRequest>>(p => p.GetRequiredService<PurchaseOrderService>());
+        services.AddScoped<IOrderWorkflow<ERPm.Application.DTOs.Sales.SalesOrderDto>>(p => p.GetRequiredService<SalesOrderService>());
+        services.AddScoped<IOrderWorkflow<ERPm.Application.DTOs.Purchase.PurchaseOrderDto>>(p => p.GetRequiredService<PurchaseOrderService>());
 
         // Register All Domain & Feature Services
         services.AddScoped<IBranchService, BranchService>();

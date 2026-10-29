@@ -37,7 +37,7 @@ public abstract class BaseCrudController<TEntity, TDto, TCreateDto, TUpdateDto, 
         var result = await Service.GetByIdAsync(id, cancellationToken);
         if (result == null)
         {
-            return NotFound(ApiResponse<TDto>.Fail($"Bản ghi với ID '{id}' không tồn tại."));
+            return NotFound(ApiResponse<TDto>.Fail("error.validation.reference"));
         }
 
         return Ok(ApiResponse<TDto>.Ok(result));
@@ -46,41 +46,44 @@ public abstract class BaseCrudController<TEntity, TDto, TCreateDto, TUpdateDto, 
     /// <summary>
     /// Creates a new record.
     /// </summary>
+    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Admin")]
     [HttpPost]
     public virtual async Task<ActionResult<ApiResponse<TDto>>> Create([FromBody] TCreateDto dto, CancellationToken cancellationToken)
     {
         var result = await Service.CreateAsync(dto, cancellationToken);
-        return Ok(ApiResponse<TDto>.Ok(result, "Tạo mới bản ghi thành công."));
+        return Ok(ApiResponse<TDto>.Ok(result, "common.saved"));
     }
 
     /// <summary>
     /// Updates an existing record by its internal integer ID.
     /// </summary>
+    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Admin")]
     [HttpPut("{id}")]
     public virtual async Task<ActionResult<ApiResponse<TDto>>> Update(TKey id, [FromBody] TUpdateDto dto, CancellationToken cancellationToken)
     {
         var result = await Service.UpdateAsync(id, dto, cancellationToken);
         if (result == null)
         {
-            return NotFound(ApiResponse<TDto>.Fail($"Bản ghi với ID '{id}' không tồn tại."));
+            return NotFound(ApiResponse<TDto>.Fail("error.validation.reference"));
         }
 
-        return Ok(ApiResponse<TDto>.Ok(result, "Cập nhật bản ghi thành công."));
+        return Ok(ApiResponse<TDto>.Ok(result, "common.saved"));
     }
 
     /// <summary>
     /// Deletes a record by its internal integer ID (automatically soft-deletes if supported).
     /// </summary>
+    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Admin")]
     [HttpDelete("{id}")]
     public virtual async Task<ActionResult<ApiResponse<bool>>> Delete(TKey id, CancellationToken cancellationToken)
     {
         var success = await Service.DeleteAsync(id, cancellationToken);
         if (!success)
         {
-            return NotFound(ApiResponse<bool>.Fail($"Bản ghi với ID '{id}' không tồn tại hoặc đã bị xóa."));
+            return NotFound(ApiResponse<bool>.Fail("error.validation.reference"));
         }
 
-        return Ok(ApiResponse<bool>.Ok(true, "Xóa bản ghi thành công."));
+        return Ok(ApiResponse<bool>.Ok(true, "common.saved"));
     }
 }
 

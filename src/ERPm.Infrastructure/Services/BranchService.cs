@@ -132,6 +132,8 @@ public class BranchService : IBranchService
 
     public async Task<BranchDto> CreateBranchAsync(CreateBranchRequest request, CancellationToken cancellationToken = default)
     {
+        ERPm.Infrastructure.Services.Common.PostingTransaction.Require(!string.IsNullOrWhiteSpace(request.Code) && request.Code.Length <= 50 && !string.IsNullOrWhiteSpace(request.Name) && request.Name.Length <= 255, "error.validation.request");
+        ERPm.Infrastructure.Services.Common.PostingTransaction.Require(request.ParentId == null || await _context.Branches.AnyAsync(b => b.Id == request.ParentId && b.IsActive, cancellationToken), "error.validation.reference");
         var branch = new Branch
         {
             Code = request.Code.Trim(),

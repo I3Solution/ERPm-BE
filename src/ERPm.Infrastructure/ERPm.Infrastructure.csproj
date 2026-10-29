@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.14" />
     <ProjectReference Include="..\ERPm.Application\ERPm.Application.csproj" />
     <ProjectReference Include="..\ERPm.Domain\ERPm.Domain.csproj" />
   </ItemGroup>
@@ -20,5 +21,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+  <ItemGroup><EmbeddedResource Include="Persistence/Migrations/Sql/*.sql" /><EmbeddedResource Include="Persistence/Seeders/system_dictionary.json" /></ItemGroup>
 
 </Project>

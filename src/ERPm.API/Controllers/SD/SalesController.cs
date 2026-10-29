@@ -7,6 +7,12 @@ namespace ERPm.API.Controllers;
 
 public class SalesController : BaseApiController
 {
+    public sealed record CancelRequest(string Reason);
+
+    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Admin")]
+    [HttpPost("invoices/{id:int}/cancel")]
+    public async Task<IActionResult> Cancel(int id, CancelRequest request, CancellationToken cancellationToken)
+        => Ok(ApiResponse<SalesInvoiceDto>.Ok(await _salesService.CancelInvoiceAsync(id, request.Reason, cancellationToken)));
     private readonly ISalesInvoiceService _salesService;
 
     public SalesController(ISalesInvoiceService salesService)
@@ -26,10 +32,10 @@ public class SalesController : BaseApiController
     {
         if (request.Items.Count == 0)
         {
-            return BadRequest(ApiResponse<SalesInvoiceDto>.Fail("Invoice must contain at least one item."));
+            return BadRequest(ApiResponse<SalesInvoiceDto>.Fail("error.validation.reference"));
         }
 
         var result = await _salesService.CreateInvoiceAsync(request, cancellationToken);
-        return Ok(ApiResponse<SalesInvoiceDto>.Ok(result, "Invoice created, stock deducted, and double-entry ledger posted successfully."));
+        return Ok(ApiResponse<SalesInvoiceDto>.Ok(result, "common.saved"));
     }
 }

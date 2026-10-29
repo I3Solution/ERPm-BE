@@ -4,6 +4,7 @@ namespace ERPm.Application.DTOs.Sales;
 
 public class CreateSalesInvoiceRequest
 {
+    public Guid RequestId { get; set; }
     public int? BranchId { get; set; }                     // Originating branch ID
     public int? CustomerId { get; set; }
     public string CustomerName { get; set; } = "Khách lẻ";
@@ -37,6 +38,9 @@ public class SalesInvoiceDto
     public decimal DiscountAmount { get; set; }
     public decimal TotalAmount { get; set; }
     public decimal PaidAmount { get; set; }
+    public decimal TenderedAmount { get; set; }
+    public decimal ChangeAmount { get; set; }
+    public string Status { get; set; } = string.Empty;
     public decimal RemainingDebt { get; set; }
     public List<SalesInvoiceItemDto> Items { get; set; } = new();
 }

@@ -16,6 +16,13 @@ public enum PaymentMethod
 
 public class SalesInvoice : BaseAuditableEntity
 {
+    public Guid? RequestId { get; set; }
+    public string? RequestHash { get; set; }
+    public decimal TenderedAmount { get; set; }
+    public decimal ChangeAmount { get; set; }
+    public DateTime? CancelledAtUtc { get; set; }
+    public string? CancelledBy { get; set; }
+    public string? CancellationReason { get; set; }
     public string InvoiceNumber { get; set; } = string.Empty; // e.g. HD0001
     public DateTime InvoiceDate { get; set; } = DateTime.UtcNow;
 
@@ -51,6 +58,10 @@ public class SalesInvoice : BaseAuditableEntity
 
 public class SalesInvoiceItem : BaseEntity
 {
+    public decimal CostAmount { get; set; }
+    public string ItemCode { get; set; } = string.Empty;
+    public string ItemName { get; set; } = string.Empty;
+    public string? UnitName { get; set; }
     public int SalesInvoiceId { get; set; }
     public int ItemId { get; set; }
 

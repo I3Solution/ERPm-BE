@@ -14,10 +14,10 @@ namespace ERPm.API.Controllers.PURCHASE;
 [Route("api/v1/purchase/orders")]
 public class PurchaseOrdersController : BaseCrudController<PurchaseOrder, PurchaseOrderDto, CreatePurchaseOrderRequest, UpdatePurchaseOrderRequest>
 {
-    public PurchaseOrdersController(IBaseCrudService<PurchaseOrder, PurchaseOrderDto, CreatePurchaseOrderRequest, UpdatePurchaseOrderRequest> service)
+    private readonly IOrderWorkflow<PurchaseOrderDto> _workflow;
+    public PurchaseOrdersController(IBaseCrudService<PurchaseOrder, PurchaseOrderDto, CreatePurchaseOrderRequest, UpdatePurchaseOrderRequest> service, IOrderWorkflow<PurchaseOrderDto> workflow)
         : base(service)
-    {
-    }
+    { _workflow = workflow; }
 
     /// <summary>
     /// Custom domain action: Confirms a purchase order by its internal integer ID.
@@ -25,24 +25,6 @@ public class PurchaseOrdersController : BaseCrudController<PurchaseOrder, Purcha
     [HttpPost("{id:int}/confirm")]
     public async Task<ActionResult<ApiResponse<PurchaseOrderDto>>> ConfirmOrder(int id, CancellationToken cancellationToken)
     {
-        var existing = await Service.GetByIdAsync(id, cancellationToken);
-        if (existing == null)
-        {
-            return NotFound(ApiResponse<PurchaseOrderDto>.Fail($"Đơn mua với ID '{id}' không tồn tại."));
-        }
-
-        var updateReq = new UpdatePurchaseOrderRequest
-        {
-            BranchId = existing.BranchId,
-            SupplierId = existing.SupplierId,
-            SupplierName = existing.SupplierName,
-            TaxAmount = existing.TaxAmount,
-            PaidAmount = existing.PaidAmount,
-            Notes = existing.Notes,
-            Status = "Confirmed"
-        };
-
-        var updated = await Service.UpdateAsync(id, updateReq, cancellationToken);
-        return Ok(ApiResponse<PurchaseOrderDto>.Ok(updated!, "Xác nhận đơn mua hàng thành công."));
+        return Ok(ApiResponse<PurchaseOrderDto>.Ok(await _workflow.ConfirmAsync(id, cancellationToken)));
     }
 }

@@ -11,6 +11,7 @@ public class StockBalance : BaseAuditableEntity
     // On-hand quantity and weighted average cost (Required decimal(18, 4))
     public decimal QuantityOnHand { get; set; } = 0m;
     public decimal AverageCostPrice { get; set; } = 0m;
+    public decimal InventoryValue { get; set; } = 0m;
 
     // Navigation
     public virtual Warehouse? Warehouse { get; set; }

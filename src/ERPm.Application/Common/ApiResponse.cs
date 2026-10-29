@@ -4,6 +4,7 @@ public class ApiResponse<T>
 {
     public bool Success { get; set; }
     public string? Message { get; set; }
+    public string? ErrorCode { get; set; }
     public T? Data { get; set; }
     public List<string>? Errors { get; set; }
 
@@ -17,6 +18,7 @@ public class ApiResponse<T>
     public static ApiResponse<T> Fail(string error, List<string>? errors = null) => new()
     {
         Success = false,
+        ErrorCode = error.StartsWith("error.", StringComparison.Ordinal) ? error : null,
         Message = error,
         Errors = errors ?? [error]
     };

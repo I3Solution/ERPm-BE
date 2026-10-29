@@ -1,3 +1,26 @@
+# ERPm-BE — Step 19, 2026-10-29
+
+## Completed
+
+- [x] Migration bảo toàn UUID cũ, snapshot hiện hành, seed tối thiểu, schema tham chiếu không DROP.
+- [x] Account/auth, scope chi nhánh, audit và lỗi có mã i18n; secrets ở ignored local config/environment; startup fail rõ khi DB thiếu migration.
+- [x] Posting kho/bán hàng nguyên tử, concurrency/idempotency, giá vốn theo InventoryValue, thanh toán/công nợ, reversal và bất biến Posted.
+- [x] Đơn bán/mua có validation, tính tổng server-side, Draft/Confirmed và khóa chống sửa đồng thời.
+- [x] Build solution 0 warning/0 error; 44 kiểm tra PostgreSQL/API đạt. Thêm CI, chưa chạy từ remote.
+
+## In-Progress
+
+Nghiệm thu thủ công MVP và đánh giá vận hành. NuGet advisory feed chưa truy cập được trong phiên; restore offline tạm thời không bật audit, cấu hình CI vẫn giữ restore chuẩn.
+
+## Next Steps
+
+PUR/PO–nhận hàng–hóa đơn mua, phiếu thu chi/đối chiếu nợ; adoption DB thủ công nếu cần; sổ cái/báo cáo và kiểm thử E2E. Xem [Step 19](steps/step-19-stabilization-and-internal-accounts.md), README và tài liệu root.
+
+
+---
+
+## Tài liệu trước Step 19 — lưu để truy vết
+
 # 📊 BẢNG TRẠNG THÁI BACKEND (ERPM-BE STATUS)
 
 > **Cập nhật:** 2026-10-28  

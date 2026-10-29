@@ -1,7 +1,23 @@
+# Mốc hiện hành — Step 19, 2026-10-29
+
+| Giai đoạn | Trạng thái có bằng chứng |
+| --- | --- |
+| 1: MVP bán hàng, kho, đối tác, dashboard | Đã ổn định source, 44 kiểm tra PostgreSQL/API và build đạt; chờ nghiệm thu thủ công |
+| 2: Mua hàng và sổ quỹ | Có API đơn Draft/Confirmed và nhập mua hạch toán 156/331; chưa có luồng PO–nhận hàng–hóa đơn/thu chi đầy đủ |
+| 3: Kế toán tài chính | Có ledger nền tảng; chưa có bộ sổ/báo cáo đầy đủ |
+| 4: Native/offline, phân hệ mở rộng | Chưa triển khai |
+
+Ưu tiên tiếp theo: nghiệm thu MVP/E2E/CI → PUR và thu chi → sổ cái → native/offline. Checklist thiết kế cũ bên dưới thể hiện kế hoạch/lịch sử, không thay thế kết quả nghiệm thu hiện hành.
+
+
+---
+
+## Tài liệu trước Step 19 — lưu để truy vết
+
 # 🗺️ LỘ TRÌNH PHÁT TRIỂN BACKEND (ERPM-BE ROADMAP)
 
 > **Repository:** https://github.com/I3Solution/ERPm-BE.git  
-> **Kiến trúc:** .NET 8 Clean Architecture, PostgreSQL, Dapper, EF Core
+> **Kiến trúc:** .NET 10 Clean Architecture, PostgreSQL, Dapper, EF Core
 
 ---
 

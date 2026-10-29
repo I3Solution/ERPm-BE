@@ -3,16 +3,21 @@ using ERPm.Application.DTOs.Partner;
 using ERPm.Application.Features.Partner;
 using ERPm.Domain.Entities.Partner;
 using Microsoft.EntityFrameworkCore;
+using ERPm.Domain.Common;
+using ERPm.Domain.Entities.Accounting;
+using static ERPm.Infrastructure.Services.Common.PostingTransaction;
 
 namespace ERPm.Infrastructure.Services;
 
 public class PartnerService : IPartnerService
 {
     private readonly IApplicationDbContext _context;
+    private readonly ICurrentUser? _user;
 
-    public PartnerService(IApplicationDbContext context)
+    public PartnerService(IApplicationDbContext context, ICurrentUser? user = null)
     {
         _context = context;
+        _user = user;
     }
 
     public async Task<List<PartnerDto>> GetPartnersAsync(CancellationToken cancellationToken = default)
@@ -30,7 +35,9 @@ public class PartnerService : IPartnerService
                 Address = p.Address,
                 TaxCode = p.TaxCode,
                 CreditLimit = p.CreditLimit,
-                DebtBalance = p.DebtBalance,
+                DebtBalance = _user == null || _user.IsAdmin || _user.IsSystem ? p.DebtBalance :
+                    _context.SalesInvoices.Where(i => i.CustomerId == p.Id && i.Status == VoucherStatus.Posted).Sum(i => i.RemainingDebt) -
+                    _context.StockReceipts.Where(r => r.SupplierId == p.Id && r.Status == VoucherStatus.Posted).Sum(r => r.TotalAmount),
                 IsActive = p.IsActive
             })
             .ToListAsync(cancellationToken);
@@ -38,9 +45,11 @@ public class PartnerService : IPartnerService
 
     public async Task<PartnerDto> CreatePartnerAsync(CreatePartnerRequest request, CancellationToken cancellationToken = default)
     {
+        Require(!string.IsNullOrWhiteSpace(request.Name) && request.Name.Length <= 255 && request.Code.Length <= 50 && Enum.IsDefined(request.PartnerType), "error.validation.request");
+        ValidateNumber(request.CreditLimit);
         var partner = new Partner
         {
-            Code = request.Code,
+            Code = string.IsNullOrWhiteSpace(request.Code) ? $"PT{Uuid7Generator.NewUuid7():N}" : request.Code.Trim().ToUpperInvariant(),
             Name = request.Name,
             PartnerType = request.PartnerType,
             Phone = request.Phone,

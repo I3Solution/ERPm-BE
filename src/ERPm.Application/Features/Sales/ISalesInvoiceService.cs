@@ -6,4 +6,5 @@ public interface ISalesInvoiceService
 {
     Task<SalesInvoiceDto> CreateInvoiceAsync(CreateSalesInvoiceRequest request, CancellationToken cancellationToken = default);
     Task<List<SalesInvoiceDto>> GetInvoicesAsync(int? branchId = null, CancellationToken cancellationToken = default);
+    Task<SalesInvoiceDto> CancelInvoiceAsync(int id, string reason, CancellationToken cancellationToken = default);
 }

@@ -24,12 +24,12 @@ public class PartnersController : BaseApiController
     [HttpPost]
     public async Task<ActionResult<ApiResponse<PartnerDto>>> CreatePartner([FromBody] CreatePartnerRequest request, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.Code) || string.IsNullOrWhiteSpace(request.Name))
+        if (string.IsNullOrWhiteSpace(request.Name))
         {
-            return BadRequest(ApiResponse<PartnerDto>.Fail("Partner code and name are required."));
+            return BadRequest(ApiResponse<PartnerDto>.Fail("error.validation.reference"));
         }
 
         var result = await _partnerService.CreatePartnerAsync(request, cancellationToken);
-        return Ok(ApiResponse<PartnerDto>.Ok(result, "Partner created successfully."));
+        return Ok(ApiResponse<PartnerDto>.Ok(result, "common.saved"));
     }
 }

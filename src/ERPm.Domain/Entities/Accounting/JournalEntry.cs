@@ -5,6 +5,7 @@ namespace ERPm.Domain.Entities.Accounting;
 
 public class JournalEntry : BaseAuditableEntity
 {
+    public int? ReversesJournalEntryId { get; set; }
     public string VoucherNumber { get; set; } = string.Empty; // Voucher number (e.g. PKT00001, HD00001)
     public string VoucherType { get; set; } = string.Empty;   // SALES_INVOICE, STOCK_ISSUE, PAYMENT, RECEIPT
     public DateTime DocDate { get; set; } = DateTime.UtcNow;  // Document date

@@ -27,7 +27,7 @@ public class BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
 
     public virtual async Task<PagedResult<TDto>> GetPagedAsync(BaseFilterQuery query, CancellationToken cancellationToken = default)
     {
-        var queryable = DbSet.AsNoTracking();
+        var queryable = PrepareQuery(DbSet.AsNoTracking());
 
         // 1. Automatically filter soft-deleted entities if TEntity implements ISoftDelete
         if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
@@ -44,8 +44,8 @@ public class BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
         queryable = ApplySorting(queryable, query);
 
         // 4. Apply pagination
-        var pageIndex = Math.Max(1, query.PageIndex);
-        var pageSize = Math.Max(1, query.PageSize);
+        var pageIndex = Math.Clamp(query.PageIndex, 1, 1000000);
+        var pageSize = Math.Clamp(query.PageSize, 1, 200);
 
         var items = await queryable
             .Skip((pageIndex - 1) * pageSize)
@@ -142,6 +142,7 @@ public class BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
     }
 
     #region Virtual Hooks & Mapping Methods
+    protected virtual IQueryable<TEntity> PrepareQuery(IQueryable<TEntity> query) => query;
 
     /// <summary>
     /// Finds an entity by primary key and ignores it if soft-deleted.
@@ -161,6 +162,22 @@ public class BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
     /// </summary>
     protected virtual IQueryable<TEntity> ApplyFilters(IQueryable<TEntity> query, BaseFilterQuery filter)
     {
+        if (!string.IsNullOrWhiteSpace(filter.Keyword))
+        {
+            var parameter = Expression.Parameter(typeof(TEntity), "e");
+            var keyword = Expression.Constant(filter.Keyword.Trim().ToLowerInvariant());
+            Expression? predicate = null;
+            foreach (var name in new[] { "Code", "Name", "OrderNumber", "CustomerName", "SupplierName" })
+            {
+                var property = typeof(TEntity).GetProperty(name);
+                if (property?.PropertyType != typeof(string)) continue;
+                var value = Expression.Property(parameter, property);
+                var contains = Expression.AndAlso(Expression.NotEqual(value, Expression.Constant(null, typeof(string))),
+                    Expression.Call(Expression.Call(value, nameof(string.ToLower), Type.EmptyTypes), nameof(string.Contains), Type.EmptyTypes, keyword));
+                predicate = predicate == null ? contains : Expression.OrElse(predicate, contains);
+            }
+            if (predicate != null) query = query.Where(Expression.Lambda<Func<TEntity, bool>>(predicate, parameter));
+        }
         if (filter.IsActive.HasValue)
         {
             var prop = typeof(TEntity).GetProperty("IsActive");
@@ -183,6 +200,16 @@ public class BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
     /// </summary>
     protected virtual IQueryable<TEntity> ApplySorting(IQueryable<TEntity> query, BaseFilterQuery filter)
     {
+        if (!string.IsNullOrWhiteSpace(filter.SortBy))
+        {
+            var property = typeof(TEntity).GetProperty(filter.SortBy);
+            if (property == null || !(property.PropertyType.IsValueType || property.PropertyType == typeof(string)))
+                throw new ERPm.Application.Common.BusinessException("error.validation.request");
+            var argument = Expression.Parameter(typeof(TEntity), "e");
+            var selector = Expression.Lambda(Expression.Property(argument, property), argument);
+            var call = Expression.Call(typeof(Queryable), filter.IsAscending ? "OrderBy" : "OrderByDescending", [typeof(TEntity), property.PropertyType], query.Expression, Expression.Quote(selector));
+            return query.Provider.CreateQuery<TEntity>(call);
+        }
         // Default to sorting by CreatedAtUtc descending if present
         var createdAtProp = typeof(TEntity).GetProperty("CreatedAtUtc");
         if (createdAtProp != null && string.IsNullOrWhiteSpace(filter.SortBy))

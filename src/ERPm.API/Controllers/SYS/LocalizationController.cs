@@ -17,6 +17,7 @@ public class LocalizationController : BaseApiController
     /// <summary>
     /// Gets all active system languages (e.g. vi, en).
     /// </summary>
+    [Microsoft.AspNetCore.Authorization.AllowAnonymous]
     [HttpGet("languages")]
     public async Task<ActionResult<ApiResponse<List<LanguageDto>>>> GetLanguages(CancellationToken cancellationToken)
     {
@@ -27,6 +28,7 @@ public class LocalizationController : BaseApiController
     /// <summary>
     /// Loads the full static dictionary bundle for client caching.
     /// </summary>
+    [Microsoft.AspNetCore.Authorization.AllowAnonymous]
     [HttpGet("{langCode}")]
     public async Task<ActionResult<ApiResponse<DictionaryBundleDto>>> GetDictionaryBundle(string langCode, CancellationToken cancellationToken)
     {
@@ -37,10 +39,11 @@ public class LocalizationController : BaseApiController
     /// <summary>
     /// Inserts or updates a dictionary key-value pair.
     /// </summary>
+    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Admin")]
     [HttpPost]
     public async Task<ActionResult<ApiResponse<bool>>> UpsertDictionaryEntry([FromBody] UpsertDictionaryRequest request, CancellationToken cancellationToken)
     {
         var success = await _localizationService.UpsertDictionaryEntryAsync(request, cancellationToken);
-        return Ok(ApiResponse<bool>.Ok(success, "Dictionary entry updated successfully."));
+        return Ok(ApiResponse<bool>.Ok(success, "common.saved"));
     }
 }

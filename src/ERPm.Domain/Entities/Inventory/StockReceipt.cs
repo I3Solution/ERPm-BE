@@ -8,6 +8,10 @@ namespace ERPm.Domain.Entities.Inventory;
 
 public class StockReceipt : BaseAuditableEntity
 {
+    public Guid? RequestId { get; set; }
+    public string? RequestHash { get; set; }
+    public int? JournalEntryId { get; set; }
+    public virtual JournalEntry? JournalEntry { get; set; }
     public string Code { get; set; } = string.Empty;       // e.g. PNK0001
     public DateTime ReceiptDate { get; set; } = DateTime.UtcNow;
     public int BranchId { get; set; }                      // Receiving branch ID
