@@ -43,3 +43,24 @@ Chào bạn AI Assistant, bạn đang làm việc trên repository **ERPm-BE** -
      - `[refactor]`: Tái cấu trúc mã nguồn không làm thay đổi nghiệp vụ.
      - `[db]`: Thay đổi riêng về SQL Schema, EF Migration, Index, Seed data.
      - `[docs]`: Cập nhật tài liệu (`PROJECT_MASTER.md`, `AGENTS.md`, `.ai/`).
+
+6. **Quy tắc ghi chép theo loại Task** (đồng bộ với mục 6 `AGENTS.md` của repo gốc `ERPm`):
+   - Mỗi việc thuộc đúng một loại dưới đây và được ghi ở đúng nơi tương ứng. Viết bằng Tiếng Việt.
+
+     | Loại | Khi nào | Ghi ở đâu | Tag commit |
+     | :--- | :--- | :--- | :--- |
+     | **Step** (tính năng lớn theo roadmap) | Nhiều tầng/nhiều ngày, có đặc tả | Đặc tả ở repo gốc: `ERPm/.ai/plans/plan-step-XX-[ten].md` (tick `- [x]` từng Task khi xong). Log: `.ai/steps/step-XX-[ten].md` | `[add]` / `[update]` |
+     | **change** (thay đổi yêu cầu) | Đổi nghiệp vụ/đặc tả đã chốt | Thuộc step đang làm: thêm mục "Thay đổi yêu cầu" (ngày, người yêu cầu, lý do, phạm vi) vào plan của step đó. Không thuộc step nào: `.ai/tasks/change-*.md` | `[update]` |
+     | **bug** (sửa lỗi) | Lỗi logic, build, SQL | `.ai/tasks/bug-*.md`: hiện tượng, cách tái hiện, nguyên nhân gốc, cách sửa, test chống tái phát | `[fix]` |
+     | **refactor** | Tái cấu trúc, không đổi nghiệp vụ | `.ai/tasks/refactor-*.md`: lý do, phạm vi, bằng chứng không đổi hành vi (test trước/sau) | `[refactor]` |
+     | **db** (schema, migration, seed riêng lẻ) | Không nằm trong một step | `.ai/tasks/db-*.md`: migration, ảnh hưởng dữ liệu cũ, cách rollback | `[db]` |
+     | **spike** (khảo sát, so sánh phương án) | Cần tìm hiểu trước khi quyết | `.ai/tasks/spike-*.md`: câu hỏi, phương án, kết luận/đề xuất | `[docs]` |
+     | **review** (rà soát mã/tài liệu) | Đánh giá chất lượng, đối chiếu | Repo gốc: `ERPm/.ai/reviews/YYYY-MM-DD-[ten].md` | `[docs]` |
+
+   - **Tên file task:** `.ai/tasks/[loai]-YYYYMMDD-[ten-ngan].md`, theo mẫu [`.ai/tasks/_TEMPLATE.md`](.ai/tasks/_TEMPLATE.md). Trường `Trạng thái` chỉ dùng: `Todo` / `Doing` / `Blocked` / `Done`.
+   - **Task làm dở hoặc bị chặn:**
+     - Thuộc một step: ghi vào mục **"Việc còn lại"** ở cuối file plan của step đó (task, trạng thái, ghi chú, đang chờ ai/việc gì).
+     - Task riêng lẻ: để `Trạng thái: Blocked` hoặc `Doing` trong file task, ghi rõ việc còn lại.
+     - `.ai/status.md` chỉ ghi một dòng ở **In-Progress** / **Next Steps** và trỏ link tới plan hoặc file task, không chép lại chi tiết.
+   - **Khi xong:** chuyển trạng thái sang `Done`, ghi kết quả kiểm tra và commit liên quan, rồi thêm một dòng vào **Completed** của `.ai/status.md`.
+   - Việc nhỏ (sửa chính tả, đổi một nhãn) không cần file task; commit message đúng tag là đủ.
