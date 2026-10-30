@@ -42,7 +42,7 @@ var user = new TestUser();
 if (setup)
 {
     await using var local = Db(user);
-    await local.Database.MigrateAsync(); await EssentialDataSeeder.SeedAsync(local);
+    await local.Database.MigrateAsync(); await EssentialDataSeeder.SeedAsync(local); await OrganizationSampleSeeder.SeedAsync(local);
     var password = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24));
     var account = new AppUser { UserName = "ADMIN", DisplayName = "Administrator", Role = "Admin" };
     account.PasswordHash = new Microsoft.AspNetCore.Identity.PasswordHasher<AppUser>().HashPassword(account, password);
@@ -176,6 +176,8 @@ try
     await Reject(async () => await catalogue.UpdateItemAsync(roundingItem.Id, new ERPm.Application.DTOs.Catalog.UpdateItemRequest { Code = "ROUNDING", Name = "Rounding", BaseUomId = uom.Id, ItemType = ItemType.Service, SalePrice = 100, IsActive = true }), "error.item.in_use");
     var deniedBranch = new Branch { Code = "DENIED", Name = "Denied" };
     db.Branches.AddRange(allowedBranch, deniedBranch); await db.SaveChangesAsync();
+    IamChecks.Pure(Check);
+    await IamChecks.DatabaseAsync(new(u => Db(u), Check, Reject));
     using var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
     var port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop();
     var password = "Verify-" + Guid.NewGuid().ToString("N");
@@ -234,6 +236,33 @@ try
         Check(disabled.IsSuccessStatusCode, "admin can revoke an account");
         http.DefaultRequestHeaders.Authorization = new("Bearer", viewerToken);
         Check((await http.GetAsync("/api/v1/auth/me")).StatusCode == HttpStatusCode.Unauthorized, "revoked accounts cannot reuse an existing token");
+
+        // Step-20: permissions inherited from a job position, enforced over HTTP.
+        http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
+        Check((await http.GetAsync("/api/v1/sys/permissions/catalog")).IsSuccessStatusCode && (await http.GetAsync("/api/v1/sys/roles")).IsSuccessStatusCode,
+            "super administrator reads the permission catalog and roles");
+        using var iamCreated = await http.PostAsJsonAsync("/api/v1/auth/users", new { userName = "iam_http", displayName = "IAM HTTP", password, role = "None", branchIds = Array.Empty<int>() });
+        Check(iamCreated.IsSuccessStatusCode, "an account without a legacy role can be provisioned");
+        using var iamPayload = JsonDocument.Parse(await iamCreated.Content.ReadAsStringAsync());
+        var iamUserId = iamPayload.RootElement.GetProperty("data").GetProperty("id").GetInt32();
+        var company = await db.Branches.IgnoreQueryFilters().SingleAsync(b => b.Code == "COMPANY_A");
+        var hanoi = await db.Branches.IgnoreQueryFilters().SingleAsync(b => b.Code == "CA_HN");
+        var position = await db.JobPositions.SingleAsync(p => p.CompanyId == company.Id && p.Code == "SALES_ACC");
+        using var hired = await http.PostAsJsonAsync("/api/v1/hrm/employees", new { code = "E-HTTP-01", fullName = "IAM HTTP", companyId = company.Id, branchId = hanoi.Id, jobPositionId = position.Id, userId = iamUserId });
+        Check(hired.IsSuccessStatusCode, "admin hires an employee linked to the account");
+        http.DefaultRequestHeaders.Authorization = new("Bearer", await Login("iam_http"));
+        using var me = JsonDocument.Parse(await http.GetStringAsync("/api/v1/auth/me"));
+        var permissions = me.RootElement.GetProperty("data").GetProperty("permissions").EnumerateArray().Select(p => p.GetString()).ToHashSet();
+        Check(permissions.Contains("sd:order:view") && !permissions.Contains("sd:invoice:cancel") && me.RootElement.GetProperty("data").GetProperty("jobPositionId").GetInt32() == position.Id,
+            "/auth/me returns the permissions inherited from the job position");
+        using var scopedOrders = JsonDocument.Parse(await http.GetStringAsync("/api/v1/sales/orders"));
+        var orderNumbers = scopedOrders.RootElement.GetProperty("data").GetProperty("items").EnumerateArray().Select(o => o.GetProperty("orderNumber").GetString()).ToArray();
+        Check(orderNumbers.SequenceEqual(["IAM-HN"]), "HTTP sales orders are limited to the position's BRANCH_TREE");
+        using var cancelDenied = await http.PostAsJsonAsync("/api/v1/sales/invoices/1/cancel", new { reason = "IAM" });
+        Check(cancelDenied.StatusCode == HttpStatusCode.Forbidden, "explicit Deny blocks invoice cancellation over HTTP");
+        Check((await http.GetAsync("/api/v1/sys/permissions/catalog")).StatusCode == HttpStatusCode.Forbidden
+            && (await http.PostAsJsonAsync("/api/v1/wms/categories", new { code = "X", name = "X" })).StatusCode == HttpStatusCode.Forbidden,
+            "endpoints outside the inherited roles are forbidden");
     }
     finally
     {

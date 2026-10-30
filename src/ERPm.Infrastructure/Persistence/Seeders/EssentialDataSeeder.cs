@@ -3,6 +3,7 @@ using ERPm.Domain.Entities.Catalog;
 using ERPm.Domain.Entities.Inventory;
 using ERPm.Domain.Entities.Localization;
 using ERPm.Domain.Entities.System;
+using ERPm.Domain.Services.Iam;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 
@@ -32,10 +33,38 @@ public static class EssentialDataSeeder
                 if (!stored.Contains((language.Key, entry.Key))) context.AppDictionaries.Add(new AppDictionary { LanguageCode = language.Key, Category = "SYSTEM", Key = entry.Key, Value = entry.Value });
         await context.SaveChangesAsync();
         var root = await context.Branches.IgnoreQueryFilters().SingleAsync(b => b.Code == "root");
+        if (root.OrgUnitType != OrgUnitType.Group && root.ParentId == null)
+        {
+            root.OrgUnitType = OrgUnitType.Group;
+            await context.SaveChangesAsync();
+        }
+        await SeedRolesAsync(context);
         if (!await context.Warehouses.IgnoreQueryFilters().AnyAsync())
         {
             context.Warehouses.Add(new Warehouse { BranchId = root.Id, Code = "MAIN", Name = "Main Warehouse", IsDefault = true, Translations = new() { ["en"] = "Main Warehouse", ["vi"] = "Kho tổng" } });
             await context.SaveChangesAsync();
         }
+    }
+
+    /// <summary>
+    /// Legacy system roles are re-synchronised from code on every run; group templates are only created when
+    /// missing so super administrators may adjust them.
+    /// </summary>
+    private static async Task SeedRolesAsync(ApplicationDbContext context)
+    {
+        var roles = await context.IamRoles.IgnoreQueryFilters().Where(r => r.CompanyId == null).ToListAsync();
+        foreach (var (code, name, policy) in SystemRoles.Legacy)
+        {
+            var role = roles.FirstOrDefault(r => r.Code == code);
+            if (role == null) context.IamRoles.Add(role = new IamRole { Code = code });
+            role.Name = name;
+            role.IsSystemRole = true;
+            role.IsActive = true;
+            role.IsDeleted = false;
+            role.PolicyDocument = policy;
+        }
+        foreach (var (code, name, policy) in SystemRoles.Templates)
+            if (roles.All(r => r.Code != code)) context.IamRoles.Add(new IamRole { Code = code, Name = name, PolicyDocument = policy });
+        await context.SaveChangesAsync();
     }
 }

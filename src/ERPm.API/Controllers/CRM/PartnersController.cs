@@ -1,3 +1,4 @@
+using ERPm.API.Security;
 using ERPm.Application.Common;
 using ERPm.Application.DTOs.Partner;
 using ERPm.Application.Features.Partner;
@@ -14,6 +15,7 @@ public class PartnersController : BaseApiController
         _partnerService = partnerService;
     }
 
+    [RequirePermission("crm:partner:view")]
     [HttpGet]
     public async Task<ActionResult<ApiResponse<List<PartnerDto>>>> GetPartners(CancellationToken cancellationToken)
     {
@@ -21,6 +23,7 @@ public class PartnersController : BaseApiController
         return Ok(ApiResponse<List<PartnerDto>>.Ok(result));
     }
 
+    [RequirePermission("crm:partner:create")]
     [HttpPost]
     public async Task<ActionResult<ApiResponse<PartnerDto>>> CreatePartner([FromBody] CreatePartnerRequest request, CancellationToken cancellationToken)
     {

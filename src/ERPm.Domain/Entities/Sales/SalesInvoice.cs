@@ -27,6 +27,7 @@ public class SalesInvoice : BaseAuditableEntity
     public DateTime InvoiceDate { get; set; } = DateTime.UtcNow;
 
     public int BranchId { get; set; }                      // Issuing branch ID
+    public int? DepartmentId { get; set; }                 // Owning department, used by DEPARTMENT data scopes
     public int? CustomerId { get; set; }
     public string CustomerName { get; set; } = "Khách lẻ";
     public int WarehouseId { get; set; }

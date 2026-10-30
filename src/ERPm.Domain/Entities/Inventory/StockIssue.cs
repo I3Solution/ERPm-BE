@@ -11,6 +11,7 @@ public class StockIssue : BaseAuditableEntity
     public string Code { get; set; } = string.Empty;       // e.g. PXK0001
     public DateTime IssueDate { get; set; } = DateTime.UtcNow;
     public int BranchId { get; set; }                      // Issuing branch ID
+    public int? DepartmentId { get; set; }                 // Owning department, used by DEPARTMENT data scopes
     public int WarehouseId { get; set; }
     public int? CustomerId { get; set; }
 

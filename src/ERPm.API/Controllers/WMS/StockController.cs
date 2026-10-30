@@ -1,3 +1,4 @@
+using ERPm.API.Security;
 using ERPm.Application.Common;
 using ERPm.Application.DTOs.Inventory;
 using ERPm.Application.Features.Inventory;
@@ -14,6 +15,7 @@ public class StockController : BaseApiController
         _stockService = stockService;
     }
 
+    [RequirePermission("wms:stock:view")]
     [HttpGet("warehouses")]
     public async Task<ActionResult<ApiResponse<List<WarehouseDto>>>> GetWarehouses([FromQuery] int? branchId, CancellationToken cancellationToken)
     {
@@ -21,6 +23,7 @@ public class StockController : BaseApiController
         return Ok(ApiResponse<List<WarehouseDto>>.Ok(result));
     }
 
+    [RequirePermission("wms:stock:view")]
     [HttpGet("balances")]
     public async Task<ActionResult<ApiResponse<List<StockBalanceDto>>>> GetStockBalances([FromQuery] int? warehouseId, [FromQuery] int? branchId, CancellationToken cancellationToken)
     {
@@ -28,6 +31,7 @@ public class StockController : BaseApiController
         return Ok(ApiResponse<List<StockBalanceDto>>.Ok(result));
     }
 
+    [RequirePermission("wms:receipt:create")]
     [HttpPost("receipts")]
     public async Task<ActionResult<ApiResponse<bool>>> CreateStockReceipt([FromBody] CreateStockReceiptRequest request, CancellationToken cancellationToken)
     {

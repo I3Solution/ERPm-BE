@@ -10,6 +10,10 @@ using ERPm.Application.Features.System;
 using ERPm.Infrastructure.Persistence;
 using ERPm.Infrastructure.Services;
 using ERPm.Infrastructure.Services.Common;
+using ERPm.Infrastructure.Services.HumanResource;
+using ERPm.Infrastructure.Services.Iam;
+using ERPm.Application.DTOs.HumanResource;
+using ERPm.Domain.Entities.HumanResource;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -54,6 +58,15 @@ public static class DependencyInjection
         services.AddScoped<ISalesInvoiceService, SalesInvoiceService>();
         services.AddScoped<IPartnerService, PartnerService>();
         services.AddScoped<IDashboardService, DashboardService>();
+
+        // IAM (dynamic roles, policy evaluation) and HRM organization
+        services.AddMemoryCache();
+        services.AddScoped<IIamService, IamService>();
+        services.AddScoped<IRoleService, RoleService>();
+        services.AddScoped<IBaseCrudService<Department, DepartmentDto, CreateDepartmentRequest, UpdateDepartmentRequest>, DepartmentService>();
+        services.AddScoped<IBaseCrudService<JobPosition, JobPositionDto, CreateJobPositionRequest, UpdateJobPositionRequest>, JobPositionService>();
+        services.AddScoped<IBaseCrudService<Employee, EmployeeDto, CreateEmployeeRequest, UpdateEmployeeRequest>, EmployeeService>();
+        services.AddScoped<IBaseCrudService<WorkHistory, WorkHistoryDto, CreateWorkHistoryRequest, UpdateWorkHistoryRequest>, WorkHistoryService>();
 
         return services;
     }

@@ -1,3 +1,4 @@
+using ERPm.API.Security;
 using ERPm.API.Controllers.Base;
 using ERPm.Application.Common;
 using ERPm.Application.Common.Crud;
@@ -11,6 +12,7 @@ namespace ERPm.API.Controllers.SALES;
 /// Manages customer sales orders (SD Module).
 /// Inherits BaseCrudController for full type-safe CRUD endpoints.
 /// </summary>
+[PermissionResource("sd:order")]
 [Route("api/v1/sales/orders")]
 public class SalesOrdersController : BaseCrudController<SalesOrder, SalesOrderDto, CreateSalesOrderRequest, UpdateSalesOrderRequest>
 {
@@ -22,6 +24,7 @@ public class SalesOrdersController : BaseCrudController<SalesOrder, SalesOrderDt
     /// <summary>
     /// Custom domain action: Confirms a sales order by its internal integer ID.
     /// </summary>
+    [RequirePermission(":confirm")]
     [HttpPost("{id:int}/confirm")]
     public async Task<ActionResult<ApiResponse<SalesOrderDto>>> ConfirmOrder(int id, CancellationToken cancellationToken)
     {

@@ -1,3 +1,4 @@
+using ERPm.API.Security;
 using ERPm.Application.Common;
 using ERPm.Application.DTOs.Catalog;
 using ERPm.Application.Features.Catalog;
@@ -17,6 +18,7 @@ public class ItemsController : BaseApiController
     /// <summary>
     /// Gets a paginated list of items filtered by keyword, category, and item type.
     /// </summary>
+    [RequirePermission("wms:item:view")]
     [HttpGet]
     public async Task<ActionResult<ApiResponse<PagedResult<ItemDto>>>> GetItems([FromQuery] ItemFilterQuery query, CancellationToken cancellationToken)
     {
@@ -27,6 +29,7 @@ public class ItemsController : BaseApiController
     /// <summary>
     /// Gets details of a single item by its internal integer ID (including JSONB Translations and Attributes).
     /// </summary>
+    [RequirePermission("wms:item:view")]
     [HttpGet("{id:int}")]
     public async Task<ActionResult<ApiResponse<ItemDto>>> GetItemById(int id, CancellationToken cancellationToken)
     {
@@ -41,7 +44,7 @@ public class ItemsController : BaseApiController
     /// <summary>
     /// Creates a new item or service.
     /// </summary>
-    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Admin")]
+    [RequirePermission("wms:item:create")]
     [HttpPost]
     public async Task<ActionResult<ApiResponse<ItemDto>>> CreateItem([FromBody] CreateItemRequest request, CancellationToken cancellationToken)
     {
@@ -57,7 +60,7 @@ public class ItemsController : BaseApiController
     /// <summary>
     /// Updates an existing item by its internal integer ID.
     /// </summary>
-    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Admin")]
+    [RequirePermission("wms:item:edit")]
     [HttpPut("{id:int}")]
     public async Task<ActionResult<ApiResponse<ItemDto>>> UpdateItem(int id, [FromBody] UpdateItemRequest request, CancellationToken cancellationToken)
     {
@@ -72,7 +75,7 @@ public class ItemsController : BaseApiController
     /// <summary>
     /// Soft-deletes an item by its internal integer ID.
     /// </summary>
-    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Admin")]
+    [RequirePermission("wms:item:delete")]
     [HttpDelete("{id:int}")]
     public async Task<ActionResult<ApiResponse<bool>>> DeleteItem(int id, CancellationToken cancellationToken)
     {

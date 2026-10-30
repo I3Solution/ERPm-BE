@@ -237,7 +237,12 @@
     "error.sales.cancelled": "Hóa đơn đã bị hủy hoặc không thể hủy.",
     "dashboard.title": "Tổng quan kinh doanh",
     "common.saved": "Đã lưu.",
-    "error.item.in_use": "Mặt hàng đã phát sinh giao dịch; hãy ngừng sử dụng thay vì xóa hoặc đổi loại hàng/đơn vị tính."
+    "error.item.in_use": "Mặt hàng đã phát sinh giao dịch; hãy ngừng sử dụng thay vì xóa hoặc đổi loại hàng/đơn vị tính.",
+    "error.iam.policy_invalid": "Tài liệu phân quyền không hợp lệ (Effect, Action hoặc phạm vi dữ liệu không đúng danh mục).",
+    "error.iam.escalation": "Bạn không thể cấp quyền hoặc phạm vi dữ liệu vượt quá quyền của chính mình.",
+    "error.iam.company_scope": "Bạn chỉ được quản lý vai trò, chức danh và tài khoản thuộc công ty của mình.",
+    "error.iam.system_role": "Vai trò hệ thống không được sửa hoặc xóa.",
+    "error.hrm.user_linked": "Tài khoản này đã gắn với một nhân viên khác."
   },
   "en": {
     "common.app_name": "ERPm - Sales & Inventory Management",
@@ -477,6 +482,11 @@
     "branch.no_results": "No matching branches",
     "error.sales.price_override": "Only administrators may override the catalogue sale price.",
     "common.saved": "Saved.",
-    "error.item.in_use": "This item has transactions. Deactivate it instead of deleting it or changing its type or unit."
+    "error.item.in_use": "This item has transactions. Deactivate it instead of deleting it or changing its type or unit.",
+    "error.iam.policy_invalid": "Invalid policy document (unknown effect, action or data scope).",
+    "error.iam.escalation": "You cannot grant permissions or data ranges beyond your own.",
+    "error.iam.company_scope": "You can only manage roles, job positions and accounts of your own company.",
+    "error.iam.system_role": "System roles cannot be edited or deleted.",
+    "error.hrm.user_linked": "This account is already linked to another employee."
   }
 }

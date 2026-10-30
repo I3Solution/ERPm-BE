@@ -1,3 +1,4 @@
+using ERPm.API.Security;
 using ERPm.Application.Common;
 using ERPm.Application.DTOs.System;
 using ERPm.Application.Features.System;
@@ -61,7 +62,7 @@ public class BranchesController : BaseApiController
     /// <summary>
     /// Creates a new branch.
     /// </summary>
-    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Admin")]
+    [RequirePermission("sys:branch:create")]
     [HttpPost]
     public async Task<ActionResult<ApiResponse<BranchDto>>> CreateBranch([FromBody] CreateBranchRequest request, CancellationToken cancellationToken)
     {

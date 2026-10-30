@@ -1,3 +1,4 @@
+using ERPm.API.Security;
 using ERPm.API.Controllers.Base;
 using ERPm.Application.Common;
 using ERPm.Application.Common.Crud;
@@ -13,6 +14,7 @@ namespace ERPm.API.Controllers.WMS;
 /// Controller for managing dynamic item attributes (Schema-Driven Metadata) in WMS module.
 /// Inherits BaseCrudController to automatically provide full type-safe CRUD operations.
 /// </summary>
+[PermissionResource("wms:item-attribute")]
 [Route("api/v1/wms/item-attributes")]
 public class ItemAttributesController : BaseCrudController<ItemAttribute, ItemAttributeDto, CreateItemAttributeRequest, UpdateItemAttributeRequest>
 {
@@ -29,6 +31,7 @@ public class ItemAttributesController : BaseCrudController<ItemAttribute, ItemAt
     /// <summary>
     /// Gets all dynamic attributes applicable to a given category plus global attributes (CategoryId == null).
     /// </summary>
+    [RequirePermission(":view")]
     [HttpGet("by-category")]
     [HttpGet("by-category/{categoryId:int}")]
     public async Task<IActionResult> GetByCategory([FromRoute] int? categoryId, CancellationToken cancellationToken = default)

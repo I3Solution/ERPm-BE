@@ -15,6 +15,7 @@ public class StockReceipt : BaseAuditableEntity
     public string Code { get; set; } = string.Empty;       // e.g. PNK0001
     public DateTime ReceiptDate { get; set; } = DateTime.UtcNow;
     public int BranchId { get; set; }                      // Receiving branch ID
+    public int? DepartmentId { get; set; }                 // Owning department, used by DEPARTMENT data scopes
     public int WarehouseId { get; set; }
     public int? SupplierId { get; set; }                   // Supplier partner ID
 

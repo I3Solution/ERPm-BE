@@ -20,8 +20,8 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddScoped<AccountService>();
-builder.Services.AddScoped<WriteAccessFilter>();
-builder.Services.AddControllers(options => options.Filters.AddService<WriteAccessFilter>()).ConfigureApiBehaviorOptions(options =>
+builder.Services.AddScoped<PermissionFilter>();
+builder.Services.AddControllers(options => options.Filters.AddService<PermissionFilter>()).ConfigureApiBehaviorOptions(options =>
     options.InvalidModelStateResponseFactory = _ => new Microsoft.AspNetCore.Mvc.BadRequestObjectResult(ERPm.Application.Common.ApiResponse<object>.Fail("error.validation.request")));
 builder.Services.AddAuthentication("ERPmBearer").AddBearerToken("ERPmBearer", options =>
 {

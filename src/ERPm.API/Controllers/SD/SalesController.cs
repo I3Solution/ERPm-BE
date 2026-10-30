@@ -1,3 +1,4 @@
+using ERPm.API.Security;
 using ERPm.Application.Common;
 using ERPm.Application.DTOs.Sales;
 using ERPm.Application.Features.Sales;
@@ -9,7 +10,7 @@ public class SalesController : BaseApiController
 {
     public sealed record CancelRequest(string Reason);
 
-    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Admin")]
+    [RequirePermission("sd:invoice:cancel")]
     [HttpPost("invoices/{id:int}/cancel")]
     public async Task<IActionResult> Cancel(int id, CancelRequest request, CancellationToken cancellationToken)
         => Ok(ApiResponse<SalesInvoiceDto>.Ok(await _salesService.CancelInvoiceAsync(id, request.Reason, cancellationToken)));
@@ -20,6 +21,7 @@ public class SalesController : BaseApiController
         _salesService = salesService;
     }
 
+    [RequirePermission("sd:invoice:view")]
     [HttpGet("invoices")]
     public async Task<ActionResult<ApiResponse<List<SalesInvoiceDto>>>> GetInvoices([FromQuery] int? branchId, CancellationToken cancellationToken)
     {
@@ -27,6 +29,7 @@ public class SalesController : BaseApiController
         return Ok(ApiResponse<List<SalesInvoiceDto>>.Ok(result));
     }
 
+    [RequirePermission("sd:invoice:create")]
     [HttpPost("pos-checkout")]
     public async Task<ActionResult<ApiResponse<SalesInvoiceDto>>> Checkout([FromBody] CreateSalesInvoiceRequest request, CancellationToken cancellationToken)
     {

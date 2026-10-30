@@ -1,3 +1,4 @@
+using ERPm.API.Security;
 using ERPm.API.Controllers.Base;
 using ERPm.Application.Common;
 using ERPm.Application.Common.Crud;
@@ -11,6 +12,7 @@ namespace ERPm.API.Controllers.PURCHASE;
 /// Manages supplier purchase orders (PURCHASE Module).
 /// Inherits BaseCrudController for full type-safe CRUD endpoints.
 /// </summary>
+[PermissionResource("pur:order")]
 [Route("api/v1/purchase/orders")]
 public class PurchaseOrdersController : BaseCrudController<PurchaseOrder, PurchaseOrderDto, CreatePurchaseOrderRequest, UpdatePurchaseOrderRequest>
 {
@@ -22,6 +24,7 @@ public class PurchaseOrdersController : BaseCrudController<PurchaseOrder, Purcha
     /// <summary>
     /// Custom domain action: Confirms a purchase order by its internal integer ID.
     /// </summary>
+    [RequirePermission(":confirm")]
     [HttpPost("{id:int}/confirm")]
     public async Task<ActionResult<ApiResponse<PurchaseOrderDto>>> ConfirmOrder(int id, CancellationToken cancellationToken)
     {

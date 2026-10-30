@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using ERPm.Application.Common;
+using ERPm.Application.Features.System;
 using ERPm.Domain.Entities.System;
+using ERPm.Domain.Services.Iam;
 using ERPm.Infrastructure.Persistence;
 using ERPm.Infrastructure.Services.Common;
 using Microsoft.AspNetCore.Identity;
@@ -13,7 +15,7 @@ public sealed record UserRequest(string UserName, string DisplayName, string Pas
 public sealed record UserAccessRequest(string DisplayName, string Role, int[] BranchIds, bool IsActive, string? Password);
 public sealed record AccountDto(int Id, string UserName, string DisplayName, string Role, int[] BranchIds);
 
-public sealed class AccountService(ApplicationDbContext context, PostingTransaction transaction)
+public sealed class AccountService(ApplicationDbContext context, PostingTransaction transaction, IIamService iam)
 {
     private readonly PasswordHasher<AppUser> _hasher = new();
 
@@ -44,10 +46,11 @@ public sealed class AccountService(ApplicationDbContext context, PostingTransact
     {
         var name = (request.UserName ?? "").Trim().ToUpperInvariant();
         PostingTransaction.Require(name.Length is > 0 and <= 100 && !string.IsNullOrWhiteSpace(request.DisplayName) && request.DisplayName.Length <= 255, "error.validation.request");
-        PostingTransaction.Require(request.Password is { Length: >= 12 and <= 256 } && request.Role is "Admin" or "Operator" or "Viewer", "error.auth.user_request");
+        PostingTransaction.Require(request.Password is { Length: >= 12 and <= 256 } && request.Role is "Admin" or "Operator" or "Viewer" or "None", "error.auth.user_request");
         var ids = request.BranchIds.Distinct().ToArray();
-        PostingTransaction.Require(request.Role == "Admin" || ids.Length > 0, "error.auth.branch_required");
+        PostingTransaction.Require(request.Role is "Admin" or "None" || ids.Length > 0, "error.auth.branch_required");
         PostingTransaction.Require(await context.Branches.IgnoreQueryFilters().CountAsync(b => !b.IsDeleted && b.IsActive && ids.Contains(b.Id), ct) == ids.Length, "error.inventory.branch_mismatch");
+        await EnsureCanAssignAsync(PermissionCatalog.Create, null, request.Role, ids, ct);
         var user = new AppUser { UserName = name, DisplayName = request.DisplayName.Trim(), Role = request.Role, BranchIds = ids.ToList() };
         user.PasswordHash = _hasher.HashPassword(user, request.Password);
         context.AppUsers.Add(user);
@@ -65,11 +68,12 @@ public sealed class AccountService(ApplicationDbContext context, PostingTransact
         await transaction.LockAsync("user-management", ct);
         var user = await context.AppUsers.SingleOrDefaultAsync(u => u.Id == id, ct);
         PostingTransaction.Require(user != null, "error.order.not_found", 404);
-        PostingTransaction.Require(!string.IsNullOrWhiteSpace(request.DisplayName) && request.DisplayName.Length <= 255 && request.Role is "Admin" or "Operator" or "Viewer", "error.auth.user_request");
+        PostingTransaction.Require(!string.IsNullOrWhiteSpace(request.DisplayName) && request.DisplayName.Length <= 255 && request.Role is "Admin" or "Operator" or "Viewer" or "None", "error.auth.user_request");
         var ids = request.BranchIds.Distinct().ToArray();
-        PostingTransaction.Require(request.Role == "Admin" || ids.Length > 0, "error.auth.branch_required");
+        PostingTransaction.Require(request.Role is "Admin" or "None" || ids.Length > 0, "error.auth.branch_required");
         PostingTransaction.Require(await context.Branches.IgnoreQueryFilters().CountAsync(b => !b.IsDeleted && b.IsActive && ids.Contains(b.Id), ct) == ids.Length, "error.inventory.branch_mismatch");
-        if (user!.Role == "Admin" && (!request.IsActive || request.Role != "Admin"))
+        await EnsureCanAssignAsync(PermissionCatalog.Edit, user!.Role, request.Role, ids, ct);
+        if (user.Role == "Admin" && (!request.IsActive || request.Role != "Admin"))
             PostingTransaction.Require(await context.AppUsers.CountAsync(u => u.IsActive && u.Role == "Admin", ct) > 1, "error.access.denied", 409);
         if (!string.IsNullOrEmpty(request.Password))
         {
@@ -81,4 +85,21 @@ public sealed class AccountService(ApplicationDbContext context, PostingTransact
         await context.SaveChangesAsync(ct);
         return new(user.Id, user.UserName, user.DisplayName, user.Role, ids);
     }, ct);
+
+    /// <summary>
+    /// Privilege escalation guard for account management: only super administrators touch Admin accounts,
+    /// the granted system role must be within the caller's own rights, and the branches within its scope.
+    /// </summary>
+    private async Task EnsureCanAssignAsync(string verb, string? currentRole, string role, int[] branchIds, CancellationToken ct)
+    {
+        var granter = await iam.GetCurrentPrincipalAsync(ct);
+        if (granter == null || granter.IsSuperAdmin) return;
+        PostingTransaction.Require(currentRole != "Admin" && role != "Admin", "error.iam.escalation", 403);
+        var code = role.ToUpperInvariant();
+        var policy = await context.IamRoles.AsNoTracking().Where(r => r.IsSystemRole && r.CompanyId == null && r.Code == code)
+            .Select(r => r.PolicyDocument).FirstOrDefaultAsync(ct);
+        if (policy != null) await iam.EnsureCanGrantAsync(policy.Statements, ct);
+        var scope = granter.Evaluate("sys:user:" + verb).Scope;
+        PostingTransaction.Require(branchIds.All(id => granter.Context.Branches.Subtree(id).All(scope.CoversBranch)), "error.iam.escalation", 403);
+    }
 }

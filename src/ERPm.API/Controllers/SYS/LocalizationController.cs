@@ -1,3 +1,4 @@
+using ERPm.API.Security;
 using ERPm.Application.Common;
 using ERPm.Application.DTOs.Localization;
 using ERPm.Application.Features.Localization;
@@ -39,7 +40,7 @@ public class LocalizationController : BaseApiController
     /// <summary>
     /// Inserts or updates a dictionary key-value pair.
     /// </summary>
-    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Admin")]
+    [RequirePermission("sys:localization:edit")]
     [HttpPost]
     public async Task<ActionResult<ApiResponse<bool>>> UpsertDictionaryEntry([FromBody] UpsertDictionaryRequest request, CancellationToken cancellationToken)
     {

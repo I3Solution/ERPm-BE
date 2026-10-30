@@ -5,11 +5,22 @@ using ERPm.Domain.Entities.Sales;
 
 namespace ERPm.Domain.Entities.System;
 
+/// <summary>Level of a node in the Group -> Company -> Branch tree.</summary>
+public enum OrgUnitType
+{
+    Group = 0,
+    Company = 1,
+    Branch = 2
+}
+
 public class Branch : BaseAuditableEntity
 {
     public string Code { get; set; } = string.Empty;       // e.g. "root", "CN_HN", "CN_HCM"
     public string Name { get; set; } = string.Empty;       // Branch display name
     public int? ParentId { get; set; }                     // Hierarchical parent branch ID
+    public OrgUnitType OrgUnitType { get; set; } = OrgUnitType.Branch;
+    public int? CompanyId { get; set; }                    // Owning company node (itself for a Company, null for the Group)
+    public string? TaxCode { get; set; }                   // Legal entity tax code (Company nodes)
     public string? Address { get; set; }
     public string? Phone { get; set; }
     public string? Email { get; set; }

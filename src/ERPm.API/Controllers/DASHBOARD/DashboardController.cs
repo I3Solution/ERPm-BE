@@ -1,3 +1,4 @@
+using ERPm.API.Security;
 using ERPm.Application.Common;
 using ERPm.Application.DTOs.Dashboard;
 using ERPm.Application.Features.Dashboard;
@@ -14,6 +15,7 @@ public class DashboardController : BaseApiController
         _dashboardService = dashboardService;
     }
 
+    [RequirePermission("dashboard:metrics:view")]
     [HttpGet("metrics")]
     public async Task<ActionResult<ApiResponse<DashboardMetricsDto>>> GetMetrics([FromQuery] int? branchId, CancellationToken cancellationToken)
     {

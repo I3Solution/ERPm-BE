@@ -5,6 +5,7 @@ using ERPm.Application.Common.Interfaces;
 using ERPm.Domain.Common;
 using ERPm.Domain.Entities.Accounting;
 using ERPm.Domain.Entities.Catalog;
+using ERPm.Domain.Entities.HumanResource;
 using ERPm.Domain.Entities.Inventory;
 using ERPm.Domain.Entities.Localization;
 using ERPm.Domain.Entities.Partner;
@@ -19,8 +20,10 @@ namespace ERPm.Infrastructure.Persistence;
 public class ApplicationDbContext : DbContext, IApplicationDbContext
 {
     private readonly ICurrentUser? _currentUser;
-    public bool IsUnrestricted => _currentUser == null || _currentUser.IsSystem || _currentUser.IsAdmin;
+    public bool IsUnrestricted => _currentUser == null || _currentUser.IsSystem || _currentUser.IsAdmin || _currentUser.HasUnrestrictedScope;
     public int[] AllowedBranchIds => _currentUser?.BranchIds ?? [];
+    public int[] AllowedDepartmentIds => _currentUser?.DepartmentIds ?? [];
+    public string? OwnRecordsUserId => _currentUser is { IncludeOwnRecords: true } ? _currentUser.UserId : null;
     internal bool AllowCancellation { get; set; }
 
     public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options, ICurrentUser? currentUser = null) : base(options)
@@ -30,6 +33,13 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
 
     public DbSet<AppUser> AppUsers => Set<AppUser>();
     public DbSet<Branch> Branches => Set<Branch>();
+    public DbSet<IamRole> IamRoles => Set<IamRole>();
+    public DbSet<JobPositionRole> JobPositionRoles => Set<JobPositionRole>();
+    public DbSet<UserRole> UserRoles => Set<UserRole>();
+    public DbSet<Department> Departments => Set<Department>();
+    public DbSet<JobPosition> JobPositions => Set<JobPosition>();
+    public DbSet<Employee> Employees => Set<Employee>();
+    public DbSet<WorkHistory> WorkHistories => Set<WorkHistory>();
     public DbSet<AppLanguage> AppLanguages => Set<AppLanguage>();
     public DbSet<AppDictionary> AppDictionaries => Set<AppDictionary>();
     public DbSet<UnitOfMeasure> UnitsOfMeasure => Set<UnitOfMeasure>();
@@ -77,6 +87,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.Property(e => e.DisplayName).HasMaxLength(255).IsRequired();
             entity.Property(e => e.Role).HasMaxLength(20).IsRequired();
             entity.Property(e => e.BranchIds).HasColumnType("jsonb");
+            entity.Property(e => e.InlinePolicy).HasColumnType("jsonb").HasConversion(JsonConverter<IamPolicyDocument?>(), JsonComparer<IamPolicyDocument?>());
             entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
@@ -95,13 +106,115 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.Property(e => e.Address).HasMaxLength(500);
             entity.Property(e => e.Phone).HasMaxLength(50);
             entity.Property(e => e.Email).HasMaxLength(100);
+            entity.Property(e => e.TaxCode).HasMaxLength(50);
+            entity.Property(e => e.OrgUnitType).HasDefaultValue(OrgUnitType.Branch).HasSentinel((OrgUnitType)(-1));
 
             entity.HasOne(e => e.Parent)
                 .WithMany(e => e.Children)
                 .HasForeignKey(e => e.ParentId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Branch>()
+                .WithMany()
+                .HasForeignKey(e => e.CompanyId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasIndex(e => e.Code).IsUnique();
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        // 1.1 SYS - Dynamic IAM roles and assignments
+        modelBuilder.Entity<IamRole>(entity =>
+        {
+            entity.ToTable("tbl_SYS_Role");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Description).HasMaxLength(500);
+            entity.Property(e => e.Translations).HasColumnType("jsonb").HasConversion(JsonConverter<Dictionary<string, string>>()).Metadata.SetValueComparer(dictionaryComparer);
+            entity.Property(e => e.PolicyDocument).HasColumnType("jsonb").HasConversion(JsonConverter<IamPolicyDocument>(), JsonComparer<IamPolicyDocument>());
+            entity.HasOne(e => e.Company).WithMany().HasForeignKey(e => e.CompanyId).OnDelete(DeleteBehavior.Restrict);
+            // Codes are unique per company; group templates (null company) share one namespace.
+            entity.HasIndex(e => new { e.CompanyId, e.Code }).IsUnique().AreNullsDistinct(false).HasFilter("is_deleted = false");
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<JobPositionRole>(entity =>
+        {
+            entity.ToTable("tbl_SYS_JobPositionRole");
+            ConfigureDualKeyEntity(entity);
+            entity.HasOne(e => e.JobPosition).WithMany(e => e.Roles).HasForeignKey(e => e.JobPositionId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Role).WithMany().HasForeignKey(e => e.RoleId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => new { e.JobPositionId, e.RoleId }).IsUnique();
+        });
+
+        modelBuilder.Entity<UserRole>(entity =>
+        {
+            entity.ToTable("tbl_SYS_UserRole");
+            ConfigureDualKeyEntity(entity);
+            entity.Property(e => e.ScopeOverride).HasColumnType("jsonb").HasConversion(JsonConverter<IamDataScope?>(), JsonComparer<IamDataScope?>());
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Role).WithMany().HasForeignKey(e => e.RoleId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => new { e.UserId, e.RoleId }).IsUnique();
+        });
+
+        // 1.2 HRM - Departments, job positions, employees and work history
+        modelBuilder.Entity<Department>(entity =>
+        {
+            entity.ToTable("tbl_HRM_Department");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Translations).HasColumnType("jsonb").HasConversion(JsonConverter<Dictionary<string, string>>()).Metadata.SetValueComparer(dictionaryComparer);
+            entity.HasOne(e => e.Company).WithMany().HasForeignKey(e => e.CompanyId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Parent).WithMany(e => e.Children).HasForeignKey(e => e.ParentId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.CompanyId, e.Code }).IsUnique().HasFilter("is_deleted = false");
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<JobPosition>(entity =>
+        {
+            entity.ToTable("tbl_HRM_JobPosition");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Translations).HasColumnType("jsonb").HasConversion(JsonConverter<Dictionary<string, string>>()).Metadata.SetValueComparer(dictionaryComparer);
+            entity.Property(e => e.DefaultScopeMode).HasMaxLength(30).IsRequired();
+            entity.HasOne(e => e.Company).WithMany().HasForeignKey(e => e.CompanyId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Department).WithMany().HasForeignKey(e => e.DepartmentId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.CompanyId, e.Code }).IsUnique().AreNullsDistinct(false).HasFilter("is_deleted = false");
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<Employee>(entity =>
+        {
+            entity.ToTable("tbl_HRM_Employee");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.FullName).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.Email).HasMaxLength(100);
+            entity.Property(e => e.Phone).HasMaxLength(50);
+            entity.HasOne(e => e.Company).WithMany().HasForeignKey(e => e.CompanyId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Department).WithMany().HasForeignKey(e => e.DepartmentId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.JobPosition).WithMany().HasForeignKey(e => e.JobPositionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => e.Code).IsUnique().HasFilter("is_deleted = false");
+            entity.HasIndex(e => e.UserId).IsUnique().HasFilter("is_deleted = false");
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<WorkHistory>(entity =>
+        {
+            entity.ToTable("tbl_HRM_WorkHistory");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.Notes).HasMaxLength(500);
+            entity.HasOne(e => e.Employee).WithMany(e => e.WorkHistories).HasForeignKey(e => e.EmployeeId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Company).WithMany().HasForeignKey(e => e.CompanyId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Department).WithMany().HasForeignKey(e => e.DepartmentId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.JobPosition).WithMany().HasForeignKey(e => e.JobPositionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.EmployeeId, e.DateEffective });
             entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
@@ -305,6 +418,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
 
         modelBuilder.Entity<StockReceipt>(entity =>
         {
+            entity.HasOne<Department>().WithMany().HasForeignKey(e => e.DepartmentId).OnDelete(DeleteBehavior.Restrict);
             entity.ToTable("tbl_WMS_StockReceipt");
             ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
@@ -352,6 +466,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
 
         modelBuilder.Entity<StockIssue>(entity =>
         {
+            entity.HasOne<Department>().WithMany().HasForeignKey(e => e.DepartmentId).OnDelete(DeleteBehavior.Restrict);
             entity.ToTable("tbl_WMS_StockIssue");
             ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
@@ -398,6 +513,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         // 5. SALE - Invoicing
         modelBuilder.Entity<SalesInvoice>(entity =>
         {
+            entity.HasOne<Department>().WithMany().HasForeignKey(e => e.DepartmentId).OnDelete(DeleteBehavior.Restrict);
             entity.ToTable("tbl_SALE_Invoice");
             ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.InvoiceNumber).HasMaxLength(50).IsRequired();
@@ -468,6 +584,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         // 5.1 SALE - Orders
         modelBuilder.Entity<SalesOrder>(entity =>
         {
+            entity.HasOne<Department>().WithMany().HasForeignKey(e => e.DepartmentId).OnDelete(DeleteBehavior.Restrict);
             entity.ToTable("tbl_SALE_Order");
             ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.OrderNumber).HasMaxLength(50).IsRequired();
@@ -521,6 +638,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         // 5.2 PURCHASE - Orders
         modelBuilder.Entity<PurchaseOrder>(entity =>
         {
+            entity.HasOne<Department>().WithMany().HasForeignKey(e => e.DepartmentId).OnDelete(DeleteBehavior.Restrict);
             entity.ToTable("tbl_PURCHASE_Order");
             ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.OrderNumber).HasMaxLength(50).IsRequired();
@@ -639,20 +757,42 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         // A user's branch grants are enforced independently of client-side filtering.
         modelBuilder.Entity<Branch>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.Id)));
         modelBuilder.Entity<Warehouse>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)));
-        modelBuilder.Entity<SalesInvoice>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)));
-        modelBuilder.Entity<StockReceipt>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)));
-        modelBuilder.Entity<StockIssue>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)));
+        modelBuilder.Entity<SalesInvoice>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)
+            || (e.DepartmentId != null && AllowedDepartmentIds.Contains(e.DepartmentId.Value)) || (OwnRecordsUserId != null && e.CreatedBy == OwnRecordsUserId)));
+        modelBuilder.Entity<StockReceipt>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)
+            || (e.DepartmentId != null && AllowedDepartmentIds.Contains(e.DepartmentId.Value)) || (OwnRecordsUserId != null && e.CreatedBy == OwnRecordsUserId)));
+        modelBuilder.Entity<StockIssue>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)
+            || (e.DepartmentId != null && AllowedDepartmentIds.Contains(e.DepartmentId.Value)) || (OwnRecordsUserId != null && e.CreatedBy == OwnRecordsUserId)));
         modelBuilder.Entity<JournalEntry>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)));
-        modelBuilder.Entity<SalesOrder>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)));
-        modelBuilder.Entity<PurchaseOrder>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)));
+        modelBuilder.Entity<SalesOrder>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)
+            || (e.DepartmentId != null && AllowedDepartmentIds.Contains(e.DepartmentId.Value)) || (OwnRecordsUserId != null && e.CreatedBy == OwnRecordsUserId)));
+        modelBuilder.Entity<PurchaseOrder>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)
+            || (e.DepartmentId != null && AllowedDepartmentIds.Contains(e.DepartmentId.Value)) || (OwnRecordsUserId != null && e.CreatedBy == OwnRecordsUserId)));
         modelBuilder.Entity<StockBalance>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.Warehouse!.BranchId)));
-        modelBuilder.Entity<SalesInvoiceItem>().HasQueryFilter(e => !e.SalesInvoice!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.SalesInvoice.BranchId)));
-        modelBuilder.Entity<StockReceiptItem>().HasQueryFilter(e => !e.StockReceipt!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.StockReceipt.BranchId)));
-        modelBuilder.Entity<StockIssueItem>().HasQueryFilter(e => !e.StockIssue!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.StockIssue.BranchId)));
+        modelBuilder.Entity<SalesInvoiceItem>().HasQueryFilter(e => !e.SalesInvoice!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.SalesInvoice.BranchId)
+            || (e.SalesInvoice.DepartmentId != null && AllowedDepartmentIds.Contains(e.SalesInvoice.DepartmentId.Value)) || (OwnRecordsUserId != null && e.SalesInvoice.CreatedBy == OwnRecordsUserId)));
+        modelBuilder.Entity<StockReceiptItem>().HasQueryFilter(e => !e.StockReceipt!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.StockReceipt.BranchId)
+            || (e.StockReceipt.DepartmentId != null && AllowedDepartmentIds.Contains(e.StockReceipt.DepartmentId.Value)) || (OwnRecordsUserId != null && e.StockReceipt.CreatedBy == OwnRecordsUserId)));
+        modelBuilder.Entity<StockIssueItem>().HasQueryFilter(e => !e.StockIssue!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.StockIssue.BranchId)
+            || (e.StockIssue.DepartmentId != null && AllowedDepartmentIds.Contains(e.StockIssue.DepartmentId.Value)) || (OwnRecordsUserId != null && e.StockIssue.CreatedBy == OwnRecordsUserId)));
         modelBuilder.Entity<JournalEntryLine>().HasQueryFilter(e => !e.JournalEntry!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.JournalEntry.BranchId)));
-        modelBuilder.Entity<SalesOrderItem>().HasQueryFilter(e => !e.SalesOrder!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.SalesOrder.BranchId)));
-        modelBuilder.Entity<PurchaseOrderItem>().HasQueryFilter(e => !e.PurchaseOrder!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.PurchaseOrder.BranchId)));
+        modelBuilder.Entity<SalesOrderItem>().HasQueryFilter(e => !e.SalesOrder!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.SalesOrder.BranchId)
+            || (e.SalesOrder.DepartmentId != null && AllowedDepartmentIds.Contains(e.SalesOrder.DepartmentId.Value)) || (OwnRecordsUserId != null && e.SalesOrder.CreatedBy == OwnRecordsUserId)));
+        modelBuilder.Entity<PurchaseOrderItem>().HasQueryFilter(e => !e.PurchaseOrder!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.PurchaseOrder.BranchId)
+            || (e.PurchaseOrder.DepartmentId != null && AllowedDepartmentIds.Contains(e.PurchaseOrder.DepartmentId.Value)) || (OwnRecordsUserId != null && e.PurchaseOrder.CreatedBy == OwnRecordsUserId)));
     }
+
+    private static readonly JsonSerializerOptions JsonColumnOptions = new() { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
+
+    /// <summary>Stores a value object as a jsonb document (PascalCase keys, nulls omitted).</summary>
+    private static Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<T, string> JsonConverter<T>() => new(
+        v => JsonSerializer.Serialize(v, JsonColumnOptions),
+        v => JsonSerializer.Deserialize<T>(v, JsonColumnOptions)!);
+
+    private static ValueComparer<T> JsonComparer<T>() => new(
+        (a, b) => JsonSerializer.Serialize(a, JsonColumnOptions) == JsonSerializer.Serialize(b, JsonColumnOptions),
+        v => JsonSerializer.Serialize(v, JsonColumnOptions).GetHashCode(),
+        v => JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(v, JsonColumnOptions), JsonColumnOptions)!);
 
     /// <summary>
     /// Configures dual-key architecture for auditable entities:

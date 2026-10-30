@@ -26,6 +26,9 @@ public class BranchService : IBranchService
                 Code = b.Code,
                 Name = b.Name,
                 ParentId = b.ParentId,
+                OrgUnitType = b.OrgUnitType,
+                CompanyId = b.CompanyId,
+                TaxCode = b.TaxCode,
                 ParentName = b.Parent != null ? b.Parent.Name : null,
                 Address = b.Address,
                 Phone = b.Phone,
@@ -50,6 +53,9 @@ public class BranchService : IBranchService
                 Code = b.Code,
                 Name = b.Name,
                 ParentId = b.ParentId,
+                OrgUnitType = b.OrgUnitType,
+                CompanyId = b.CompanyId,
+                TaxCode = b.TaxCode,
                 Address = b.Address,
                 Phone = b.Phone,
                 Email = b.Email,
@@ -121,6 +127,9 @@ public class BranchService : IBranchService
             Code = b.Code,
             Name = b.Name,
             ParentId = b.ParentId,
+            OrgUnitType = b.OrgUnitType,
+            CompanyId = b.CompanyId,
+            TaxCode = b.TaxCode,
             ParentName = b.Parent?.Name,
             Address = b.Address,
             Phone = b.Phone,
@@ -134,11 +143,25 @@ public class BranchService : IBranchService
     {
         ERPm.Infrastructure.Services.Common.PostingTransaction.Require(!string.IsNullOrWhiteSpace(request.Code) && request.Code.Length <= 50 && !string.IsNullOrWhiteSpace(request.Name) && request.Name.Length <= 255, "error.validation.request");
         ERPm.Infrastructure.Services.Common.PostingTransaction.Require(request.ParentId == null || await _context.Branches.AnyAsync(b => b.Id == request.ParentId && b.IsActive, cancellationToken), "error.validation.reference");
+        // Group -> Company -> Branch: a company sits under the group, a branch under a company or another branch.
+        // A branch directly under the group stays allowed for single-company setups (no owning company).
+        var parent = request.ParentId == null ? null : await _context.Branches.Where(b => b.Id == request.ParentId)
+            .Select(b => new { b.Id, b.OrgUnitType, b.CompanyId }).SingleAsync(cancellationToken);
+        ERPm.Infrastructure.Services.Common.PostingTransaction.Require(request.OrgUnitType switch
+        {
+            OrgUnitType.Group => parent == null && !await _context.Branches.AnyAsync(b => b.OrgUnitType == OrgUnitType.Group, cancellationToken),
+            OrgUnitType.Company => parent?.OrgUnitType == OrgUnitType.Group,
+            OrgUnitType.Branch => parent != null,
+            _ => false
+        } && (request.TaxCode?.Length ?? 0) <= 50, "error.validation.request");
         var branch = new Branch
         {
             Code = request.Code.Trim(),
             Name = request.Name.Trim(),
             ParentId = request.ParentId,
+            OrgUnitType = request.OrgUnitType,
+            CompanyId = request.OrgUnitType == OrgUnitType.Branch ? parent!.CompanyId : null,
+            TaxCode = string.IsNullOrWhiteSpace(request.TaxCode) ? null : request.TaxCode.Trim(),
             Address = request.Address,
             Phone = request.Phone,
             Email = request.Email,
@@ -147,12 +170,17 @@ public class BranchService : IBranchService
 
         await _context.Branches.AddAsync(branch, cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
+        if (branch.OrgUnitType == OrgUnitType.Company)
+        {
+            branch.CompanyId = branch.Id;
+            await _context.SaveChangesAsync(cancellationToken);
+        }
 
         string? parentName = null;
         if (branch.ParentId.HasValue)
         {
-            var parent = await _context.Branches.FindAsync(new object[] { branch.ParentId.Value }, cancellationToken);
-            parentName = parent?.Name;
+            var parentBranch = await _context.Branches.FindAsync(new object[] { branch.ParentId.Value }, cancellationToken);
+            parentName = parentBranch?.Name;
         }
 
         return new BranchDto
@@ -161,6 +189,9 @@ public class BranchService : IBranchService
             Code = branch.Code,
             Name = branch.Name,
             ParentId = branch.ParentId,
+            OrgUnitType = branch.OrgUnitType,
+            CompanyId = branch.CompanyId,
+            TaxCode = branch.TaxCode,
             ParentName = parentName,
             Address = branch.Address,
             Phone = branch.Phone,

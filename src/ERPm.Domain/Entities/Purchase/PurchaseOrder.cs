@@ -11,6 +11,7 @@ public class PurchaseOrder : BaseAuditableEntity
     public DateTime OrderDate { get; set; } = DateTime.UtcNow;
 
     public int BranchId { get; set; }                      // Purchasing branch ID
+    public int? DepartmentId { get; set; }                 // Owning department, used by DEPARTMENT data scopes
     public int? SupplierId { get; set; }
     public string SupplierName { get; set; } = string.Empty;
 
