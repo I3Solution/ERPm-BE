@@ -56,6 +56,8 @@ public class DepartmentFilterQuery : BaseFilterQuery
 public class EmployeeFilterQuery : BaseFilterQuery
 {
     public bool? WithoutAccount { get; set; }
+    /// <summary>Keeps employees working at this org tree node or any node below it (company, branch, store).</summary>
+    public int? BranchId { get; set; }
 }
 
 public class CreateDepartmentRequest
