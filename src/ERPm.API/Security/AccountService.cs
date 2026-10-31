@@ -14,7 +14,7 @@ public sealed record LoginRequest(string UserName, string Password);
 public sealed record UserRequest(string UserName, string DisplayName, string Password, string Role, int[] BranchIds, int? EmployeeId = null);
 public sealed record UserAccessRequest(string DisplayName, string Role, int[] BranchIds, bool IsActive, string? Password, int? EmployeeId = null);
 public sealed record AccountDto(int Id, string UserName, string DisplayName, string Role, int[] BranchIds,
-    int? EmployeeId = null, string? EmployeeCode = null, string? EmployeeName = null);
+    int? EmployeeId = null, string? EmployeeCode = null, string? EmployeeName = null, bool IsActive = true);
 
 public sealed class AccountService(ApplicationDbContext context, PostingTransaction transaction, IIamService iam)
 {
@@ -61,7 +61,7 @@ public sealed class AccountService(ApplicationDbContext context, PostingTransact
         var employee = await LinkEmployeeAsync(user, request.EmployeeId, granter, ct);
         await context.SaveChangesAsync(ct);
         iam.Invalidate();
-        return new AccountDto(user.Id, user.UserName, user.DisplayName, user.Role, ids, employee?.Id, employee?.Code, employee?.FullName);
+        return new AccountDto(user.Id, user.UserName, user.DisplayName, user.Role, ids, employee?.Id, employee?.Code, employee?.FullName, user.IsActive);
     }
 
     public static ClaimsPrincipal Principal(AppUser user) => new(new ClaimsIdentity([
@@ -94,7 +94,7 @@ public sealed class AccountService(ApplicationDbContext context, PostingTransact
         var employee = await LinkEmployeeAsync(user, request.EmployeeId, granter, ct);
         await context.SaveChangesAsync(ct);
         iam.Invalidate();
-        return new(user.Id, user.UserName, user.DisplayName, user.Role, ids, employee?.Id, employee?.Code, employee?.FullName);
+        return new(user.Id, user.UserName, user.DisplayName, user.Role, ids, employee?.Id, employee?.Code, employee?.FullName, user.IsActive);
     }, ct);
 
     /// <summary>

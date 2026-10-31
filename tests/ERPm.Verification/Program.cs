@@ -239,6 +239,9 @@ try
         Check(usersResponse.IsSuccessStatusCode && !(await usersResponse.Content.ReadAsStringAsync()).Contains("passwordHash", StringComparison.OrdinalIgnoreCase), "user management never exposes password hashes");
         using var disabled = await http.PutAsJsonAsync($"/api/v1/auth/users/{viewerId}", new { displayName = "Disabled viewer", role = "Viewer", branchIds = new[] { allowedBranch.Id }, isActive = false });
         Check(disabled.IsSuccessStatusCode, "admin can revoke an account");
+        using var usersAfterRevoke = JsonDocument.Parse(await http.GetStringAsync("/api/v1/auth/users"));
+        Check(usersAfterRevoke.RootElement.GetProperty("data").EnumerateArray().Any(u => u.GetProperty("userName").GetString() == "VIEWER" && !u.GetProperty("isActive").GetBoolean()),
+            "the user list reports a revoked account as inactive");
         http.DefaultRequestHeaders.Authorization = new("Bearer", viewerToken);
         Check((await http.GetAsync("/api/v1/auth/me")).StatusCode == HttpStatusCode.Unauthorized, "revoked accounts cannot reuse an existing token");
 
