@@ -25,7 +25,7 @@ public class DepartmentsController : BaseCrudController<Department, DepartmentDt
     public override Task<ActionResult<ApiResponse<PagedResult<DepartmentDto>>>> GetPaged(BaseFilterQuery query, CancellationToken cancellationToken) =>
         base.GetPaged(query, cancellationToken);
 
-    /// <summary>Paged list with the standard filters plus ?levelCode=SECTION and/or ?underId={id} (subtree by Path).</summary>
+    /// <summary>Paged list with the standard filters plus ?companyId={id}, ?levelCode=SECTION and/or ?underId={id} (subtree by Path).</summary>
     [RequirePermission(":view")]
     [HttpGet]
     public Task<ActionResult<ApiResponse<PagedResult<DepartmentDto>>>> Search([FromQuery] DepartmentFilterQuery query, CancellationToken cancellationToken) =>

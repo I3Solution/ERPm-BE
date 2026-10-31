@@ -47,6 +47,7 @@ public class DepartmentDto
 /// <summary>Department list filter: by level code and/or the subtree under a department (Path prefix).</summary>
 public class DepartmentFilterQuery : BaseFilterQuery
 {
+    public int? CompanyId { get; set; }
     public string? LevelCode { get; set; }
     public int? UnderId { get; set; }
 }
