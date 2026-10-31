@@ -255,7 +255,8 @@
     "notifications.back_to_center": "Quay lại Trung tâm thông báo",
     "notifications.filter_module": "Phân hệ nghiệp vụ",
     "notifications.filter_severity": "Mức độ quan trọng",
-    "notifications.filter_status": "Trạng thái đọc"
+    "notifications.filter_status": "Trạng thái đọc",
+    "error.hrm.department_level_order": "Cấp của phòng ban con phải thấp hơn (sâu hơn) cấp của phòng ban cha."
   },
   "en": {
     "common.app_name": "ERPm - Sales & Inventory Management",
@@ -513,6 +514,7 @@
     "notifications.back_to_center": "Back to Notification Center",
     "notifications.filter_module": "Business Module",
     "notifications.filter_severity": "Severity Level",
-    "notifications.filter_status": "Read Status"
+    "notifications.filter_status": "Read Status",
+    "error.hrm.department_level_order": "A sub-department must be on a deeper level than its parent department."
   }
 }

@@ -50,6 +50,14 @@ public class RolesController(IRoleService roles) : BaseApiController
     public async Task<ActionResult<ApiResponse<int[]>>> SetJobPositionRoles(int jobPositionId, [FromBody] JobPositionRolesRequest request, CancellationToken cancellationToken) =>
         Ok(ApiResponse<int[]>.Ok(await roles.SetJobPositionRolesAsync(jobPositionId, request.RoleIds ?? [], cancellationToken), "common.saved"));
 
+    [RequirePermission("sys:role:view"), HttpGet("departments/{departmentId:int}")]
+    public async Task<ActionResult<ApiResponse<List<DepartmentRoleGrantDto>>>> GetDepartmentRoles(int departmentId, CancellationToken cancellationToken) =>
+        Ok(ApiResponse<List<DepartmentRoleGrantDto>>.Ok(await roles.GetDepartmentRolesAsync(departmentId, cancellationToken)));
+
+    [RequirePermission("sys:role:edit"), HttpPut("departments/{departmentId:int}")]
+    public async Task<ActionResult<ApiResponse<List<DepartmentRoleGrantDto>>>> SetDepartmentRoles(int departmentId, [FromBody] List<DepartmentRoleGrantDto> grants, CancellationToken cancellationToken) =>
+        Ok(ApiResponse<List<DepartmentRoleGrantDto>>.Ok(await roles.SetDepartmentRolesAsync(departmentId, grants, cancellationToken), "common.saved"));
+
     [RequirePermission("sys:role:view"), HttpGet("users/{userId:int}")]
     public async Task<ActionResult<ApiResponse<UserAccessPolicyDto>>> GetUserAccess(int userId, CancellationToken cancellationToken) =>
         Ok(ApiResponse<UserAccessPolicyDto>.Ok(await roles.GetUserAccessAsync(userId, cancellationToken)));

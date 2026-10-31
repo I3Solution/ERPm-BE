@@ -29,6 +29,8 @@ public interface IRoleService
     Task<bool> DeleteRoleAsync(int id, CancellationToken cancellationToken = default);
     Task<int[]> GetJobPositionRolesAsync(int jobPositionId, CancellationToken cancellationToken = default);
     Task<int[]> SetJobPositionRolesAsync(int jobPositionId, int[] roleIds, CancellationToken cancellationToken = default);
+    Task<List<DepartmentRoleGrantDto>> GetDepartmentRolesAsync(int departmentId, CancellationToken cancellationToken = default);
+    Task<List<DepartmentRoleGrantDto>> SetDepartmentRolesAsync(int departmentId, List<DepartmentRoleGrantDto> grants, CancellationToken cancellationToken = default);
     Task<UserAccessPolicyDto> GetUserAccessAsync(int userId, CancellationToken cancellationToken = default);
     Task<UserAccessPolicyDto> SetUserAccessAsync(int userId, UserAccessPolicyDto request, CancellationToken cancellationToken = default);
 }

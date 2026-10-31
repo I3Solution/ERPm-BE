@@ -70,14 +70,9 @@ public sealed class IamService(ApplicationDbContext context, IMemoryCache cache,
 
         // Roles owned by another company never apply, even if assigned by mistake.
         var companyId = position?.CompanyId;
-        if (position?.JobPositionId is { } jobPositionId)
-        {
-            var positionRoles = await (from link in context.JobPositionRoles
-                                       join role in context.IamRoles on link.RoleId equals role.Id
-                                       where link.JobPositionId == jobPositionId && role.IsActive && (role.CompanyId == null || role.CompanyId == companyId)
-                                       select role.PolicyDocument).AsNoTracking().ToListAsync(cancellationToken);
-            statements.AddRange(positionRoles.SelectMany(p => p.Statements));
-        }
+        var departmentParents = departments.ToDictionary(d => d.Id, d => d.ParentId);
+        if (position != null)
+            statements.AddRange(await PositionStatementsAsync([(position.DepartmentId, position.JobPositionId)], companyId, departmentParents, cancellationToken));
         var userRoles = await (from link in context.UserRoles
                                join role in context.IamRoles on link.RoleId equals role.Id
                                where link.UserId == user.Id && role.IsActive && (role.CompanyId == null || role.CompanyId == companyId)
@@ -94,6 +89,35 @@ public sealed class IamService(ApplicationDbContext context, IMemoryCache cache,
         };
         cache.Set(key, principal, TimeSpan.FromMinutes(5));
         return principal;
+    }
+
+    /// <summary>
+    /// Statements granted by org positions: the job position's roles, the department's own roles and the roles of
+    /// ancestor departments marked ApplyToChildren. Takes a list so concurrent assignments can be added later.
+    /// </summary>
+    private async Task<List<IamStatement>> PositionStatementsAsync(IReadOnlyCollection<(int? DepartmentId, int? JobPositionId)> positions,
+        int? companyId, IReadOnlyDictionary<int, int?> departmentParents, CancellationToken cancellationToken)
+    {
+        var jobPositionIds = positions.Where(p => p.JobPositionId != null).Select(p => p.JobPositionId!.Value).Distinct().ToArray();
+        var ownDepartments = positions.Where(p => p.DepartmentId != null).Select(p => p.DepartmentId!.Value).Distinct().ToArray();
+        var ancestors = new HashSet<int>();
+        foreach (var departmentId in ownDepartments)
+        {
+            var cursor = departmentParents.GetValueOrDefault(departmentId);
+            while (cursor is { } parent && ancestors.Add(parent)) cursor = departmentParents.GetValueOrDefault(parent);
+        }
+        var ancestorIds = ancestors.ToArray();
+
+        var positionRoles = await (from link in context.JobPositionRoles
+                                   join role in context.IamRoles on link.RoleId equals role.Id
+                                   where jobPositionIds.Contains(link.JobPositionId) && role.IsActive && (role.CompanyId == null || role.CompanyId == companyId)
+                                   select role.PolicyDocument).AsNoTracking().ToListAsync(cancellationToken);
+        var departmentRoles = await (from link in context.DepartmentRoles
+                                     join role in context.IamRoles on link.RoleId equals role.Id
+                                     where (ownDepartments.Contains(link.DepartmentId) || (link.ApplyToChildren && ancestorIds.Contains(link.DepartmentId)))
+                                         && role.IsActive && (role.CompanyId == null || role.CompanyId == companyId)
+                                     select role.PolicyDocument).AsNoTracking().ToListAsync(cancellationToken);
+        return positionRoles.Concat(departmentRoles).SelectMany(p => p.Statements).ToList();
     }
 
     private sealed record Position(int EmployeeId, int CompanyId, int BranchId, int? DepartmentId, int? JobPositionId, string? DefaultScopeMode);

@@ -1,4 +1,33 @@
+using ERPm.Application.Common.Crud;
+
 namespace ERPm.Application.DTOs.HumanResource;
+
+public class DepartmentLevelDto
+{
+    public int Id { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public Dictionary<string, string> Translations { get; set; } = new();
+    public int SortOrder { get; set; }
+    public int? CompanyId { get; set; }
+    public string? StandardLevelCode { get; set; }
+    public bool IsActive { get; set; }
+}
+
+public class CreateDepartmentLevelRequest
+{
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public Dictionary<string, string> Translations { get; set; } = new();
+    public int SortOrder { get; set; }
+    public int? CompanyId { get; set; }
+    public string? StandardLevelCode { get; set; }
+    public bool IsActive { get; set; } = true;
+}
+
+public class UpdateDepartmentLevelRequest : CreateDepartmentLevelRequest
+{
+}
 
 public class DepartmentDto
 {
@@ -9,7 +38,23 @@ public class DepartmentDto
     public int CompanyId { get; set; }
     public int BranchId { get; set; }
     public int? ParentId { get; set; }
+    public int LevelId { get; set; }
+    public string Path { get; set; } = string.Empty;
+    public int Depth { get; set; }
     public bool IsActive { get; set; }
+}
+
+/// <summary>Department list filter: by level code and/or the subtree under a department (Path prefix).</summary>
+public class DepartmentFilterQuery : BaseFilterQuery
+{
+    public string? LevelCode { get; set; }
+    public int? UnderId { get; set; }
+}
+
+/// <summary>Employee list filter; <see cref="WithoutAccount"/> keeps employees not yet linked to a login.</summary>
+public class EmployeeFilterQuery : BaseFilterQuery
+{
+    public bool? WithoutAccount { get; set; }
 }
 
 public class CreateDepartmentRequest
@@ -20,6 +65,7 @@ public class CreateDepartmentRequest
     public int CompanyId { get; set; }
     public int BranchId { get; set; }
     public int? ParentId { get; set; }
+    public int? LevelId { get; set; }                      // Null uses the group DEPARTMENT level
     public bool IsActive { get; set; } = true;
 }
 

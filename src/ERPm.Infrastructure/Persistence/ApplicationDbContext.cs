@@ -36,7 +36,9 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<IamRole> IamRoles => Set<IamRole>();
     public DbSet<JobPositionRole> JobPositionRoles => Set<JobPositionRole>();
     public DbSet<UserRole> UserRoles => Set<UserRole>();
+    public DbSet<DepartmentRole> DepartmentRoles => Set<DepartmentRole>();
     public DbSet<Department> Departments => Set<Department>();
+    public DbSet<DepartmentLevel> DepartmentLevels => Set<DepartmentLevel>();
     public DbSet<JobPosition> JobPositions => Set<JobPosition>();
     public DbSet<Employee> Employees => Set<Employee>();
     public DbSet<WorkHistory> WorkHistories => Set<WorkHistory>();
@@ -152,6 +154,15 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.HasIndex(e => new { e.JobPositionId, e.RoleId }).IsUnique();
         });
 
+        modelBuilder.Entity<DepartmentRole>(entity =>
+        {
+            entity.ToTable("tbl_SYS_DepartmentRole");
+            ConfigureDualKeyEntity(entity);
+            entity.HasOne(e => e.Department).WithMany().HasForeignKey(e => e.DepartmentId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Role).WithMany().HasForeignKey(e => e.RoleId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.DepartmentId, e.RoleId }).IsUnique();
+        });
+
         modelBuilder.Entity<UserRole>(entity =>
         {
             entity.ToTable("tbl_SYS_UserRole");
@@ -173,7 +184,24 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.HasOne(e => e.Company).WithMany().HasForeignKey(e => e.CompanyId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Parent).WithMany(e => e.Children).HasForeignKey(e => e.ParentId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Level).WithMany().HasForeignKey(e => e.LevelId).OnDelete(DeleteBehavior.Restrict);
+            entity.Property(e => e.Path).HasMaxLength(1000).IsRequired();
+            // Prefix searches (path LIKE '/1/5/%') use this index without recursion.
+            entity.HasIndex(e => e.Path).HasOperators("text_pattern_ops");
             entity.HasIndex(e => new { e.CompanyId, e.Code }).IsUnique().HasFilter("is_deleted = false");
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<DepartmentLevel>(entity =>
+        {
+            entity.ToTable("tbl_HRM_DepartmentLevel");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.StandardLevelCode).HasMaxLength(50);
+            entity.Property(e => e.Translations).HasColumnType("jsonb").HasConversion(JsonConverter<Dictionary<string, string>>()).Metadata.SetValueComparer(dictionaryComparer);
+            entity.HasOne(e => e.Company).WithMany().HasForeignKey(e => e.CompanyId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.CompanyId, e.Code }).IsUnique().AreNullsDistinct(false).HasFilter("is_deleted = false");
             entity.HasQueryFilter(e => !e.IsDeleted);
         });
 

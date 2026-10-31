@@ -31,6 +31,13 @@ public class JobPositionRolesRequest
     public int[] RoleIds { get; set; } = [];
 }
 
+/// <summary>Role granted to a department; <see cref="ApplyToChildren"/> extends it to all sub-departments.</summary>
+public class DepartmentRoleGrantDto
+{
+    public int RoleId { get; set; }
+    public bool ApplyToChildren { get; set; }
+}
+
 public class UserRoleGrantDto
 {
     public int RoleId { get; set; }

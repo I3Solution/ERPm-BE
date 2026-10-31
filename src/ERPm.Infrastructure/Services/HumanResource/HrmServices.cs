@@ -1,3 +1,4 @@
+using ERPm.Application.Common.Crud;
 using ERPm.Application.Common.Interfaces;
 using ERPm.Application.DTOs.HumanResource;
 using ERPm.Application.Features.System;
@@ -37,7 +38,11 @@ internal static class OrgRules
     }
 }
 
-/// <summary>Departments of a company branch. Rejects cycles and parents from another company.</summary>
+/// <summary>
+/// Departments of a company branch. Enforces level order (a child sits on a deeper level than its parent),
+/// same company as the parent and no cycles, and maintains the materialized <c>Path</c> / <c>Depth</c>
+/// of the whole subtree when a department moves.
+/// </summary>
 public class DepartmentService(ApplicationDbContext context, IIamService iam, ICurrentUser? user = null)
     : BaseCrudService<Department, DepartmentDto, CreateDepartmentRequest, UpdateDepartmentRequest>(context)
 {
@@ -50,18 +55,69 @@ public class DepartmentService(ApplicationDbContext context, IIamService iam, IC
         return query.Where(d => branches.Contains(d.BranchId) || departments.Contains(d.Id));
     }
 
+    protected override IQueryable<Department> ApplyFilters(IQueryable<Department> query, BaseFilterQuery filter)
+    {
+        query = base.ApplyFilters(query, filter);
+        if (filter is not DepartmentFilterQuery departmentFilter) return query;
+        if (!string.IsNullOrWhiteSpace(departmentFilter.LevelCode))
+        {
+            var code = departmentFilter.LevelCode.Trim().ToUpperInvariant();
+            query = query.Where(d => d.Level!.Code == code);
+        }
+        if (departmentFilter.UnderId is { } underId)
+        {
+            var departments = Context.Departments;
+            query = query.Where(d => departments.Any(u => u.Id == underId && d.Path.StartsWith(u.Path)));
+        }
+        return query;
+    }
+
     protected override async Task<Department?> FindEntityAsync(int id, CancellationToken cancellationToken) =>
         await PrepareQuery(DbSet).FirstOrDefaultAsync(d => d.Id == id, cancellationToken);
+
+    /// <summary>Insert and Path back-fill (which needs the new id) run in one transaction.</summary>
+    public override Task<DepartmentDto> CreateAsync(CreateDepartmentRequest dto, CancellationToken cancellationToken = default) =>
+        new PostingTransaction(Context).RunAsync(() => base.CreateAsync(dto, cancellationToken), cancellationToken);
 
     protected override async Task BeforeCreateAsync(Department entity, CreateDepartmentRequest dto, CancellationToken cancellationToken)
     {
         await ValidateAsync(null, dto, cancellationToken);
         entity.Code = dto.Code;
         entity.Name = dto.Name;
+        entity.LevelId = dto.LevelId!.Value;
     }
 
-    protected override Task BeforeUpdateAsync(Department entity, UpdateDepartmentRequest dto, CancellationToken cancellationToken) =>
-        ValidateAsync(entity.Id, dto, cancellationToken);
+    protected override async Task AfterCreateAsync(Department entity, CreateDepartmentRequest dto, CancellationToken cancellationToken)
+    {
+        var parentPath = entity.ParentId is { } parentId
+            ? await Context.Departments.Where(d => d.Id == parentId).Select(d => d.Path).FirstAsync(cancellationToken)
+            : "/";
+        entity.Path = $"{parentPath}{entity.Id}/";
+        entity.Depth = PathDepth(entity.Path);
+        await Context.SaveChangesAsync(cancellationToken);
+        iam.Invalidate();
+    }
+
+    protected override async Task BeforeUpdateAsync(Department entity, UpdateDepartmentRequest dto, CancellationToken cancellationToken)
+    {
+        await ValidateAsync(entity.Id, dto, cancellationToken);
+        if (dto.ParentId == entity.ParentId) return;
+
+        // Re-root the whole subtree; saved together with the department itself by the base update.
+        var oldPath = entity.Path;
+        var parentPath = dto.ParentId is { } parentId
+            ? await Context.Departments.Where(d => d.Id == parentId).Select(d => d.Path).FirstAsync(cancellationToken)
+            : "/";
+        var newPath = $"{parentPath}{entity.Id}/";
+        var descendants = await Context.Departments.Where(d => d.Id != entity.Id && d.Path.StartsWith(oldPath)).ToListAsync(cancellationToken);
+        foreach (var child in descendants)
+        {
+            child.Path = newPath + child.Path[oldPath.Length..];
+            child.Depth = PathDepth(child.Path);
+        }
+        entity.Path = newPath;
+        entity.Depth = PathDepth(newPath);
+    }
 
     protected override async Task BeforeDeleteAsync(Department entity, CancellationToken cancellationToken)
     {
@@ -73,7 +129,8 @@ public class DepartmentService(ApplicationDbContext context, IIamService iam, IC
 
     protected override Task AfterUpdateAsync(Department entity, UpdateDepartmentRequest dto, CancellationToken cancellationToken) { iam.Invalidate(); return Task.CompletedTask; }
     protected override Task AfterDeleteAsync(Department entity, CancellationToken cancellationToken) { iam.Invalidate(); return Task.CompletedTask; }
-    protected override Task AfterCreateAsync(Department entity, CreateDepartmentRequest dto, CancellationToken cancellationToken) { iam.Invalidate(); return Task.CompletedTask; }
+
+    private static int PathDepth(string path) => path.Count(c => c == '/') - 1;
 
     private async Task ValidateAsync(int? id, CreateDepartmentRequest dto, CancellationToken cancellationToken)
     {
@@ -84,10 +141,25 @@ public class DepartmentService(ApplicationDbContext context, IIamService iam, IC
         await OrgRules.RequirePlacementAsync(Context, dto.CompanyId, dto.BranchId, null, null, cancellationToken);
         _scope.Require(dto.BranchId, id);
         PostingTransaction.Require(!await Context.Departments.AnyAsync(d => d.Id != id && d.CompanyId == dto.CompanyId && d.Code == dto.Code, cancellationToken), "error.validation.duplicate", 409);
+
+        // Level: a group level or one of the company's own levels; null falls back to the group DEPARTMENT level.
+        dto.LevelId ??= await Context.DepartmentLevels.Where(l => l.CompanyId == null && l.Code == DepartmentLevel.DepartmentCode)
+            .Select(l => (int?)l.Id).FirstOrDefaultAsync(cancellationToken);
+        var level = await Context.DepartmentLevels.AsNoTracking()
+            .Where(l => l.Id == dto.LevelId && l.IsActive && (l.CompanyId == null || l.CompanyId == dto.CompanyId))
+            .Select(l => new { l.SortOrder }).FirstOrDefaultAsync(cancellationToken);
+        PostingTransaction.Require(level != null, "error.validation.reference");
+        if (id is { } self)
+        {
+            var childLevels = await Context.Departments.Where(d => d.ParentId == self).Select(d => d.Level!.SortOrder).ToListAsync(cancellationToken);
+            PostingTransaction.Require(childLevels.All(order => order > level!.SortOrder), "error.hrm.department_level_order");
+        }
         if (dto.ParentId is not { } parentId) return;
 
-        var parents = await Context.Departments.AsNoTracking().Select(d => new { d.Id, d.ParentId, d.CompanyId }).ToDictionaryAsync(d => d.Id, cancellationToken);
+        var parents = await Context.Departments.AsNoTracking()
+            .Select(d => new { d.Id, d.ParentId, d.CompanyId, LevelOrder = d.Level!.SortOrder }).ToDictionaryAsync(d => d.Id, cancellationToken);
         PostingTransaction.Require(parents.TryGetValue(parentId, out var parent) && parent.CompanyId == dto.CompanyId, "error.validation.reference");
+        PostingTransaction.Require(level!.SortOrder > parent!.LevelOrder, "error.hrm.department_level_order");
         // Walk up from the new parent; reaching the edited department would close a cycle.
         int? cursor = parentId;
         var steps = 0;
@@ -96,6 +168,59 @@ public class DepartmentService(ApplicationDbContext context, IIamService iam, IC
             PostingTransaction.Require(current != id && steps++ <= parents.Count, "error.validation.reference");
             cursor = parents.TryGetValue(current, out var node) ? node.ParentId : null;
         }
+    }
+}
+
+/// <summary>
+/// Department level catalog. Group levels (no company) need an unrestricted scope; levels in use by a
+/// department cannot be deleted.
+/// </summary>
+public class DepartmentLevelService(ApplicationDbContext context, ICurrentUser? user = null)
+    : BaseCrudService<DepartmentLevel, DepartmentLevelDto, CreateDepartmentLevelRequest, UpdateDepartmentLevelRequest>(context)
+{
+    private readonly HrmScope _scope = new(user);
+
+    protected override async Task BeforeCreateAsync(DepartmentLevel entity, CreateDepartmentLevelRequest dto, CancellationToken cancellationToken)
+    {
+        await ValidateAsync(null, dto, cancellationToken);
+        entity.Code = dto.Code;
+        entity.Name = dto.Name;
+        entity.StandardLevelCode = dto.StandardLevelCode;
+    }
+
+    protected override async Task BeforeUpdateAsync(DepartmentLevel entity, UpdateDepartmentLevelRequest dto, CancellationToken cancellationToken)
+    {
+        RequireOwner(entity.CompanyId);
+        await ValidateAsync(entity.Id, dto, cancellationToken);
+        if (dto.SortOrder == entity.SortOrder) return;
+        // A new order must keep every existing parent/child pair valid.
+        var id = entity.Id;
+        var broken = await Context.Departments.AnyAsync(d => d.ParentId != null
+            && ((d.LevelId == id && d.Parent!.Level!.SortOrder >= dto.SortOrder) || (d.Parent!.LevelId == id && d.Level!.SortOrder <= dto.SortOrder)), cancellationToken);
+        PostingTransaction.Require(!broken, "error.hrm.department_level_order");
+    }
+
+    protected override async Task BeforeDeleteAsync(DepartmentLevel entity, CancellationToken cancellationToken)
+    {
+        RequireOwner(entity.CompanyId);
+        PostingTransaction.Require(!await Context.Departments.AnyAsync(d => d.LevelId == entity.Id, cancellationToken), "error.validation.reference", 409);
+    }
+
+    private void RequireOwner(int? companyId) =>
+        PostingTransaction.Require(_scope.All || (companyId is { } c && _scope.Branches.Contains(c)), "error.access.denied", 403);
+
+    private async Task ValidateAsync(int? id, CreateDepartmentLevelRequest dto, CancellationToken cancellationToken)
+    {
+        dto.Code = (dto.Code ?? "").Trim().ToUpperInvariant();
+        dto.Name = (dto.Name ?? "").Trim();
+        dto.StandardLevelCode = string.IsNullOrWhiteSpace(dto.StandardLevelCode) ? null : dto.StandardLevelCode.Trim().ToUpperInvariant();
+        dto.Translations ??= new();
+        PostingTransaction.Require(dto.Code.Length is > 0 and <= 50 && dto.Name.Length is > 0 and <= 200 && (dto.StandardLevelCode?.Length ?? 0) <= 50, "error.validation.required");
+        PostingTransaction.Require(dto.SortOrder > 0, "error.validation.request");
+        RequireOwner(dto.CompanyId);
+        PostingTransaction.Require(dto.CompanyId == null || await Context.Branches.IgnoreQueryFilters()
+            .AnyAsync(b => b.Id == dto.CompanyId && !b.IsDeleted && b.OrgUnitType == OrgUnitType.Company, cancellationToken), "error.validation.reference");
+        PostingTransaction.Require(!await Context.DepartmentLevels.AnyAsync(l => l.Id != id && l.CompanyId == dto.CompanyId && l.Code == dto.Code, cancellationToken), "error.validation.duplicate", 409);
     }
 }
 
@@ -170,6 +295,14 @@ public class EmployeeService(ApplicationDbContext context, IIamService iam, ICur
 
     protected override async Task<Employee?> FindEntityAsync(int id, CancellationToken cancellationToken) =>
         await PrepareQuery(DbSet).FirstOrDefaultAsync(e => e.Id == id, cancellationToken);
+
+    protected override IQueryable<Employee> ApplyFilters(IQueryable<Employee> query, BaseFilterQuery filter)
+    {
+        query = base.ApplyFilters(query, filter);
+        return filter is EmployeeFilterQuery { WithoutAccount: { } withoutAccount }
+            ? query.Where(e => (e.UserId == null) == withoutAccount)
+            : query;
+    }
 
     protected override async Task BeforeCreateAsync(Employee entity, CreateEmployeeRequest dto, CancellationToken cancellationToken)
     {
