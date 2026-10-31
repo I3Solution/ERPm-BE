@@ -9,4 +9,6 @@ public interface IBranchService
     Task<BranchDto?> GetBranchByIdAsync(int id, CancellationToken cancellationToken = default);
     Task<List<int>> GetBranchAndDescendantIdsAsync(int branchId, CancellationToken cancellationToken = default);
     Task<BranchDto> CreateBranchAsync(CreateBranchRequest request, CancellationToken cancellationToken = default);
+    Task<BranchDto?> UpdateBranchAsync(int id, UpdateBranchRequest request, CancellationToken cancellationToken = default);
+    Task<bool> DeleteBranchAsync(int id, CancellationToken cancellationToken = default);
 }

@@ -20,6 +20,19 @@ public class BranchDto
     public List<BranchDto> Children { get; set; } = new();
 }
 
+/// <summary>Edit of an org tree node. The node type (OrgUnitType) never changes after creation.</summary>
+public class UpdateBranchRequest
+{
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public int? ParentId { get; set; }
+    public string? TaxCode { get; set; }
+    public string? Address { get; set; }
+    public string? Phone { get; set; }
+    public string? Email { get; set; }
+    public bool IsActive { get; set; } = true;
+}
+
 public class CreateBranchRequest
 {
     public string Code { get; set; } = string.Empty;

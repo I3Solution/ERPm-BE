@@ -222,6 +222,9 @@ try
         Check(branchPayload.RootElement.GetProperty("data").GetArrayLength() == 1, "HTTP branch scope excludes other branches");
         using var forbidden = await http.PostAsJsonAsync("/api/v1/stock/receipts", Receipt(1, 20));
         Check(forbidden.StatusCode == HttpStatusCode.Forbidden, "viewer cannot post stock receipts");
+        using var branchEditDenied = await http.PutAsJsonAsync($"/api/v1/branches/{allowedBranch.Id}", new { code = "X", name = "X", parentId = (int?)null, isActive = true });
+        using var branchDeleteDenied = await http.DeleteAsync($"/api/v1/branches/{allowedBranch.Id}");
+        Check(branchEditDenied.StatusCode == HttpStatusCode.Forbidden && branchDeleteDenied.StatusCode == HttpStatusCode.Forbidden, "viewer cannot edit or delete branches");
         http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
         using var order = await http.PostAsJsonAsync("/api/v1/sales/orders", new { branchId = branch.Id, customerId = customer.Id, discountAmount = 10, taxAmount = 5, items = new[] { new { itemId = item.Id, quantity = 2, unitPrice = 100 } } });
         if (!order.IsSuccessStatusCode) throw new Exception("Order failed: " + await order.Content.ReadAsStringAsync());

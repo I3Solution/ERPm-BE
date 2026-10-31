@@ -69,4 +69,25 @@ public class BranchesController : BaseApiController
         var result = await _branchService.CreateBranchAsync(request, cancellationToken);
         return Ok(ApiResponse<BranchDto>.Ok(result, "common.saved"));
     }
+
+    /// <summary>
+    /// Edits a node of the org tree (code, name, tax code, contact, active flag, parent). The node type never changes.
+    /// </summary>
+    [RequirePermission("sys:branch:edit")]
+    [HttpPut("{id:int}")]
+    public async Task<ActionResult<ApiResponse<BranchDto>>> UpdateBranch(int id, [FromBody] UpdateBranchRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _branchService.UpdateBranchAsync(id, request, cancellationToken);
+        return result == null ? NotFound(ApiResponse<BranchDto>.Fail("error.validation.reference")) : Ok(ApiResponse<BranchDto>.Ok(result, "common.saved"));
+    }
+
+    /// <summary>
+    /// Soft-deletes a node that nothing references any more; otherwise deactivate it with IsActive = false.
+    /// </summary>
+    [RequirePermission("sys:branch:delete")]
+    [HttpDelete("{id:int}")]
+    public async Task<ActionResult<ApiResponse<bool>>> DeleteBranch(int id, CancellationToken cancellationToken) =>
+        await _branchService.DeleteBranchAsync(id, cancellationToken)
+            ? Ok(ApiResponse<bool>.Ok(true, "common.saved"))
+            : NotFound(ApiResponse<bool>.Fail("error.validation.reference"));
 }
