@@ -57,7 +57,7 @@ public sealed class AuthController(AccountService accounts, ApplicationDbContext
                 Employee = context.Employees.Where(e => e.UserId == u.Id).Select(e => new { e.Id, e.Code, e.FullName }).FirstOrDefault()
             })
             .Select(x => new AccountDto(x.User.Id, x.User.UserName, x.User.DisplayName, x.User.Role, x.User.BranchIds.ToArray(),
-                x.Employee == null ? null : x.Employee.Id, x.Employee == null ? null : x.Employee.Code, x.Employee == null ? null : x.Employee.FullName))
+                x.Employee == null ? null : x.Employee.Id, x.Employee == null ? null : x.Employee.Code, x.Employee == null ? null : x.Employee.FullName, x.User.IsActive))
             .ToListAsync(ct)));
     }
 
