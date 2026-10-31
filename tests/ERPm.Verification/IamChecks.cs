@@ -219,6 +219,8 @@ static class IamChecks
             "a user Deny overrides the Allow inherited from the department");
 
         var foreignDepartment = await departments.CreateAsync(new CreateDepartmentRequest { Code = "CB_DEP", Name = "Other company", CompanyId = otherCompany.Id, BranchId = otherCompany.Id });
+        var byCompany = await departments.GetPagedAsync(new DepartmentFilterQuery { CompanyId = otherCompany.Id, PageSize = 100 });
+        t.Check(byCompany.Items.Select(d => d.Id).SequenceEqual([foreignDepartment.Id]), "department list filters by company");
         await t.Reject(() => guarded.SetDepartmentRolesAsync(foreignDepartment.Id, [new() { RoleId = created.Id }]), "error.iam.company_scope");
 
         // Task 20.3.3: edit, move and delete org tree nodes.

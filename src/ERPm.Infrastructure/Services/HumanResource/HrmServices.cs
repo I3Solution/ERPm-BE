@@ -59,6 +59,7 @@ public class DepartmentService(ApplicationDbContext context, IIamService iam, IC
     {
         query = base.ApplyFilters(query, filter);
         if (filter is not DepartmentFilterQuery departmentFilter) return query;
+        if (departmentFilter.CompanyId is { } companyId) query = query.Where(d => d.CompanyId == companyId);
         if (!string.IsNullOrWhiteSpace(departmentFilter.LevelCode))
         {
             var code = departmentFilter.LevelCode.Trim().ToUpperInvariant();
