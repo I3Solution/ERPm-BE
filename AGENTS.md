@@ -64,3 +64,8 @@ Chào bạn AI Assistant, bạn đang làm việc trên repository **ERPm-BE** -
      - `.ai/status.md` chỉ ghi một dòng ở **In-Progress** / **Next Steps** và trỏ link tới plan hoặc file task, không chép lại chi tiết.
    - **Khi xong:** chuyển trạng thái sang `Done`, ghi kết quả kiểm tra và commit liên quan, rồi thêm một dòng vào **Completed** của `.ai/status.md`.
    - Việc nhỏ (sửa chính tả, đổi một nhãn) không cần file task; commit message đúng tag là đủ.
+
+7. **Quy tắc tạo card Trello:** theo mục 7 `AGENTS.md` của repo gốc `ERPm`.
+   - Tên card: `[tag](MODULE) <MÃ> <tiêu đề>`.
+   - Cột: Backlog / Todo / Doing / Blocked / Review / Done.
+   - Mỗi card link tới plan hoặc file task, kèm checklist build và test.
