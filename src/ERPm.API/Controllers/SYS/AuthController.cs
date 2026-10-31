@@ -51,7 +51,14 @@ public sealed class AuthController(AccountService accounts, ApplicationDbContext
         var all = principal.IsSuperAdmin;
         return Ok(ApiResponse<List<AccountDto>>.Ok(await context.AppUsers.AsNoTracking()
             .Where(u => all || context.Employees.Any(e => e.UserId == u.Id && e.CompanyId == companyId))
-            .Select(u => new AccountDto(u.Id, u.UserName, u.DisplayName, u.Role, u.BranchIds.ToArray())).ToListAsync(ct)));
+            .Select(u => new
+            {
+                User = u,
+                Employee = context.Employees.Where(e => e.UserId == u.Id).Select(e => new { e.Id, e.Code, e.FullName }).FirstOrDefault()
+            })
+            .Select(x => new AccountDto(x.User.Id, x.User.UserName, x.User.DisplayName, x.User.Role, x.User.BranchIds.ToArray(),
+                x.Employee == null ? null : x.Employee.Id, x.Employee == null ? null : x.Employee.Code, x.Employee == null ? null : x.Employee.FullName))
+            .ToListAsync(ct)));
     }
 
     [RequirePermission("sys:user:edit"), HttpPut("users/{id:int}")]

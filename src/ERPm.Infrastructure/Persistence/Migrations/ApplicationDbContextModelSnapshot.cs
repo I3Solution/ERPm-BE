@@ -758,6 +758,133 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("deleted_by");
 
+                    b.Property<int>("Depth")
+                        .HasColumnType("integer")
+                        .HasColumnName("depth");
+
+                    b.Property<DateOnly?>("EffectiveFrom")
+                        .HasColumnType("date")
+                        .HasColumnName("effective_from");
+
+                    b.Property<DateOnly?>("EffectiveTo")
+                        .HasColumnType("date")
+                        .HasColumnName("effective_to");
+
+                    b.Property<Guid>("ExternalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("external_id");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
+                    b.Property<DateTime?>("LastModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_modified_at_utc");
+
+                    b.Property<string>("LastModifiedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("last_modified_by");
+
+                    b.Property<int>("LevelId")
+                        .HasColumnType("integer")
+                        .HasColumnName("level_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<int?>("ParentId")
+                        .HasColumnType("integer")
+                        .HasColumnName("parent_id");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("path");
+
+                    b.Property<int?>("TenantId")
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("Translations")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("translations");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_hrm_department");
+
+                    b.HasIndex("BranchId")
+                        .HasDatabaseName("ix_tbl_hrm_department_branch_id");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_hrm_department_external_id");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id", "IsDeleted" });
+
+                    b.HasIndex("LevelId")
+                        .HasDatabaseName("ix_tbl_hrm_department_level_id");
+
+                    b.HasIndex("ParentId")
+                        .HasDatabaseName("ix_tbl_hrm_department_parent_id");
+
+                    b.HasIndex("Path")
+                        .HasDatabaseName("ix_tbl_hrm_department_path");
+
+                    NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("Path"), new[] { "text_pattern_ops" });
+
+                    b.HasIndex("CompanyId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_hrm_department_company_id_code")
+                        .HasFilter("is_deleted = false");
+
+                    b.ToTable("tbl_HRM_Department", (string)null);
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.HumanResource.DepartmentLevel", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("code");
+
+                    b.Property<int?>("CompanyId")
+                        .HasColumnType("integer")
+                        .HasColumnName("company_id");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("created_by");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at_utc");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("deleted_by");
+
                     b.Property<Guid>("ExternalId")
                         .HasColumnType("uuid")
                         .HasColumnName("external_id");
@@ -784,9 +911,14 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("name");
 
-                    b.Property<int?>("ParentId")
+                    b.Property<int>("SortOrder")
                         .HasColumnType("integer")
-                        .HasColumnName("parent_id");
+                        .HasColumnName("sort_order");
+
+                    b.Property<string>("StandardLevelCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("standard_level_code");
 
                     b.Property<int?>("TenantId")
                         .HasColumnType("integer")
@@ -798,26 +930,22 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnName("translations");
 
                     b.HasKey("Id")
-                        .HasName("pk_tbl_hrm_department");
-
-                    b.HasIndex("BranchId")
-                        .HasDatabaseName("ix_tbl_hrm_department_branch_id");
+                        .HasName("pk_tbl_hrm_department_level");
 
                     b.HasIndex("ExternalId")
                         .IsUnique()
-                        .HasDatabaseName("ix_tbl_hrm_department_external_id");
+                        .HasDatabaseName("ix_tbl_hrm_department_level_external_id");
 
                     NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id", "IsDeleted" });
 
-                    b.HasIndex("ParentId")
-                        .HasDatabaseName("ix_tbl_hrm_department_parent_id");
-
                     b.HasIndex("CompanyId", "Code")
                         .IsUnique()
-                        .HasDatabaseName("ix_tbl_hrm_department_company_id_code")
+                        .HasDatabaseName("ix_tbl_hrm_department_level_company_id_code")
                         .HasFilter("is_deleted = false");
 
-                    b.ToTable("tbl_HRM_Department", (string)null);
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("CompanyId", "Code"), false);
+
+                    b.ToTable("tbl_HRM_DepartmentLevel", (string)null);
                 });
 
             modelBuilder.Entity("ERPm.Domain.Entities.HumanResource.Employee", b =>
@@ -2829,6 +2957,50 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     b.ToTable("tbl_SYS_Branch", (string)null);
                 });
 
+            modelBuilder.Entity("ERPm.Domain.Entities.System.DepartmentRole", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("ApplyToChildren")
+                        .HasColumnType("boolean")
+                        .HasColumnName("apply_to_children");
+
+                    b.Property<int>("DepartmentId")
+                        .HasColumnType("integer")
+                        .HasColumnName("department_id");
+
+                    b.Property<Guid>("ExternalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("external_id");
+
+                    b.Property<int>("RoleId")
+                        .HasColumnType("integer")
+                        .HasColumnName("role_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_sys_department_role");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_sys_department_role_external_id");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id" });
+
+                    b.HasIndex("RoleId")
+                        .HasDatabaseName("ix_tbl_sys_department_role_role_id");
+
+                    b.HasIndex("DepartmentId", "RoleId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_sys_department_role_department_id_role_id");
+
+                    b.ToTable("tbl_SYS_DepartmentRole", (string)null);
+                });
+
             modelBuilder.Entity("ERPm.Domain.Entities.System.IamRole", b =>
                 {
                     b.Property<int>("Id")
@@ -3672,6 +3844,13 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_tbl_hrm_department_tbl_sys_branch_company_id");
 
+                    b.HasOne("ERPm.Domain.Entities.HumanResource.DepartmentLevel", "Level")
+                        .WithMany()
+                        .HasForeignKey("LevelId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_hrm_department_department_levels_level_id");
+
                     b.HasOne("ERPm.Domain.Entities.HumanResource.Department", "Parent")
                         .WithMany("Children")
                         .HasForeignKey("ParentId")
@@ -3682,7 +3861,20 @@ namespace ERPm.Infrastructure.Persistence.Migrations
 
                     b.Navigation("Company");
 
+                    b.Navigation("Level");
+
                     b.Navigation("Parent");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.HumanResource.DepartmentLevel", b =>
+                {
+                    b.HasOne("ERPm.Domain.Entities.System.Branch", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_hrm_department_level_tbl_sys_branch_company_id");
+
+                    b.Navigation("Company");
                 });
 
             modelBuilder.Entity("ERPm.Domain.Entities.HumanResource.Employee", b =>
@@ -4143,6 +4335,27 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_tbl_sys_branch_tbl_sys_branch_parent_id");
 
                     b.Navigation("Parent");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.System.DepartmentRole", b =>
+                {
+                    b.HasOne("ERPm.Domain.Entities.HumanResource.Department", "Department")
+                        .WithMany()
+                        .HasForeignKey("DepartmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_sys_department_role_departments_department_id");
+
+                    b.HasOne("ERPm.Domain.Entities.System.IamRole", "Role")
+                        .WithMany()
+                        .HasForeignKey("RoleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_sys_department_role_tbl_sys_role_role_id");
+
+                    b.Navigation("Department");
+
+                    b.Navigation("Role");
                 });
 
             modelBuilder.Entity("ERPm.Domain.Entities.System.IamRole", b =>

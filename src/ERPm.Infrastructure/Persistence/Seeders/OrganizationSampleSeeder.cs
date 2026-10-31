@@ -48,6 +48,13 @@ public static class OrganizationSampleSeeder
             }
             positions[code] = position.Id;
         }
+        // Department-level grant: every employee of SALES (and its sub-units) gets the sales staff role.
+        var salesStaff = await context.IamRoles.SingleAsync(r => r.CompanyId == null && r.Code == "SALES_STAFF");
+        if (!await context.DepartmentRoles.AnyAsync(l => l.DepartmentId == sales.Id && l.RoleId == salesStaff.Id))
+        {
+            context.DepartmentRoles.Add(new DepartmentRole { DepartmentId = sales.Id, RoleId = salesStaff.Id, ApplyToChildren = true });
+            await context.SaveChangesAsync();
+        }
         return new(company.Id, hanoi.Id, hanoiSub.Id, hcm.Id, accounting.Id, sales.Id, positions);
     }
 
@@ -69,7 +76,11 @@ public static class OrganizationSampleSeeder
     {
         var department = await context.Departments.FirstOrDefaultAsync(d => d.CompanyId == companyId && d.Code == code);
         if (department != null) return department;
-        context.Departments.Add(department = new Department { Code = code, Name = name, CompanyId = companyId, BranchId = branchId });
+        var level = await context.DepartmentLevels.SingleAsync(l => l.CompanyId == null && l.Code == DepartmentLevel.DepartmentCode);
+        context.Departments.Add(department = new Department { Code = code, Name = name, CompanyId = companyId, BranchId = branchId, LevelId = level.Id });
+        await context.SaveChangesAsync();
+        department.Path = $"/{department.Id}/";
+        department.Depth = 1;
         await context.SaveChangesAsync();
         return department;
     }

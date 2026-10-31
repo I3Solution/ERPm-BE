@@ -11,9 +11,10 @@ using Microsoft.EntityFrameworkCore;
 namespace ERPm.API.Security;
 
 public sealed record LoginRequest(string UserName, string Password);
-public sealed record UserRequest(string UserName, string DisplayName, string Password, string Role, int[] BranchIds);
-public sealed record UserAccessRequest(string DisplayName, string Role, int[] BranchIds, bool IsActive, string? Password);
-public sealed record AccountDto(int Id, string UserName, string DisplayName, string Role, int[] BranchIds);
+public sealed record UserRequest(string UserName, string DisplayName, string Password, string Role, int[] BranchIds, int? EmployeeId = null);
+public sealed record UserAccessRequest(string DisplayName, string Role, int[] BranchIds, bool IsActive, string? Password, int? EmployeeId = null);
+public sealed record AccountDto(int Id, string UserName, string DisplayName, string Role, int[] BranchIds,
+    int? EmployeeId = null, string? EmployeeCode = null, string? EmployeeName = null);
 
 public sealed class AccountService(ApplicationDbContext context, PostingTransaction transaction, IIamService iam)
 {
@@ -51,11 +52,16 @@ public sealed class AccountService(ApplicationDbContext context, PostingTransact
         PostingTransaction.Require(request.Role is "Admin" or "None" || ids.Length > 0, "error.auth.branch_required");
         PostingTransaction.Require(await context.Branches.IgnoreQueryFilters().CountAsync(b => !b.IsDeleted && b.IsActive && ids.Contains(b.Id), ct) == ids.Length, "error.inventory.branch_mismatch");
         await EnsureCanAssignAsync(PermissionCatalog.Create, null, request.Role, ids, ct);
+        // Company administrators must link the new account to an employee; only super administrators create unlinked (system) accounts.
+        var granter = await iam.GetCurrentPrincipalAsync(ct);
+        PostingTransaction.Require(granter == null || granter.IsSuperAdmin || request.EmployeeId != null, "error.validation.required");
         var user = new AppUser { UserName = name, DisplayName = request.DisplayName.Trim(), Role = request.Role, BranchIds = ids.ToList() };
         user.PasswordHash = _hasher.HashPassword(user, request.Password);
         context.AppUsers.Add(user);
+        var employee = await LinkEmployeeAsync(user, request.EmployeeId, granter, ct);
         await context.SaveChangesAsync(ct);
-        return new AccountDto(user.Id, user.UserName, user.DisplayName, user.Role, ids);
+        iam.Invalidate();
+        return new AccountDto(user.Id, user.UserName, user.DisplayName, user.Role, ids, employee?.Id, employee?.Code, employee?.FullName);
     }
 
     public static ClaimsPrincipal Principal(AppUser user) => new(new ClaimsIdentity([
@@ -73,6 +79,9 @@ public sealed class AccountService(ApplicationDbContext context, PostingTransact
         PostingTransaction.Require(request.Role is "Admin" or "None" || ids.Length > 0, "error.auth.branch_required");
         PostingTransaction.Require(await context.Branches.IgnoreQueryFilters().CountAsync(b => !b.IsDeleted && b.IsActive && ids.Contains(b.Id), ct) == ids.Length, "error.inventory.branch_mismatch");
         await EnsureCanAssignAsync(PermissionCatalog.Edit, user!.Role, request.Role, ids, ct);
+        var granter = await iam.GetCurrentPrincipalAsync(ct);
+        if (granter is { IsSuperAdmin: false })
+            PostingTransaction.Require(await context.Employees.AnyAsync(e => e.UserId == id && e.CompanyId == granter.Context.CompanyId, ct), "error.iam.company_scope", 403);
         if (user.Role == "Admin" && (!request.IsActive || request.Role != "Admin"))
             PostingTransaction.Require(await context.AppUsers.CountAsync(u => u.IsActive && u.Role == "Admin", ct) > 1, "error.access.denied", 409);
         if (!string.IsNullOrEmpty(request.Password))
@@ -82,9 +91,31 @@ public sealed class AccountService(ApplicationDbContext context, PostingTransact
         }
         user.DisplayName = request.DisplayName.Trim(); user.Role = request.Role; user.BranchIds = ids.ToList(); user.IsActive = request.IsActive;
         user.FailedLoginCount = 0; user.LockedUntilUtc = null; user.SecurityStamp = Guid.NewGuid().ToString("N");
+        var employee = await LinkEmployeeAsync(user, request.EmployeeId, granter, ct);
         await context.SaveChangesAsync(ct);
-        return new(user.Id, user.UserName, user.DisplayName, user.Role, ids);
+        iam.Invalidate();
+        return new(user.Id, user.UserName, user.DisplayName, user.Role, ids, employee?.Id, employee?.Code, employee?.FullName);
     }, ct);
+
+    /// <summary>
+    /// Makes <paramref name="employeeId"/> the only employee linked to the account (null unlinks). Employee.UserId
+    /// stays the single source of the link. The employee must be free and, for company administrators, in their company.
+    /// </summary>
+    private async Task<ERPm.Domain.Entities.HumanResource.Employee?> LinkEmployeeAsync(AppUser user, int? employeeId, IamPrincipal? granter, CancellationToken ct)
+    {
+        var linked = user.Id == 0 ? [] : await context.Employees.Where(e => e.UserId == user.Id).ToListAsync(ct);
+        ERPm.Domain.Entities.HumanResource.Employee? employee = null;
+        if (employeeId is { } target)
+        {
+            employee = await context.Employees.FirstOrDefaultAsync(e => e.Id == target, ct);
+            PostingTransaction.Require(employee != null, "error.validation.reference");
+            PostingTransaction.Require(granter == null || granter.IsSuperAdmin || employee!.CompanyId == granter.Context.CompanyId, "error.iam.company_scope", 403);
+            PostingTransaction.Require(employee!.UserId == null || employee.UserId == user.Id, "error.hrm.user_linked", 409);
+            employee.User = user;
+        }
+        foreach (var other in linked.Where(e => e.Id != employee?.Id)) other.UserId = null;
+        return employee;
+    }
 
     /// <summary>
     /// Privilege escalation guard for account management: only super administrators touch Admin accounts,

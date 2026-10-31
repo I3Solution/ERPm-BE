@@ -67,6 +67,7 @@ public static class DependencyInjection
         services.AddScoped<IIamService, IamService>();
         services.AddScoped<IRoleService, RoleService>();
         services.AddScoped<IBaseCrudService<Department, DepartmentDto, CreateDepartmentRequest, UpdateDepartmentRequest>, DepartmentService>();
+        services.AddScoped<IBaseCrudService<DepartmentLevel, DepartmentLevelDto, CreateDepartmentLevelRequest, UpdateDepartmentLevelRequest>, DepartmentLevelService>();
         services.AddScoped<IBaseCrudService<JobPosition, JobPositionDto, CreateJobPositionRequest, UpdateJobPositionRequest>, JobPositionService>();
         services.AddScoped<IBaseCrudService<Employee, EmployeeDto, CreateEmployeeRequest, UpdateEmployeeRequest>, EmployeeService>();
         services.AddScoped<IBaseCrudService<WorkHistory, WorkHistoryDto, CreateWorkHistoryRequest, UpdateWorkHistoryRequest>, WorkHistoryService>();

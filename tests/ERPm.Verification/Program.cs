@@ -270,6 +270,41 @@ try
         Check((await http.GetAsync("/api/v1/sys/permissions/catalog")).StatusCode == HttpStatusCode.Forbidden
             && (await http.PostAsJsonAsync("/api/v1/wms/categories", new { code = "X", name = "X" })).StatusCode == HttpStatusCode.Forbidden,
             "endpoints outside the inherited roles are forbidden");
+
+        // CR-20-01: accounts are created together with their employee link.
+        http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
+        var salesDepartment = await db.Departments.SingleAsync(d => d.CompanyId == company.Id && d.Code == "SALES");
+        using var caHired = await http.PostAsJsonAsync("/api/v1/hrm/employees", new { code = "E-CA-ADM", fullName = "Company admin", companyId = company.Id, branchId = hanoi.Id, departmentId = salesDepartment.Id, jobPositionId = position.Id });
+        using var caHiredPayload = JsonDocument.Parse(await caHired.Content.ReadAsStringAsync());
+        var caEmployeeId = caHiredPayload.RootElement.GetProperty("data").GetProperty("id").GetInt32();
+        using var free = JsonDocument.Parse(await http.GetStringAsync("/api/v1/hrm/employees?withoutAccount=true&pageSize=100"));
+        Check(free.RootElement.GetProperty("data").GetProperty("items").EnumerateArray().Select(e => e.GetProperty("id").GetInt32()).Contains(caEmployeeId),
+            "employees?withoutAccount=true lists employees without a login");
+        using var caCreated = await http.PostAsJsonAsync("/api/v1/auth/users", new { userName = "ca_admin", displayName = "Company admin", password, role = "None", branchIds = Array.Empty<int>(), employeeId = caEmployeeId });
+        using var caPayload = JsonDocument.Parse(await caCreated.Content.ReadAsStringAsync());
+        var caUserId = caPayload.RootElement.GetProperty("data").GetProperty("id").GetInt32();
+        Check(caCreated.IsSuccessStatusCode && caPayload.RootElement.GetProperty("data").GetProperty("employeeCode").GetString() == "E-CA-ADM",
+            "a user is created together with its employee link");
+        using var caGrant = await http.PutAsJsonAsync($"/api/v1/sys/roles/users/{caUserId}", new
+        {
+            roles = Array.Empty<object>(),
+            inlinePolicy = new { statements = new[] { new { sid = "CompanyUsers", effect = "Allow", actions = new[] { "sys:user:*" }, dataScope = new { mode = "COMPANY" } } } }
+        });
+        Check(caGrant.IsSuccessStatusCode, "super administrator grants company user management");
+        http.DefaultRequestHeaders.Authorization = new("Bearer", await Login("ca_admin"));
+        using var caMe = JsonDocument.Parse(await http.GetStringAsync("/api/v1/auth/me"));
+        var caData = caMe.RootElement.GetProperty("data");
+        Check(caData.GetProperty("employeeId").GetInt32() == caEmployeeId && caData.GetProperty("companyId").GetInt32() == company.Id
+            && caData.GetProperty("departmentId").GetInt32() == salesDepartment.Id
+            && caData.GetProperty("permissions").EnumerateArray().Any(p => p.GetString() == "sd:order:create"),
+            "/auth/me returns the linked employee, its org position and permissions granted by the department");
+        using var unlinked = await http.PostAsJsonAsync("/api/v1/auth/users", new { userName = "ca_nobody", displayName = "No employee", password, role = "None", branchIds = Array.Empty<int>() });
+        Check(unlinked.StatusCode == HttpStatusCode.BadRequest && (await unlinked.Content.ReadAsStringAsync()).Contains("error.validation.required"),
+            "a company administrator cannot create a user without an employee");
+        var takenEmployee = await db.Employees.Where(e => e.Code == "E-HTTP-01").Select(e => e.Id).SingleAsync();
+        using var taken = await http.PostAsJsonAsync("/api/v1/auth/users", new { userName = "ca_dup", displayName = "Duplicate", password, role = "None", branchIds = Array.Empty<int>(), employeeId = takenEmployee });
+        Check(taken.StatusCode == HttpStatusCode.Conflict && (await taken.Content.ReadAsStringAsync()).Contains("error.hrm.user_linked"),
+            "a user cannot be linked to an employee that already has an account");
     }
     finally
     {

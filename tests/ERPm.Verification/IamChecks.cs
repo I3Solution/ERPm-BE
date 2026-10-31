@@ -158,9 +158,71 @@ static class IamChecks
         var admin = await db.IamRoles.SingleAsync(r => r.Code == IamRole.AdminCode);
         await t.Reject(() => guarded.UpdateRoleAsync(admin.Id, new SaveRoleRequest { Code = "ADMIN", Name = "Hijack", PolicyDocument = admin.PolicyDocument }), "error.iam.system_role");
 
-        // Retire the test account so the HTTP stage still bootstraps its administrator on an account-free database.
-        account = await db.AppUsers.SingleAsync(u => u.Id == account.Id);
-        account.IsDeleted = true; account.IsActive = false; await db.SaveChangesAsync();
+        // CR-20-01: department levels, Path maintenance and department roles.
+        var levels = await db.DepartmentLevels.Where(l => l.CompanyId == null).ToDictionaryAsync(l => l.Code, l => l.Id);
+        t.Check(levels.Keys.ToHashSet().SetEquals(["DIVISION", "DEPARTMENT", "SECTION", "TEAM"]), "migration seeds the DIVISION/DEPARTMENT/SECTION/TEAM levels");
+        var departments = new DepartmentService(db, Iam(db));
+        Task<DepartmentDto> Unit(string code, string level, int? parentId, int companyId, int branchId) => departments.CreateAsync(new CreateDepartmentRequest
+        {
+            Code = code, Name = code, CompanyId = companyId, BranchId = branchId, ParentId = parentId, LevelId = levels[level]
+        });
+        var divisionA = await Unit("DIV_A", "DIVISION", null, org.CompanyId, org.HanoiBranchId);
+        var departmentA = await Unit("DEP_A", "DEPARTMENT", divisionA.Id, org.CompanyId, org.HanoiBranchId);
+        var sectionA = await Unit("SEC_A", "SECTION", departmentA.Id, org.CompanyId, org.HanoiBranchId);
+        var teamA = await Unit("TEAM_A", "TEAM", sectionA.Id, org.CompanyId, org.HanoiBranchId);
+        t.Check(teamA.Path == $"/{divisionA.Id}/{departmentA.Id}/{sectionA.Id}/{teamA.Id}/" && teamA.Depth == 4,
+            "Division > Department > Section > Team builds the materialized path");
+        await t.Reject(() => Unit("DEP_UNDER_SEC", "DEPARTMENT", sectionA.Id, org.CompanyId, org.HanoiBranchId), "error.hrm.department_level_order");
+
+        var divisionB = await Unit("DIV_B", "DIVISION", null, org.CompanyId, org.HanoiBranchId);
+        await departments.UpdateAsync(departmentA.Id, new UpdateDepartmentRequest
+        {
+            Code = "DEP_A", Name = "DEP_A", CompanyId = org.CompanyId, BranchId = org.HanoiBranchId, ParentId = divisionB.Id, LevelId = levels["DEPARTMENT"]
+        });
+        var movedTeam = await db.Departments.AsNoTracking().SingleAsync(d => d.Id == teamA.Id);
+        var under = await departments.GetPagedAsync(new DepartmentFilterQuery { UnderId = divisionB.Id, PageSize = 50 });
+        t.Check(movedTeam.Path == $"/{divisionB.Id}/{departmentA.Id}/{sectionA.Id}/{teamA.Id}/"
+            && under.Items.Select(d => d.Id).ToHashSet().SetEquals([divisionB.Id, departmentA.Id, sectionA.Id, teamA.Id]),
+            "moving a department re-roots the Path of its whole subtree (underId filter follows)");
+
+        // Employees in the department and in its section; WAREHOUSE_ACCOUNTANT is granted to the department only.
+        async Task<int> Staff(string code, int departmentId)
+        {
+            var login = new AppUser { UserName = "IAM_" + code, DisplayName = code, Role = "None", PasswordHash = "-" };
+            db.AppUsers.Add(login); await db.SaveChangesAsync();
+            await employees.CreateAsync(new CreateEmployeeRequest
+            {
+                Code = "E-" + code, FullName = code, CompanyId = org.CompanyId, BranchId = org.HanoiBranchId, DepartmentId = departmentId,
+                JobPositionId = org.JobPositions["SALES_ACC"], UserId = login.Id, HireDate = new DateOnly(2026, 1, 1)
+            });
+            return login.Id;
+        }
+        var depUser = await Staff("DEP", departmentA.Id);
+        var secUser = await Staff("SEC", sectionA.Id);
+        await roles.SetDepartmentRolesAsync(departmentA.Id, [new() { RoleId = warehouse.Id, ApplyToChildren = false }]);
+        t.Check((await Iam(db).GetPrincipalAsync(depUser)).Can("wms:receipt:create") && !(await Iam(db).GetPrincipalAsync(secUser)).Can("wms:receipt:create"),
+            "a department role reaches its own employees, not sub-departments without ApplyToChildren");
+        await roles.SetDepartmentRolesAsync(departmentA.Id, [new() { RoleId = warehouse.Id, ApplyToChildren = true }]);
+        t.Check((await Iam(db).GetPrincipalAsync(secUser)).Can("wms:receipt:create"), "ApplyToChildren extends the department role to sub-departments");
+
+        var secEmployee = await db.Employees.AsNoTracking().SingleAsync(e => e.UserId == secUser);
+        await workHistories.CreateAsync(new CreateWorkHistoryRequest
+        {
+            EmployeeId = secEmployee.Id, DateEffective = new DateOnly(2026, 6, 1), CompanyId = org.CompanyId, BranchId = org.HanoiBranchId,
+            DepartmentId = org.AccountingDepartmentId, JobPositionId = org.JobPositions["SALES_ACC"]
+        });
+        t.Check(!(await Iam(db).GetPrincipalAsync(secUser)).Can("wms:receipt:create"), "transferring out of the department drops its roles");
+
+        await roles.SetUserAccessAsync(depUser, new UserAccessPolicyDto { InlinePolicy = SystemRoles.Policy(SystemRoles.Deny("NoReceipts", ["wms:receipt:create"])) });
+        t.Check(!(await Iam(db).GetPrincipalAsync(depUser)).Can("wms:receipt:create") && (await Iam(db).GetPrincipalAsync(depUser)).Can("wms:stock:view"),
+            "a user Deny overrides the Allow inherited from the department");
+
+        var foreignDepartment = await departments.CreateAsync(new CreateDepartmentRequest { Code = "CB_DEP", Name = "Other company", CompanyId = otherCompany.Id, BranchId = otherCompany.Id });
+        await t.Reject(() => guarded.SetDepartmentRolesAsync(foreignDepartment.Id, [new() { RoleId = created.Id }]), "error.iam.company_scope");
+
+        // Retire the test accounts so the HTTP stage still bootstraps its administrator on an account-free database.
+        foreach (var retired in await db.AppUsers.ToListAsync()) { retired.IsDeleted = true; retired.IsActive = false; }
+        await db.SaveChangesAsync();
     }
 }
 

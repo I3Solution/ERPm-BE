@@ -102,6 +102,42 @@ public sealed class RoleService(ApplicationDbContext context, IIamService iam, E
         return ids.Order().ToArray();
     }
 
+    public async Task<List<DepartmentRoleGrantDto>> GetDepartmentRolesAsync(int departmentId, CancellationToken cancellationToken = default)
+    {
+        PostingTransaction.Require(await context.Departments.AnyAsync(d => d.Id == departmentId, cancellationToken), "error.validation.reference", 404);
+        return await context.DepartmentRoles.AsNoTracking().Where(l => l.DepartmentId == departmentId).OrderBy(l => l.RoleId)
+            .Select(l => new DepartmentRoleGrantDto { RoleId = l.RoleId, ApplyToChildren = l.ApplyToChildren }).ToListAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Replaces the roles of a department. The department and the roles must belong to the caller's company
+    /// (super administrators excepted); new or widened grants pass the escalation guard.
+    /// </summary>
+    public async Task<List<DepartmentRoleGrantDto>> SetDepartmentRolesAsync(int departmentId, List<DepartmentRoleGrantDto> grants, CancellationToken cancellationToken = default)
+    {
+        var granter = await iam.GetCurrentPrincipalAsync(cancellationToken);
+        var department = await context.Departments.AsNoTracking().Where(d => d.Id == departmentId).Select(d => new { d.CompanyId }).FirstOrDefaultAsync(cancellationToken);
+        PostingTransaction.Require(department != null, "error.validation.reference", 404);
+        RequireCompany(granter, department!.CompanyId);
+        var wanted = (grants ?? []).GroupBy(g => g.RoleId).Select(g => g.Last()).ToList();
+        var roles = (await LoadAssignableRolesAsync(wanted.Select(g => g.RoleId).ToArray(), department.CompanyId, cancellationToken)).ToDictionary(r => r.Id);
+        var links = await context.DepartmentRoles.Where(l => l.DepartmentId == departmentId).ToListAsync(cancellationToken);
+        // Adding a role or extending it to sub-departments widens access; removing never does.
+        var widened = wanted.Where(g => links.FirstOrDefault(l => l.RoleId == g.RoleId) is not { } link || (g.ApplyToChildren && !link.ApplyToChildren));
+        await iam.EnsureCanGrantAsync(widened.SelectMany(g => roles[g.RoleId].PolicyDocument.Statements), cancellationToken);
+
+        context.DepartmentRoles.RemoveRange(links.Where(l => wanted.All(g => g.RoleId != l.RoleId)));
+        foreach (var grant in wanted)
+        {
+            var link = links.FirstOrDefault(l => l.RoleId == grant.RoleId);
+            if (link == null) context.DepartmentRoles.Add(new DepartmentRole { DepartmentId = departmentId, RoleId = grant.RoleId, ApplyToChildren = grant.ApplyToChildren });
+            else link.ApplyToChildren = grant.ApplyToChildren;
+        }
+        await context.SaveChangesAsync(cancellationToken);
+        iam.Invalidate();
+        return await GetDepartmentRolesAsync(departmentId, cancellationToken);
+    }
+
     public async Task<UserAccessPolicyDto> GetUserAccessAsync(int userId, CancellationToken cancellationToken = default)
     {
         var user = await context.AppUsers.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
