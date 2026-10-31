@@ -234,6 +234,17 @@ public class JobPositionService(ApplicationDbContext context, IIamService iam, I
 {
     private readonly HrmScope _scope = new(user);
 
+    /// <summary>Group-wide positions stay visible; a company's positions only to callers whose scope covers that company.</summary>
+    protected override IQueryable<JobPosition> PrepareQuery(IQueryable<JobPosition> query)
+    {
+        if (_scope.All) return query;
+        var branches = _scope.Branches;
+        return query.Where(p => p.CompanyId == null || branches.Contains(p.CompanyId.Value));
+    }
+
+    protected override async Task<JobPosition?> FindEntityAsync(int id, CancellationToken cancellationToken) =>
+        await PrepareQuery(DbSet).FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
+
     protected override async Task BeforeCreateAsync(JobPosition entity, CreateJobPositionRequest dto, CancellationToken cancellationToken)
     {
         await ValidateAsync(null, dto, cancellationToken);

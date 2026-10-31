@@ -1,3 +1,4 @@
+using ERPm.Application.Common.Crud;
 using ERPm.Application.Common.Interfaces;
 using ERPm.Application.DTOs.HumanResource;
 using ERPm.Application.DTOs.System;
@@ -245,6 +246,15 @@ static class IamChecks
         t.Check(await branches.DeleteBranchAsync(annexStore.Id) && !await db.Branches.AnyAsync(b => b.Id == annexStore.Id)
             && await db.Branches.IgnoreQueryFilters().AnyAsync(b => b.Id == annexStore.Id && b.IsDeleted),
             "delete soft-deletes an unreferenced leaf and refuses nodes with children or references");
+
+        // Job position list: group-wide positions plus those of companies inside the caller's scope.
+        var companyBranchIds = (await db.Branches.IgnoreQueryFilters().Where(b => b.Id == org.CompanyId || b.CompanyId == org.CompanyId).Select(b => b.Id).ToListAsync()).ToHashSet();
+        var foreignPosition = await new JobPositionService(db, Iam(db)).CreateAsync(new CreateJobPositionRequest { Code = "CB_STAFF", Name = "Company B staff", CompanyId = otherCompany.Id, DefaultScopeMode = "BRANCH" });
+        var companyUser = new ScopeUser(account.Id, new EffectiveDataScope(false, companyBranchIds, new HashSet<int>(), false));
+        await using var companyDb = t.Db(companyUser);
+        var positions = await new JobPositionService(companyDb, Iam(companyDb, companyUser), companyUser).GetPagedAsync(new BaseFilterQuery { PageSize = 100 });
+        t.Check(positions.Items.Any(p => p.CompanyId == org.CompanyId) && positions.Items.All(p => p.Id != foreignPosition.Id && (p.CompanyId == null || p.CompanyId == org.CompanyId)),
+            "job position list hides the positions of companies outside the caller's scope");
 
         // Retire the test accounts so the HTTP stage still bootstraps its administrator on an account-free database.
         foreach (var retired in await db.AppUsers.ToListAsync()) { retired.IsDeleted = true; retired.IsActive = false; }
