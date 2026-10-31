@@ -4,6 +4,7 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.14" />
     <ProjectReference Include="..\ERPm.Application\ERPm.Application.csproj" />
     <ProjectReference Include="..\ERPm.Domain\ERPm.Domain.csproj" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
   <ItemGroup>

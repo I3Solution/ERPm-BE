@@ -62,6 +62,11 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<JournalEntry> JournalEntries => Set<JournalEntry>();
     public DbSet<JournalEntryLine> JournalEntryLines => Set<JournalEntryLine>();
+    public DbSet<NotificationTemplate> NotificationTemplates => Set<NotificationTemplate>();
+    public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<NotificationRecipient> NotificationRecipients => Set<NotificationRecipient>();
+    public DbSet<UserNotificationPreference> UserNotificationPreferences => Set<UserNotificationPreference>();
+    public DbSet<NotificationOutbox> NotificationOutboxes => Set<NotificationOutbox>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -244,6 +249,79 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
                 .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasIndex(e => new { e.LanguageCode, e.Key }).IsUnique();
+        });
+
+        // 1.1 Enterprise Notification Engine (Step 21)
+        modelBuilder.Entity<NotificationTemplate>(entity =>
+        {
+            entity.ToTable("tbl_SYS_NotificationTemplate");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.Code).HasMaxLength(100).IsRequired();
+            entity.HasIndex(e => e.Code).IsUnique();
+            entity.Property(e => e.Name).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Category).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.DefaultSeverity).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.SupportedChannels).HasColumnType("jsonb").HasConversion(JsonConverter<List<string>>(), JsonComparer<List<string>>());
+            entity.Property(e => e.TitleTemplate).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.BodyTemplate).IsRequired();
+            entity.Property(e => e.Translations).HasColumnType("jsonb").HasConversion(JsonConverter<Dictionary<string, NotificationTemplateTranslation>>(), JsonComparer<Dictionary<string, NotificationTemplateTranslation>>());
+            entity.Property(e => e.ActionUrlPattern).HasMaxLength(500);
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<Notification>(entity =>
+        {
+            entity.ToTable("tbl_SYS_Notification");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.TemplateCode).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Category).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Severity).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.Title).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.Body).IsRequired();
+            entity.Property(e => e.DataPayload).HasColumnType("jsonb").HasConversion(JsonConverter<Dictionary<string, object>>(), objectDictionaryComparer);
+            entity.Property(e => e.ActionUrl).HasMaxLength(500);
+            entity.Property(e => e.TargetType).HasMaxLength(30).IsRequired();
+            entity.Property(e => e.IdempotencyKey).HasMaxLength(150);
+            entity.HasIndex(e => e.IdempotencyKey).IsUnique();
+            entity.HasOne(e => e.Company).WithMany().HasForeignKey(e => e.CompanyId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.SenderUser).WithMany().HasForeignKey(e => e.SenderUserId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<NotificationRecipient>(entity =>
+        {
+            entity.ToTable("tbl_SYS_NotificationRecipient");
+            ConfigureDualKeyAuditable(entity);
+            entity.HasOne(e => e.Notification).WithMany(n => n.Recipients).HasForeignKey(e => e.NotificationId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => new { e.UserId, e.IsRead });
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<UserNotificationPreference>(entity =>
+        {
+            entity.ToTable("tbl_SYS_UserNotificationPreference");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.Category).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Channel).HasMaxLength(30).IsRequired();
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => new { e.UserId, e.Category, e.Channel }).IsUnique();
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<NotificationOutbox>(entity =>
+        {
+            entity.ToTable("tbl_SYS_NotificationOutbox");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.Channel).HasMaxLength(30).IsRequired();
+            entity.Property(e => e.Destination).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.Payload).HasColumnType("jsonb").HasConversion(JsonConverter<Dictionary<string, object>>(), objectDictionaryComparer);
+            entity.HasOne(e => e.Notification).WithMany(n => n.Outboxes).HasForeignKey(e => e.NotificationId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => new { e.Status, e.NextRetryUtc });
+            entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
         // 2. WMS - Catalog / Master Data

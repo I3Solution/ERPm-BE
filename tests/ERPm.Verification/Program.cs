@@ -178,6 +178,8 @@ try
     db.Branches.AddRange(allowedBranch, deniedBranch); await db.SaveChangesAsync();
     IamChecks.Pure(Check);
     await IamChecks.DatabaseAsync(new(u => Db(u), Check, Reject));
+    ERPm.Verification.NotificationChecks.Pure(Check);
+    await ERPm.Verification.NotificationChecks.RunDbChecksAsync(new(u => Db(u), Check, Reject));
     using var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
     var port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop();
     var password = "Verify-" + Guid.NewGuid().ToString("N");
@@ -241,6 +243,11 @@ try
         http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
         Check((await http.GetAsync("/api/v1/sys/permissions/catalog")).IsSuccessStatusCode && (await http.GetAsync("/api/v1/sys/roles")).IsSuccessStatusCode,
             "super administrator reads the permission catalog and roles");
+        Check((await http.GetAsync("/api/v1/sys/notifications/unread-count")).IsSuccessStatusCode, "admin reads unread notification count over HTTP");
+        Check((await http.GetAsync("/api/v1/sys/notifications")).IsSuccessStatusCode, "admin reads notification list over HTTP");
+        Check((await http.GetAsync("/api/v1/sys/notifications/preferences")).IsSuccessStatusCode, "admin reads preferences over HTTP");
+        using var broadcastResp = await http.PostAsJsonAsync("/api/v1/sys/notifications/broadcast", new { title = "Broadcast", body = "System announcement", category = "SYS", severity = "INFO", targetType = "ALL" });
+        Check(broadcastResp.IsSuccessStatusCode, "admin can broadcast notification over HTTP");
         using var iamCreated = await http.PostAsJsonAsync("/api/v1/auth/users", new { userName = "iam_http", displayName = "IAM HTTP", password, role = "None", branchIds = Array.Empty<int>() });
         Check(iamCreated.IsSuccessStatusCode, "an account without a legacy role can be provisioned");
         using var iamPayload = JsonDocument.Parse(await iamCreated.Content.ReadAsStringAsync());

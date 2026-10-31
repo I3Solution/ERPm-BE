@@ -1,4 +1,7 @@
 using ERPm.Application.Common.Crud;
+using ERPm.Application.Common.Notifications;
+using ERPm.Infrastructure.Notifications;
+using ERPm.Infrastructure.Notifications.Channels;
 using ERPm.Application.Common.Interfaces;
 using ERPm.Application.Features.Catalog;
 using ERPm.Application.Features.Dashboard;
@@ -67,6 +70,15 @@ public static class DependencyInjection
         services.AddScoped<IBaseCrudService<JobPosition, JobPositionDto, CreateJobPositionRequest, UpdateJobPositionRequest>, JobPositionService>();
         services.AddScoped<IBaseCrudService<Employee, EmployeeDto, CreateEmployeeRequest, UpdateEmployeeRequest>, EmployeeService>();
         services.AddScoped<IBaseCrudService<WorkHistory, WorkHistoryDto, CreateWorkHistoryRequest, UpdateWorkHistoryRequest>, WorkHistoryService>();
+
+        // Enterprise Notification Engine (Step 21)
+        services.AddSingleton<ITemplateRenderer, TemplateRenderer>();
+        services.AddScoped<INotificationRouter, NotificationRouter>();
+        services.AddScoped<INotificationChannelProvider, InAppChannelProvider>();
+        services.AddScoped<INotificationChannelProvider, EmailChannelProvider>();
+        services.AddScoped<INotificationEngine, NotificationEngine>();
+        services.AddScoped<INotificationService, NotificationService>();
+        services.AddHostedService<ERPm.Infrastructure.Notifications.BackgroundWorkers.NotificationOutboxWorker>();
 
         return services;
     }

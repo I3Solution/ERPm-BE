@@ -56,6 +56,24 @@ public partial class SalesInvoiceService
             context.AllowCancellation = true;
             try { await context.SaveChangesAsync(cancellationToken); }
             finally { context.AllowCancellation = false; }
+
+            if (notificationEngine != null)
+            {
+                _ = notificationEngine.PublishAsync(new ERPm.Domain.Events.NotificationEvent(
+                    "SD_INVOICE_CANCELLED",
+                    ERPm.Domain.Enums.NotificationCategory.SD,
+                    ERPm.Domain.Enums.NotificationSeverity.DANGER,
+                    ERPm.Domain.Enums.NotificationTargetType.BranchTree,
+                    branchId: invoice.BranchId,
+                    parameters: new Dictionary<string, object>
+                    {
+                        ["invoice_code"] = invoice.InvoiceNumber,
+                        ["total_amount"] = invoice.TotalAmount,
+                        ["cancelled_by"] = user?.UserId ?? "Hệ thống"
+                    },
+                    actionUrl: "/sales/invoices"
+                ));
+            }
             return Map(invoice);
         }, cancellationToken);
     }

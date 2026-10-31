@@ -14,7 +14,7 @@ namespace ERPm.Infrastructure.Services.Iam;
 /// own company; group templates and group-wide positions are reserved to super administrators. Every grant
 /// passes the privilege escalation guard.
 /// </summary>
-public sealed class RoleService(ApplicationDbContext context, IIamService iam) : IRoleService
+public sealed class RoleService(ApplicationDbContext context, IIamService iam, ERPm.Application.Common.Notifications.INotificationEngine? notificationEngine = null) : IRoleService
 {
     public async Task<List<RoleDto>> GetRolesAsync(CancellationToken cancellationToken = default)
     {
@@ -140,6 +140,22 @@ public sealed class RoleService(ApplicationDbContext context, IIamService iam) :
         context.UserRoles.RemoveRange(links);
         context.UserRoles.AddRange(grants.Select(g => new UserRole { UserId = userId, RoleId = g.RoleId, ScopeOverride = g.ScopeOverride }));
         user.InlinePolicy = request.InlinePolicy is { Statements.Count: > 0 } ? request.InlinePolicy : null;
+        if (notificationEngine != null)
+        {
+            var roleNames = string.Join(", ", roles.Values.Select(r => r.Name));
+            _ = notificationEngine.PublishAsync(new ERPm.Domain.Events.NotificationEvent(
+                "SYS_ROLE_CHANGED",
+                ERPm.Domain.Enums.NotificationCategory.SYS,
+                ERPm.Domain.Enums.NotificationSeverity.INFO,
+                ERPm.Domain.Enums.NotificationTargetType.User,
+                targetId: userId,
+                parameters: new Dictionary<string, object>
+                {
+                    ["role_name"] = string.IsNullOrEmpty(roleNames) ? "Tùy biến" : roleNames
+                },
+                actionUrl: "/auth/me"
+            ));
+        }
         await context.SaveChangesAsync(cancellationToken);
         iam.Invalidate();
         return await GetUserAccessAsync(userId, cancellationToken);

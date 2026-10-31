@@ -39,6 +39,7 @@ public static class EssentialDataSeeder
             await context.SaveChangesAsync();
         }
         await SeedRolesAsync(context);
+        await NotificationTemplateSeeder.SeedAsync(context);
         if (!await context.Warehouses.IgnoreQueryFilters().AnyAsync())
         {
             context.Warehouses.Add(new Warehouse { BranchId = root.Id, Code = "MAIN", Name = "Main Warehouse", IsDefault = true, Translations = new() { ["en"] = "Main Warehouse", ["vi"] = "Kho tổng" } });

@@ -15,6 +15,7 @@ public static class PermissionCatalog
     public const string Delete = "delete";
     public const string Confirm = "confirm";
     public const string Cancel = "cancel";
+    public const string Broadcast = "broadcast";
 
     private static readonly (string Resource, string[] Verbs)[] Resources =
     [
@@ -22,6 +23,7 @@ public static class PermissionCatalog
         ("sys:localization", [Edit]),
         ("sys:user", [View, Create, Edit]),
         ("sys:role", [View, Create, Edit, Delete]),
+        ("sys:notification", [View, Edit, Broadcast]),
         ("hrm:department", [View, Create, Edit, Delete]),
         ("hrm:job-position", [View, Create, Edit, Delete]),
         ("hrm:employee", [View, Create, Edit, Delete]),

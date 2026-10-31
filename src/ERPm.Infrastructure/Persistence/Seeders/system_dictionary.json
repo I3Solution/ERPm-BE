@@ -242,7 +242,20 @@
     "error.iam.escalation": "Bạn không thể cấp quyền hoặc phạm vi dữ liệu vượt quá quyền của chính mình.",
     "error.iam.company_scope": "Bạn chỉ được quản lý vai trò, chức danh và tài khoản thuộc công ty của mình.",
     "error.iam.system_role": "Vai trò hệ thống không được sửa hoặc xóa.",
-    "error.hrm.user_linked": "Tài khoản này đã gắn với một nhân viên khác."
+    "error.hrm.user_linked": "Tài khoản này đã gắn với một nhân viên khác.",
+    "notifications.title": "Thông báo",
+    "notifications.center_title": "Trung tâm Thông báo",
+    "notifications.center_subtitle": "Quản lý và theo dõi toàn bộ các sự kiện cảnh báo nghiệp vụ và thông báo hệ thống.",
+    "notifications.mark_all_read": "Đánh dấu tất cả đã đọc",
+    "notifications.empty": "Không có thông báo mới",
+    "notifications.view_all": "Xem tất cả thông báo",
+    "notifications.preferences": "Cài đặt thông báo",
+    "notifications.preferences_title": "Cấu hình Thông báo",
+    "notifications.preferences_subtitle": "Tùy chỉnh kênh nhận tin và khung giờ yên tĩnh cho tài khoản của bạn.",
+    "notifications.back_to_center": "Quay lại Trung tâm thông báo",
+    "notifications.filter_module": "Phân hệ nghiệp vụ",
+    "notifications.filter_severity": "Mức độ quan trọng",
+    "notifications.filter_status": "Trạng thái đọc"
   },
   "en": {
     "common.app_name": "ERPm - Sales & Inventory Management",
@@ -487,6 +500,19 @@
     "error.iam.escalation": "You cannot grant permissions or data ranges beyond your own.",
     "error.iam.company_scope": "You can only manage roles, job positions and accounts of your own company.",
     "error.iam.system_role": "System roles cannot be edited or deleted.",
-    "error.hrm.user_linked": "This account is already linked to another employee."
+    "error.hrm.user_linked": "This account is already linked to another employee.",
+    "notifications.title": "Notifications",
+    "notifications.center_title": "Notification Center",
+    "notifications.center_subtitle": "Manage and track all business alerts and system notifications.",
+    "notifications.mark_all_read": "Mark all as read",
+    "notifications.empty": "No new notifications",
+    "notifications.view_all": "View all notifications",
+    "notifications.preferences": "Notification Preferences",
+    "notifications.preferences_title": "Notification Preferences",
+    "notifications.preferences_subtitle": "Customize delivery channels and quiet hours for your account.",
+    "notifications.back_to_center": "Back to Notification Center",
+    "notifications.filter_module": "Business Module",
+    "notifications.filter_severity": "Severity Level",
+    "notifications.filter_status": "Read Status"
   }
 }

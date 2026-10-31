@@ -7,7 +7,7 @@ using ERPm.Infrastructure.Services.Common;
 using Microsoft.EntityFrameworkCore;
 using static ERPm.Infrastructure.Services.Common.PostingTransaction;
 namespace ERPm.Infrastructure.Services;
-public sealed class SalesOrderService(ApplicationDbContext context, PostingTransaction posting)
+public sealed class SalesOrderService(ApplicationDbContext context, PostingTransaction posting, ERPm.Application.Common.Notifications.INotificationEngine? notificationEngine = null)
     : BaseCrudService<SalesOrder, SalesOrderDto, CreateSalesOrderRequest, UpdateSalesOrderRequest>(context), IOrderWorkflow<SalesOrderDto>
 {
     protected override IQueryable<SalesOrder> PrepareQuery(IQueryable<SalesOrder> query) => query.Include(o => o.Items);
@@ -48,6 +48,28 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
         Require(entity!.Status == "Draft", "error.order.state", 409);
         entity.Status = "Confirmed";
         await Context.SaveChangesAsync(ct);
+
+        if (notificationEngine != null)
+        {
+            var customerName = entity.CustomerId.HasValue
+                ? await Context.Set<Partner>().Where(p => p.Id == entity.CustomerId).Select(p => p.Name).FirstOrDefaultAsync(ct)
+                : "Khách lẻ";
+
+            _ = notificationEngine.PublishAsync(new ERPm.Domain.Events.NotificationEvent(
+                "SD_ORDER_NEW",
+                ERPm.Domain.Enums.NotificationCategory.SD,
+                ERPm.Domain.Enums.NotificationSeverity.INFO,
+                ERPm.Domain.Enums.NotificationTargetType.BranchTree,
+                branchId: entity.BranchId,
+                parameters: new Dictionary<string, object>
+                {
+                    ["order_code"] = entity.OrderNumber,
+                    ["customer_name"] = customerName ?? "Khách lẻ",
+                    ["total_amount"] = entity.TotalAmount
+                },
+                actionUrl: "/sales/pos"
+            ));
+        }
         return MapToDto(entity);
     }, ct);
     private async Task PrepareAsync(SalesOrder entity, CreateSalesOrderRequest request, CancellationToken ct)

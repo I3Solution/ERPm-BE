@@ -19,6 +19,7 @@ builder.Configuration.AddJsonFile("appsettings.local.json", optional: true).AddE
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddSignalR();
 builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<PermissionFilter>();
 builder.Services.AddControllers(options => options.Filters.AddService<PermissionFilter>()).ConfigureApiBehaviorOptions(options =>
@@ -50,7 +51,8 @@ builder.Services.AddRateLimiter(options =>
 var origins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? [];
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
 {
-    if (origins.Length > 0) policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod();
+    if (origins.Length > 0) policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod().AllowCredentials();
+    else policy.SetIsOriginAllowed(_ => true).AllowAnyHeader().AllowAnyMethod().AllowCredentials();
 }));
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options => options.SwaggerDoc("v1", new OpenApiInfo { Title = "ERPm API", Version = "v1" }));
@@ -64,10 +66,21 @@ if (app.Environment.IsDevelopment())
 if (!app.Environment.IsDevelopment()) app.UseHttpsRedirection();
 app.UseCors();
 app.UseRateLimiter();
+app.Use(async (context, next) =>
+{
+    var accessToken = context.Request.Query["access_token"];
+    var path = context.Request.Path;
+    if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+    {
+        context.Request.Headers.Authorization = $"Bearer {accessToken}";
+    }
+    await next();
+});
 app.UseAuthentication();
 app.UseMiddleware<AccountValidationMiddleware>();
 app.UseAuthorization();
 app.MapControllers();
+app.MapHub<ERPm.Infrastructure.Hubs.NotificationHub>("/hubs/notifications");
 await using (var scope = app.Services.CreateAsyncScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
@@ -82,7 +95,7 @@ await using (var scope = app.Services.CreateAsyncScope())
         if ((await db.Database.GetPendingMigrationsAsync()).Any()) throw new InvalidOperationException("Database migrations pending. Run with --migrate before starting the API.");
     }
     var password = builder.Configuration["BootstrapAdmin:Password"];
-    if (!string.IsNullOrEmpty(password) && !await db.AppUsers.AnyAsync())
+    if (!string.IsNullOrEmpty(password) && !await db.AppUsers.AnyAsync(u => u.UserName == "admin"))
         await scope.ServiceProvider.GetRequiredService<AccountService>().CreateAsync(new(
             builder.Configuration["BootstrapAdmin:UserName"] ?? "admin", "Administrator", password, "Admin", []), default);
 }

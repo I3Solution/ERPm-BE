@@ -51,5 +51,12 @@ public interface IApplicationDbContext
     DbSet<JournalEntry> JournalEntries { get; }
     DbSet<JournalEntryLine> JournalEntryLines { get; }
 
+    // Enterprise Notification Engine
+    DbSet<NotificationTemplate> NotificationTemplates { get; }
+    DbSet<Notification> Notifications { get; }
+    DbSet<NotificationRecipient> NotificationRecipients { get; }
+    DbSet<UserNotificationPreference> UserNotificationPreferences { get; }
+    DbSet<NotificationOutbox> NotificationOutboxes { get; }
+
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

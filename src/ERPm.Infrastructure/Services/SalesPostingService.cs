@@ -14,7 +14,7 @@ using static ERPm.Infrastructure.Services.Common.PostingTransaction;
 
 namespace ERPm.Infrastructure.Services;
 
-public partial class SalesInvoiceService(ApplicationDbContext context, IBranchService branches, PostingTransaction posting, ICurrentUser? user = null) : ISalesInvoiceService
+public partial class SalesInvoiceService(ApplicationDbContext context, IBranchService branches, PostingTransaction posting, ICurrentUser? user = null, ERPm.Application.Common.Notifications.INotificationEngine? notificationEngine = null) : ISalesInvoiceService
 {
     public async Task<List<SalesInvoiceDto>> GetInvoicesAsync(int? branchId = null, CancellationToken cancellationToken = default)
     {
@@ -96,6 +96,27 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
                     issue.Items.Add(new StockIssueItem { ItemId = item.Id, Quantity = line.Quantity, UnitCost = cost, TotalCost = costAmount });
                     balances[item.Id].QuantityOnHand -= line.Quantity;
                     balances[item.Id].InventoryValue -= costAmount;
+
+                    if (notificationEngine != null && item.MinStockAlert > 0 && balances[item.Id].QuantityOnHand <= item.MinStockAlert)
+                    {
+                        _ = notificationEngine.PublishAsync(new ERPm.Domain.Events.NotificationEvent(
+                            "WMS_LOW_STOCK",
+                            ERPm.Domain.Enums.NotificationCategory.WMS,
+                            ERPm.Domain.Enums.NotificationSeverity.WARNING,
+                            ERPm.Domain.Enums.NotificationTargetType.BranchTree,
+                            branchId: warehouse.BranchId,
+                            parameters: new Dictionary<string, object>
+                            {
+                                ["item_name"] = item.Name,
+                                ["item_code"] = item.Code,
+                                ["warehouse_name"] = warehouse.Name,
+                                ["current_stock"] = balances[item.Id].QuantityOnHand,
+                                ["min_stock"] = item.MinStockAlert,
+                                ["uom"] = item.BaseUom?.Name ?? "cái"
+                            },
+                            actionUrl: $"/inventory?search={item.Code}"
+                        ));
+                    }
                 }
             }
             invoice.SubTotal = invoice.Items.Sum(i => i.Amount);
