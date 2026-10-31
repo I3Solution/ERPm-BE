@@ -19,7 +19,7 @@ public static class PermissionCatalog
 
     private static readonly (string Resource, string[] Verbs)[] Resources =
     [
-        ("sys:branch", [View, Create]),
+        ("sys:branch", [View, Create, Edit, Delete]),
         ("sys:localization", [Edit]),
         ("sys:user", [View, Create, Edit]),
         ("sys:role", [View, Create, Edit, Delete]),

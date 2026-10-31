@@ -7,6 +7,7 @@ using ERPm.Domain.Entities.System;
 using ERPm.Domain.Services.Iam;
 using ERPm.Infrastructure.Persistence;
 using ERPm.Infrastructure.Persistence.Seeders;
+using ERPm.Infrastructure.Services;
 using ERPm.Infrastructure.Services.HumanResource;
 using ERPm.Infrastructure.Services.Iam;
 using Microsoft.EntityFrameworkCore;
@@ -219,6 +220,29 @@ static class IamChecks
 
         var foreignDepartment = await departments.CreateAsync(new CreateDepartmentRequest { Code = "CB_DEP", Name = "Other company", CompanyId = otherCompany.Id, BranchId = otherCompany.Id });
         await t.Reject(() => guarded.SetDepartmentRolesAsync(foreignDepartment.Id, [new() { RoleId = created.Id }]), "error.iam.company_scope");
+
+        // Task 20.3.3: edit, move and delete org tree nodes.
+        var branches = new BranchService(db, Iam(db));
+        var annex = await branches.CreateBranchAsync(new CreateBranchRequest { Code = "CA_ANNEX", Name = "Annex", ParentId = org.CompanyId });
+        var annexStore = await branches.CreateBranchAsync(new CreateBranchRequest { Code = "CA_ANNEX_01", Name = "Annex store", ParentId = annex.Id });
+        var renamed = await branches.UpdateBranchAsync(annex.Id, new UpdateBranchRequest { Code = "CA_ANNEX", Name = "Annex renamed", ParentId = org.CompanyId, Phone = "000", IsActive = true });
+        t.Check(renamed!.Name == "Annex renamed" && renamed.Phone == "000" && renamed.OrgUnitType == OrgUnitType.Branch, "branch edit changes the fields and never the node type");
+
+        await branches.UpdateBranchAsync(annex.Id, new UpdateBranchRequest { Code = "CA_ANNEX", Name = "Annex renamed", ParentId = otherCompany.Id, IsActive = true });
+        var movedIds = new[] { annex.Id, annexStore.Id };
+        t.Check((await db.Branches.AsNoTracking().Where(b => movedIds.Contains(b.Id)).ToListAsync()).All(b => b.CompanyId == otherCompany.Id),
+            "moving a branch recomputes CompanyId of its whole subtree");
+
+        await t.Reject(() => branches.UpdateBranchAsync(annex.Id, new UpdateBranchRequest { Code = "CA_ANNEX", Name = "Annex", ParentId = annexStore.Id, IsActive = true }), "error.validation.reference");
+        await t.Reject(() => branches.UpdateBranchAsync(otherCompany.Id, new UpdateBranchRequest { Code = "COMPANY_B", Name = "Company B", ParentId = annex.Id, IsActive = true }), "error.validation.request");
+        await t.Reject(() => branches.UpdateBranchAsync(org.HanoiBranchId, new UpdateBranchRequest { Code = "CA_HN", Name = "Hanoi", ParentId = otherCompany.Id, IsActive = true }), "error.validation.reference");
+
+        var rootBranch = await db.Branches.IgnoreQueryFilters().SingleAsync(b => b.Code == "root");
+        await t.Reject(() => branches.DeleteBranchAsync(otherCompany.Id), "error.validation.reference");
+        await t.Reject(() => branches.DeleteBranchAsync(rootBranch.Id), "error.validation.reference");
+        t.Check(await branches.DeleteBranchAsync(annexStore.Id) && !await db.Branches.AnyAsync(b => b.Id == annexStore.Id)
+            && await db.Branches.IgnoreQueryFilters().AnyAsync(b => b.Id == annexStore.Id && b.IsDeleted),
+            "delete soft-deletes an unreferenced leaf and refuses nodes with children or references");
 
         // Retire the test accounts so the HTTP stage still bootstraps its administrator on an account-free database.
         foreach (var retired in await db.AppUsers.ToListAsync()) { retired.IsDeleted = true; retired.IsActive = false; }

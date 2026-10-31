@@ -1,18 +1,21 @@
-using ERPm.Application.Common.Interfaces;
 using ERPm.Application.DTOs.System;
 using ERPm.Application.Features.System;
 using ERPm.Domain.Entities.System;
+using ERPm.Infrastructure.Persistence;
+using ERPm.Infrastructure.Services.Common;
 using Microsoft.EntityFrameworkCore;
 
 namespace ERPm.Infrastructure.Services;
 
 public class BranchService : IBranchService
 {
-    private readonly IApplicationDbContext _context;
+    private readonly ApplicationDbContext _context;
+    private readonly IIamService? _iam;
 
-    public BranchService(IApplicationDbContext context)
+    public BranchService(ApplicationDbContext context, IIamService? iam = null)
     {
         _context = context;
+        _iam = iam;
     }
 
     public async Task<List<BranchDto>> GetBranchesAsync(CancellationToken cancellationToken = default)
@@ -199,5 +202,114 @@ public class BranchService : IBranchService
             IsDefault = branch.IsDefault,
             IsActive = branch.IsActive
         };
+    }
+
+    /// <summary>
+    /// Edits a node. The type never changes; a new parent must be visible to the caller, keep the tree acyclic and
+    /// match the type rules (company under the group, branch under a company or branch). Moving a branch recomputes
+    /// CompanyId of its whole subtree and is refused when that would strand departments or employees in the old company.
+    /// </summary>
+    public async Task<BranchDto?> UpdateBranchAsync(int id, UpdateBranchRequest request, CancellationToken cancellationToken = default)
+    {
+        var branch = await _context.Branches.Include(b => b.Parent).FirstOrDefaultAsync(b => b.Id == id, cancellationToken);
+        if (branch == null) return null;
+        var code = (request.Code ?? "").Trim();
+        var name = (request.Name ?? "").Trim();
+        PostingTransaction.Require(code.Length is > 0 and <= 50 && name.Length is > 0 and <= 255
+            && (request.TaxCode?.Length ?? 0) <= 50 && (request.Address?.Length ?? 0) <= 500
+            && (request.Phone?.Length ?? 0) <= 50 && (request.Email?.Length ?? 0) <= 100, "error.validation.request");
+        // The unique code index also covers soft-deleted rows.
+        PostingTransaction.Require(!await _context.Branches.IgnoreQueryFilters().AnyAsync(b => b.Id != id && b.Code == code, cancellationToken), "error.validation.duplicate", 409);
+        PostingTransaction.Require(request.IsActive || (branch.OrgUnitType != OrgUnitType.Group && !branch.IsDefault), "error.validation.reference", 409);
+
+        var parentChanged = request.ParentId != branch.ParentId;
+        if (parentChanged)
+        {
+            PostingTransaction.Require(branch.OrgUnitType != OrgUnitType.Group && request.ParentId != null && request.ParentId != id, "error.validation.request");
+            var parent = await _context.Branches.Where(b => b.Id == request.ParentId && b.IsActive)
+                .Select(b => new { b.Id, b.OrgUnitType, b.CompanyId }).FirstOrDefaultAsync(cancellationToken);
+            PostingTransaction.Require(parent != null, "error.validation.reference");
+            PostingTransaction.Require(branch.OrgUnitType == OrgUnitType.Company
+                ? parent!.OrgUnitType == OrgUnitType.Group
+                : parent!.OrgUnitType is OrgUnitType.Company or OrgUnitType.Branch, "error.validation.request");
+
+            // The whole tree (ignoring the caller's scope) decides cycles: the new parent may not sit inside this subtree.
+            var all = await _context.Branches.IgnoreQueryFilters().Where(b => !b.IsDeleted).ToListAsync(cancellationToken);
+            var subtree = CollectSubtree(all, id);
+            PostingTransaction.Require(subtree.All(b => b.Id != parent!.Id), "error.validation.reference");
+
+            if (branch.OrgUnitType == OrgUnitType.Branch)
+            {
+                var newCompanyId = parent!.OrgUnitType == OrgUnitType.Company ? parent.Id : parent.CompanyId;
+                var ids = subtree.Select(b => b.Id).ToArray();
+                if (newCompanyId != branch.CompanyId)
+                    PostingTransaction.Require(!await _context.Departments.AnyAsync(d => ids.Contains(d.BranchId), cancellationToken)
+                        && !await _context.Employees.AnyAsync(e => ids.Contains(e.BranchId), cancellationToken)
+                        && !await _context.WorkHistories.AnyAsync(w => ids.Contains(w.BranchId), cancellationToken), "error.validation.reference", 409);
+                foreach (var node in subtree.Where(b => b.OrgUnitType == OrgUnitType.Branch)) node.CompanyId = newCompanyId;
+            }
+            branch.ParentId = request.ParentId;
+        }
+
+        branch.Code = code;
+        branch.Name = name;
+        branch.TaxCode = string.IsNullOrWhiteSpace(request.TaxCode) ? null : request.TaxCode.Trim();
+        branch.Address = request.Address;
+        branch.Phone = request.Phone;
+        branch.Email = request.Email;
+        var activeChanged = branch.IsActive != request.IsActive;
+        branch.IsActive = request.IsActive;
+        await _context.SaveChangesAsync(cancellationToken);
+        if (parentChanged || activeChanged) _iam?.Invalidate();
+        return await GetBranchByIdAsync(id, cancellationToken);
+    }
+
+    /// <summary>
+    /// Soft-deletes a node only when nothing references it: no child node, department, employee, work history,
+    /// warehouse, voucher, job position, role, department level or account branch grant. Otherwise use IsActive = false.
+    /// </summary>
+    public async Task<bool> DeleteBranchAsync(int id, CancellationToken cancellationToken = default)
+    {
+        var branch = await _context.Branches.FirstOrDefaultAsync(b => b.Id == id, cancellationToken);
+        if (branch == null) return false;
+        PostingTransaction.Require(branch.OrgUnitType != OrgUnitType.Group && !branch.IsDefault, "error.validation.reference", 409);
+        var db = _context;
+        var referenced = await db.Branches.IgnoreQueryFilters().AnyAsync(b => !b.IsDeleted && b.ParentId == id, cancellationToken)
+            || await db.Departments.AnyAsync(d => d.BranchId == id || d.CompanyId == id, cancellationToken)
+            || await db.Employees.AnyAsync(e => e.BranchId == id || e.CompanyId == id, cancellationToken)
+            || await db.WorkHistories.AnyAsync(w => w.BranchId == id || w.CompanyId == id, cancellationToken)
+            || await db.JobPositions.AnyAsync(p => p.CompanyId == id, cancellationToken)
+            || await db.IamRoles.AnyAsync(r => r.CompanyId == id, cancellationToken)
+            || await db.DepartmentLevels.AnyAsync(l => l.CompanyId == id, cancellationToken)
+            || await db.Warehouses.IgnoreQueryFilters().AnyAsync(w => !w.IsDeleted && w.BranchId == id, cancellationToken)
+            || await db.SalesOrders.IgnoreQueryFilters().AnyAsync(v => !v.IsDeleted && v.BranchId == id, cancellationToken)
+            || await db.SalesInvoices.IgnoreQueryFilters().AnyAsync(v => !v.IsDeleted && v.BranchId == id, cancellationToken)
+            || await db.PurchaseOrders.IgnoreQueryFilters().AnyAsync(v => !v.IsDeleted && v.BranchId == id, cancellationToken)
+            || await db.StockReceipts.IgnoreQueryFilters().AnyAsync(v => !v.IsDeleted && v.BranchId == id, cancellationToken)
+            || await db.StockIssues.IgnoreQueryFilters().AnyAsync(v => !v.IsDeleted && v.BranchId == id, cancellationToken)
+            || await db.JournalEntries.IgnoreQueryFilters().AnyAsync(v => !v.IsDeleted && v.BranchId == id, cancellationToken)
+            || (await db.AppUsers.IgnoreQueryFilters().Where(u => !u.IsDeleted).Select(u => u.BranchIds).ToListAsync(cancellationToken)).Any(ids => ids.Contains(id));
+        PostingTransaction.Require(!referenced, "error.validation.reference", 409);
+        branch.IsDeleted = true;
+        branch.DeletedAtUtc = DateTime.UtcNow;
+        await _context.SaveChangesAsync(cancellationToken);
+        _iam?.Invalidate();
+        return true;
+    }
+
+    private static List<Branch> CollectSubtree(List<Branch> all, int rootId)
+    {
+        var result = new List<Branch>();
+        var seen = new HashSet<int>();
+        var stack = new Stack<int>([rootId]);
+        while (stack.Count > 0)
+        {
+            var current = stack.Pop();
+            if (!seen.Add(current)) continue;
+            var node = all.FirstOrDefault(b => b.Id == current);
+            if (node != null) result.Add(node);
+            foreach (var child in all.Where(b => b.ParentId == current)) stack.Push(child.Id);
+        }
+        return result;
     }
 }
