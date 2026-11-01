@@ -22,6 +22,9 @@ public class IamRole : BaseAuditableEntity
     public IamPolicyDocument PolicyDocument { get; set; } = new();
     public bool IsActive { get; set; } = true;
 
+    /// <summary>PostgreSQL xmin system column, used as an optimistic concurrency token so two editors cannot overwrite each other.</summary>
+    public uint Version { get; set; }
+
     // Navigation
     public virtual Branch? Company { get; set; }
 }

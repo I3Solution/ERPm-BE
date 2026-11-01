@@ -117,6 +117,30 @@ static class IamChecks
         principal = await Iam(db).GetPrincipalAsync(account.Id);
         t.Check(!principal.Can("sd:order:view") && principal.Can("sd:invoice:view") && !principal.Can("wms:stock:view"),
             "inline Deny overrides the inherited Allow and removed extra roles stop applying");
+
+        // Effective-access preview: explicit Deny is reported apart from "not granted", with the statement's origin.
+        await roles.SetUserAccessAsync(account.Id, new UserAccessPolicyDto { InlinePolicy = SystemRoles.Policy(SystemRoles.Deny("NoOrders", ["sd:order:*"])) });
+        var effective = (await Iam(db).GetEffectiveAsync(account.Id)).ToDictionary(e => e.Action);
+        t.Check(effective["sd:order:view"].Status == EffectiveStatus.Denied && effective["sd:order:view"].Sources.Any(s => s.Source == "inline-policy" && s.Sid == "NoOrders" && s.Effect == IamStatement.Deny)
+            && effective["sd:invoice:view"].Status == EffectiveStatus.Allowed && effective["sd:invoice:view"].Sources.Any(s => s.Source.StartsWith("job-position:"))
+            && effective["sys:role:delete"].Status == EffectiveStatus.NotGranted && effective["sys:role:delete"].Sources.Count == 0,
+            "effective access separates Denied from NotGranted and names the granting role or inline statement");
+
+        // Two editors: the second save with a stale version is refused and the first edit survives.
+        await using var editorA = t.Db(null);
+        await using var editorB = t.Db(null);
+        var concurrentRole = await new RoleService(editorA, Iam(editorA)).CreateRoleAsync(new SaveRoleRequest
+        {
+            Code = "CONCURRENT_ROLE", Name = "Concurrent", PolicyDocument = SystemRoles.Policy(SystemRoles.Allow("View", ["sd:order:view"]))
+        });
+        SaveRoleRequest Edit(string name) => new()
+        {
+            Code = "CONCURRENT_ROLE", Name = name, Version = concurrentRole.Version, PolicyDocument = SystemRoles.Policy(SystemRoles.Allow("View", ["sd:order:view"]))
+        };
+        await new RoleService(editorA, Iam(editorA)).UpdateRoleAsync(concurrentRole.Id, Edit("First edit"));
+        await t.Reject(() => new RoleService(editorB, Iam(editorB)).UpdateRoleAsync(concurrentRole.Id, Edit("Second edit")), "error.request.conflict");
+        await using var reader = t.Db(null);
+        t.Check((await reader.IamRoles.AsNoTracking().SingleAsync(r => r.Id == concurrentRole.Id)).Name == "First edit", "stale role edit is refused and the first save is kept");
         await roles.SetUserAccessAsync(account.Id, new UserAccessPolicyDto());
 
         var workHistories = new WorkHistoryService(db, Iam(db));
