@@ -95,8 +95,9 @@ await using (var scope = app.Services.CreateAsyncScope())
         if ((await db.Database.GetPendingMigrationsAsync()).Any()) throw new InvalidOperationException("Database migrations pending. Run with --migrate before starting the API.");
     }
     var password = builder.Configuration["BootstrapAdmin:Password"];
-    if (!string.IsNullOrEmpty(password) && !await db.AppUsers.AnyAsync(u => u.UserName == "admin"))
+    var adminUserName = (builder.Configuration["BootstrapAdmin:UserName"] ?? "admin").Trim().ToUpperInvariant();
+    if (!string.IsNullOrEmpty(password) && !await db.AppUsers.IgnoreQueryFilters().AnyAsync(u => u.UserName == adminUserName))
         await scope.ServiceProvider.GetRequiredService<AccountService>().CreateAsync(new(
-            builder.Configuration["BootstrapAdmin:UserName"] ?? "admin", "Administrator", password, "Admin", []), default);
+            adminUserName, "Administrator", password, "Admin", []), default);
 }
 if (!args.Contains("--migrate")) await app.RunAsync();
