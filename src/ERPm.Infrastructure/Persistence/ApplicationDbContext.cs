@@ -139,6 +139,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.Translations).HasColumnType("jsonb").HasConversion(JsonConverter<Dictionary<string, string>>()).Metadata.SetValueComparer(dictionaryComparer);
             entity.Property(e => e.PolicyDocument).HasColumnType("jsonb").HasConversion(JsonConverter<IamPolicyDocument>(), JsonComparer<IamPolicyDocument>());
+            entity.Property(e => e.Version).HasColumnName("xmin").HasColumnType("xid").ValueGeneratedOnAddOrUpdate().IsConcurrencyToken();
             entity.HasOne(e => e.Company).WithMany().HasForeignKey(e => e.CompanyId).OnDelete(DeleteBehavior.Restrict);
             // Codes are unique per company; group templates (null company) share one namespace.
             entity.HasIndex(e => new { e.CompanyId, e.Code }).IsUnique().AreNullsDistinct(false).HasFilter("is_deleted = false");

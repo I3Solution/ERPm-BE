@@ -59,7 +59,9 @@ public sealed class RoleService(ApplicationDbContext context, IIamService iam, E
         await ValidateAsync(id, request, cancellationToken);
         await iam.EnsureCanGrantAsync(request.PolicyDocument.Statements, cancellationToken);
         Apply(role, request);
-        await context.SaveChangesAsync(cancellationToken);
+        if (request.Version is { } version) context.Entry(role).Property(r => r.Version).OriginalValue = version;
+        try { await context.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { throw new BusinessException("error.request.conflict", 409); }
         iam.Invalidate();
         return ToDto(role);
     }
@@ -267,6 +269,7 @@ public sealed class RoleService(ApplicationDbContext context, IIamService iam, E
         Translations = role.Translations,
         CompanyId = role.CompanyId,
         IsSystemRole = role.IsSystemRole,
+        Version = role.Version,
         PolicyDocument = role.PolicyDocument,
         IsActive = role.IsActive
     };
