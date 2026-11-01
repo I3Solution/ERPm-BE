@@ -181,6 +181,17 @@ public class DepartmentLevelService(ApplicationDbContext context, ICurrentUser? 
 {
     private readonly HrmScope _scope = new(user);
 
+    /// <summary>Group-wide levels stay visible; a company's levels only to callers whose scope covers that company.</summary>
+    protected override IQueryable<DepartmentLevel> PrepareQuery(IQueryable<DepartmentLevel> query)
+    {
+        if (_scope.All) return query;
+        var branches = _scope.Branches;
+        return query.Where(l => l.CompanyId == null || branches.Contains(l.CompanyId.Value));
+    }
+
+    protected override async Task<DepartmentLevel?> FindEntityAsync(int id, CancellationToken cancellationToken) =>
+        await PrepareQuery(DbSet).FirstOrDefaultAsync(l => l.Id == id, cancellationToken);
+
     protected override async Task BeforeCreateAsync(DepartmentLevel entity, CreateDepartmentLevelRequest dto, CancellationToken cancellationToken)
     {
         await ValidateAsync(null, dto, cancellationToken);

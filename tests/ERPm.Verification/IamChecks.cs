@@ -256,6 +256,14 @@ static class IamChecks
         t.Check(positions.Items.Any(p => p.CompanyId == org.CompanyId) && positions.Items.All(p => p.Id != foreignPosition.Id && (p.CompanyId == null || p.CompanyId == org.CompanyId)),
             "job position list hides the positions of companies outside the caller's scope");
 
+        // Department level list: same rule as positions.
+        var foreignLevel = await new DepartmentLevelService(db).CreateAsync(new CreateDepartmentLevelRequest { Code = "CB_LEVEL", Name = "Company B level", CompanyId = otherCompany.Id, SortOrder = 50 });
+        var levelPage = await new DepartmentLevelService(companyDb, companyUser).GetPagedAsync(new BaseFilterQuery { PageSize = 100 });
+        t.Check(levelPage.Items.Any(l => l.CompanyId == null || l.CompanyId == org.CompanyId) && levelPage.Items.All(l => l.Id != foreignLevel.Id && (l.CompanyId == null || l.CompanyId == org.CompanyId)),
+            "department level list hides the levels of companies outside the caller's scope");
+        t.Check((await new DepartmentLevelService(db).GetByIdAsync(foreignLevel.Id)) is not null && await new DepartmentLevelService(companyDb, companyUser).GetByIdAsync(foreignLevel.Id) is null,
+            "department level lookup by id respects the caller's scope");
+
         // Retire the test accounts so the HTTP stage still bootstraps its administrator on an account-free database.
         foreach (var retired in await db.AppUsers.ToListAsync()) { retired.IsDeleted = true; retired.IsActive = false; }
         await db.SaveChangesAsync();
