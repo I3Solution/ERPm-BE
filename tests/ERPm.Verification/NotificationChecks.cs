@@ -22,117 +22,123 @@ public static class NotificationChecks
         var renderer = new TemplateRenderer();
         var template = new NotificationTemplate
         {
-            Code = "TEST_CODE",
-            Name = "Test",
-            TitleTemplate = "Alert: {item_name}",
-            BodyTemplate = "Stock for {item_code} is {stock_qty} {uom}.",
+            Code = "TEST_TPL",
+            Name = "Test Template",
+            Category = "WMS",
+            DefaultSeverity = "WARNING",
+            TitleTemplate = "Low stock: {item_code}",
+            BodyTemplate = "Item {item_code} has only {qty} left in {warehouse}",
             Translations = new Dictionary<string, NotificationTemplateTranslation>
             {
-                ["vi"] = new() { Title = "Cảnh báo: {item_name}", Body = "Tồn kho cho {item_code} còn {stock_qty} {uom}." },
-                ["en"] = new() { Title = "Alert: {item_name}", Body = "Stock for {item_code} is {stock_qty} {uom}." }
+                ["vi"] = new() { Title = "Sắp hết hàng: {item_code}", Body = "Mặt hàng {item_code} chỉ còn {qty} tại kho {warehouse}." },
+                ["en"] = new() { Title = "Low stock alert: {item_code}", Body = "Item {item_code} has only {qty} remaining in {warehouse}." }
             }
         };
 
-        var paramsMap = new Dictionary<string, object>
+        var sampleParams = new Dictionary<string, object>
         {
-            ["item_name"] = "Bút bi",
-            ["item_code"] = "PEN-01",
-            ["stock_qty"] = 15,
-            ["uom"] = "hộp"
+            ["item_code"] = "SKU-999",
+            ["qty"] = 5,
+            ["warehouse"] = "KHO_TONG"
         };
 
-        var (viTitle, viBody) = renderer.Render(template, paramsMap, "vi");
-        check(viTitle == "Cảnh báo: Bút bi" && viBody == "Tồn kho cho PEN-01 còn 15 hộp.", "TemplateRenderer renders localized Vietnamese strings and formats placeholders");
+        var renderedVi = renderer.Render(template, sampleParams, "vi");
+        check(renderedVi.Title.Contains("SKU-999") && renderedVi.Body.Contains("kho KHO_TONG"), "TemplateRenderer renders localized Vietnamese strings and formats placeholders");
 
-        var (enTitle, enBody) = renderer.Render(template, paramsMap, "en");
-        check(enTitle == "Alert: Bút bi" && enBody == "Stock for PEN-01 is 15 hộp.", "TemplateRenderer renders localized English strings");
+        var renderedEn = renderer.Render(template, sampleParams, "en");
+        check(renderedEn.Title.Contains("Low stock alert: SKU-999") && renderedEn.Body.Contains("5 remaining"), "TemplateRenderer renders localized English strings");
 
-        var notifEvent = new NotificationEvent(
+        var ev = new NotificationEvent(
             templateCode: "WMS_LOW_STOCK",
             category: NotificationCategory.WMS,
             severity: NotificationSeverity.WARNING,
             targetType: NotificationTargetType.BranchTree,
             branchId: 1,
-            parameters: paramsMap
+            parameters: sampleParams
         );
-
-        check(notifEvent.TemplateCode == "WMS_LOW_STOCK" && notifEvent.Category == "WMS" && notifEvent.BranchId == 1,
-            "NotificationEvent constructor preserves category, severity, and branchId");
+        check(ev.TemplateCode == "WMS_LOW_STOCK" && ev.Severity == "WARNING" && ev.BranchId == 1, "NotificationEvent constructor preserves category, severity, and branchId");
     }
 
     public static async Task RunDbChecksAsync(Context ctx)
     {
         await using var db = ctx.Db(null);
 
-        // 1. Verify Seeded Notification Templates
-        var templates = await db.NotificationTemplates.ToListAsync();
-        ctx.Check(templates.Count >= 5, "at least 5 standard notification templates seeded");
-        ctx.Check(templates.Any(t => t.Code == "WMS_LOW_STOCK" && t.Category == NotificationCategory.WMS), "WMS_LOW_STOCK template exists");
-        ctx.Check(templates.Any(t => t.Code == "SD_ORDER_NEW" && t.Category == NotificationCategory.SD), "SD_ORDER_NEW template exists");
-        ctx.Check(templates.Any(t => t.Code == "SD_INVOICE_CANCELLED" && t.DefaultSeverity == NotificationSeverity.DANGER), "SD_INVOICE_CANCELLED alert exists");
+        var seededTemplates = await db.NotificationTemplates.AsNoTracking().ToListAsync();
+        ctx.Check(seededTemplates.Count >= 5, "at least 5 standard notification templates seeded");
 
-        // 2. Setup mock channel provider and services
-        var testUser = await db.AppUsers.FirstOrDefaultAsync();
+        var lowStockTpl = seededTemplates.FirstOrDefault(t => t.Code == "WMS_LOW_STOCK");
+        ctx.Check(lowStockTpl != null && lowStockTpl.Category == "WMS", "WMS_LOW_STOCK template exists");
+
+        var newOrderTpl = seededTemplates.FirstOrDefault(t => t.Code == "SD_ORDER_NEW");
+        ctx.Check(newOrderTpl != null && newOrderTpl.Category == "SD", "SD_ORDER_NEW template exists");
+
+        var cancelInvoiceTpl = seededTemplates.FirstOrDefault(t => t.Code == "SD_INVOICE_CANCELLED");
+        ctx.Check(cancelInvoiceTpl != null && cancelInvoiceTpl.DefaultSeverity == "DANGER", "SD_INVOICE_CANCELLED alert exists");
+
+        var renderer = new TemplateRenderer();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(db);
+        services.AddSingleton<ITemplateRenderer>(renderer);
+        services.AddScoped<INotificationRouter, NotificationRouter>();
+        services.AddScoped<INotificationChannelProvider, InAppChannelProvider>();
+        services.AddSingleton<Microsoft.AspNetCore.SignalR.IHubContext<ERPm.Infrastructure.Hubs.NotificationHub>>(new DummyHubContext());
+
+        var serviceProvider = services.BuildServiceProvider();
+        var scopeFactory = serviceProvider.GetRequiredService<IServiceScopeFactory>();
+        var engine = new NotificationEngine(scopeFactory, renderer, NullLogger<NotificationEngine>.Instance);
+
+        var testUser = await db.AppUsers.FirstOrDefaultAsync(u => u.UserName == "test_notification_user");
         if (testUser == null)
         {
-            testUser = new AppUser { UserName = "notif_tester", DisplayName = "Notification Tester", Role = "Admin" };
+            testUser = new AppUser
+            {
+                UserName = "test_notification_user",
+                DisplayName = "Test User for Notifications",
+                PasswordHash = "dummy_hash",
+                SecurityStamp = Guid.NewGuid().ToString(),
+                IsActive = true
+            };
             db.AppUsers.Add(testUser);
             await db.SaveChangesAsync();
         }
-        var router = new NotificationRouter(db, new ERPm.Infrastructure.Services.BranchService(db));
-        var renderer = new TemplateRenderer();
-        var dummyChannel = new EmailChannelProvider(NullLogger<EmailChannelProvider>.Instance);
-        var sc = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
-        sc.AddSingleton(db);
-        sc.AddSingleton<INotificationRouter>(router);
-        sc.AddSingleton<INotificationChannelProvider>(dummyChannel);
-        var sp = sc.BuildServiceProvider();
-        var scopeFactory = sp.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>();
-        var engine = new NotificationEngine(scopeFactory, renderer, NullLogger<NotificationEngine>.Instance);
 
-        // 3. Test Notification Publishing with Idempotency
-        var idempotencyKey = "test-notif-" + Guid.NewGuid().ToString("N");
         var publishEvent = new NotificationEvent(
             templateCode: "SD_ORDER_NEW",
             category: NotificationCategory.SD,
             severity: NotificationSeverity.INFO,
             targetType: NotificationTargetType.User,
             targetId: testUser.Id,
-            idempotencyKey: idempotencyKey,
             parameters: new Dictionary<string, object>
             {
-                ["order_code"] = "SO-9999",
-                ["customer_name"] = "Công ty ABC",
-                ["total_amount"] = 500000m
-            }
+                ["order_code"] = "SO-TEST-001",
+                ["customer_name"] = "Nguyen Van A",
+                ["amount"] = 1500000m
+            },
+            idempotencyKey: $"VERIFY-TEST-{Guid.NewGuid()}"
         );
 
         var pubResult = await engine.PublishAsync(publishEvent);
         ctx.Check(pubResult.Success && pubResult.RecipientCount == 1, "notification published successfully to target user");
 
-        // Duplicate publish with same idempotency key must be ignored
         var duplicateResult = await engine.PublishAsync(publishEvent);
         ctx.Check(duplicateResult.Success && duplicateResult.RecipientCount == 0, "idempotency key prevents duplicate notification delivery");
 
-        // 4. Test Notification Retrieval & Unread Counter
-        var service = new NotificationService(db, new DummyHubContext(), NullLogger<NotificationService>.Instance);
+        var service = new NotificationService(db, new DummyHubContext(), renderer, engine, NullLogger<NotificationService>.Instance);
         var unread = await service.GetUnreadCountAsync(testUser.Id);
         ctx.Check(unread.UnreadCount >= 1, "unread notification count is greater than zero");
 
         var list = await service.GetNotificationsAsync(testUser.Id, pageIndex: 1, pageSize: 10);
         ctx.Check(list.Items.Count >= 1 && list.Items.Any(i => i.TemplateCode == "SD_ORDER_NEW"), "notifications list contains published item");
 
-        // 5. Test Mark As Read
         var firstItem = list.Items.First(i => i.TemplateCode == "SD_ORDER_NEW");
         var markReadOk = await service.MarkAsReadAsync(testUser.Id, firstItem.Id);
         ctx.Check(markReadOk, "notification marked as read");
 
-        // 6. Test Mark All As Read
         await service.MarkAllAsReadAsync(testUser.Id);
         var unreadAfter = await service.GetUnreadCountAsync(testUser.Id);
         ctx.Check(unreadAfter.UnreadCount == 0, "mark all as read sets unread count to 0");
 
-        // 7. Test User Preferences
         var pref = await service.UpdatePreferenceAsync(testUser.Id, new UpdatePreferenceRequest
         {
             Category = NotificationCategory.WMS,
@@ -140,6 +146,47 @@ public static class NotificationChecks
             IsEnabled = false
         });
         ctx.Check(!pref.IsEnabled && pref.Category == "WMS", "user preference successfully toggled");
+
+        // Template Management Checks (CRUD, Preview, Test Send)
+        var templates = await service.GetTemplatesAsync();
+        ctx.Check(templates.Count >= 5, "at least 5 notification templates retrieved via service");
+
+        var newTpl = await service.CreateTemplateAsync(new CreateNotificationTemplateRequest
+        {
+            Code = $"TEST_ALERT_{Guid.NewGuid():N}"[..20],
+            Name = "Custom Test Alert",
+            Category = "SYS",
+            DefaultSeverity = "WARNING",
+            SupportedChannels = ["IN_APP", "EMAIL"],
+            TitleTemplate = "Alert for {user_name}",
+            BodyTemplate = "Details: {message}",
+            Translations = new Dictionary<string, TemplateTranslationDto>
+            {
+                ["vi"] = new() { Title = "Cảnh báo cho {user_name}", Body = "Chi tiết: {message}" },
+                ["en"] = new() { Title = "Alert for {user_name}", Body = "Details: {message}" }
+            }
+        }, testUser.Id);
+        ctx.Check(newTpl.Id > 0 && newTpl.Name == "Custom Test Alert", "custom notification template created");
+
+        var preview = await service.PreviewTemplateAsync(new PreviewNotificationTemplateRequest
+        {
+            TitleTemplate = newTpl.TitleTemplate,
+            BodyTemplate = newTpl.BodyTemplate,
+            Translations = newTpl.Translations,
+            SampleData = new Dictionary<string, object>
+            {
+                ["user_name"] = "Admin Test",
+                ["message"] = "Server high load"
+            }
+        });
+        ctx.Check(preview.RenderedTranslations["vi"].Title.Contains("Admin Test"), "template preview rendered with sample data");
+
+        var testSendResult = await service.TestSendTemplateAsync(newTpl.Id, testUser.Id, new Dictionary<string, object>
+        {
+            ["user_name"] = "Admin Test",
+            ["message"] = "Sample broadcast"
+        });
+        ctx.Check(testSendResult.Success, "test send template delivered successfully");
 
         db.AppUsers.Remove(testUser);
         await db.SaveChangesAsync();

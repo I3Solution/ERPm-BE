@@ -8,4 +8,5 @@ namespace ERPm.Application.Common.Notifications;
 public interface ITemplateRenderer
 {
     (string Title, string Body) Render(NotificationTemplate template, IDictionary<string, object> parameters, string languageCode = "vi");
+    string RenderString(string pattern, IDictionary<string, object> parameters);
 }

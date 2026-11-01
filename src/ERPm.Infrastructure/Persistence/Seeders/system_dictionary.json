@@ -354,7 +354,10 @@
     "acc.employee": "Nhân viên",
     "acc.employee_hint": "Bắt buộc với quản trị viên công ty; quyền lấy theo vị trí của nhân viên.",
     "acc.branches": "Chi nhánh được cấp",
-    "acc.branches_hint": "Chỉ cần với quyền Chỉ xem hoặc Vận hành."
+    "acc.branches_hint": "Chỉ cần với quyền Chỉ xem hoặc Vận hành.",
+    "notifications.templates_manage": "Mẫu thông báo",
+    "notifications.templates_title": "Quản lý Mẫu thông báo",
+    "notifications.templates_subtitle": "Tùy biến câu từ mẫu, tham số động và cấu hình đa kênh cho từng sự kiện thông báo."
   },
   "en": {
     "common.app_name": "ERPm - Sales & Inventory Management",
@@ -711,6 +714,9 @@
     "acc.employee": "Employee",
     "acc.employee_hint": "Required for company administrators; permissions follow the employee's position.",
     "acc.branches": "Granted branches",
-    "acc.branches_hint": "Only needed for the View only and Operator roles."
+    "acc.branches_hint": "Only needed for the View only and Operator roles.",
+    "notifications.templates_manage": "Notification Templates",
+    "notifications.templates_title": "Notification Templates",
+    "notifications.templates_subtitle": "Customize template copy, dynamic placeholders, and multi-channel delivery rules."
   }
 }
