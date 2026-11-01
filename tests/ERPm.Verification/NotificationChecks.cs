@@ -76,13 +76,19 @@ public static class NotificationChecks
         ctx.Check(cancelInvoiceTpl != null && cancelInvoiceTpl.DefaultSeverity == "DANGER", "SD_INVOICE_CANCELLED alert exists");
 
         var renderer = new TemplateRenderer();
+        var branchService = new ERPm.Infrastructure.Services.BranchService(db);
+        var router = new NotificationRouter(db, branchService);
+        var dummyHub = new DummyHubContext();
+        var inAppProvider = new InAppChannelProvider(dummyHub, NullLogger<InAppChannelProvider>.Instance);
+
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(db);
         services.AddSingleton<ITemplateRenderer>(renderer);
-        services.AddScoped<INotificationRouter, NotificationRouter>();
-        services.AddScoped<INotificationChannelProvider, InAppChannelProvider>();
-        services.AddSingleton<Microsoft.AspNetCore.SignalR.IHubContext<ERPm.Infrastructure.Hubs.NotificationHub>>(new DummyHubContext());
+        services.AddSingleton<ERPm.Application.Features.System.IBranchService>(branchService);
+        services.AddSingleton<INotificationRouter>(router);
+        services.AddSingleton<INotificationChannelProvider>(inAppProvider);
+        services.AddSingleton<Microsoft.AspNetCore.SignalR.IHubContext<ERPm.Infrastructure.Hubs.NotificationHub>>(dummyHub);
 
         var serviceProvider = services.BuildServiceProvider();
         var scopeFactory = serviceProvider.GetRequiredService<IServiceScopeFactory>();
@@ -187,6 +193,20 @@ public static class NotificationChecks
             ["message"] = "Sample broadcast"
         });
         ctx.Check(testSendResult.Success, "test send template delivered successfully");
+
+        // Clean up test entities created during checks
+        var createdTpl = await db.NotificationTemplates.FirstOrDefaultAsync(t => t.Id == newTpl.Id);
+        if (createdTpl != null) db.NotificationTemplates.Remove(createdTpl);
+
+        var prefs = await db.UserNotificationPreferences.Where(p => p.UserId == testUser.Id).ToListAsync();
+        db.UserNotificationPreferences.RemoveRange(prefs);
+
+        var recipients = await db.NotificationRecipients.Where(r => r.UserId == testUser.Id).ToListAsync();
+        var notifIds = recipients.Select(r => r.NotificationId).Distinct().ToList();
+        db.NotificationRecipients.RemoveRange(recipients);
+
+        var notifs = await db.Notifications.Where(n => notifIds.Contains(n.Id)).ToListAsync();
+        db.Notifications.RemoveRange(notifs);
 
         db.AppUsers.Remove(testUser);
         await db.SaveChangesAsync();
