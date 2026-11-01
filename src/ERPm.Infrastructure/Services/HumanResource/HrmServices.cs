@@ -1,3 +1,4 @@
+using ERPm.Application.Common;
 using ERPm.Application.Common.Crud;
 using ERPm.Application.Common.Interfaces;
 using ERPm.Application.DTOs.HumanResource;
@@ -319,12 +320,29 @@ public class EmployeeService(ApplicationDbContext context, IIamService iam, ICur
     protected override async Task<Employee?> FindEntityAsync(int id, CancellationToken cancellationToken) =>
         await PrepareQuery(DbSet).FirstOrDefaultAsync(e => e.Id == id, cancellationToken);
 
+    private int[]? _branchSubtree;
+
+    /// <summary>Resolves the branch filter's subtree once (the tree is not queryable recursively), then pages as usual.</summary>
+    public override async Task<PagedResult<EmployeeDto>> GetPagedAsync(BaseFilterQuery query, CancellationToken cancellationToken = default)
+    {
+        _branchSubtree = null;
+        if (query is EmployeeFilterQuery { BranchId: { } branchId })
+        {
+            var nodes = await Context.Branches.IgnoreQueryFilters().AsNoTracking().Where(b => !b.IsDeleted)
+                .Select(b => new { b.Id, b.ParentId }).ToListAsync(cancellationToken);
+            var tree = new ERPm.Domain.Services.Iam.OrgTree(nodes.Select(b => (b.Id, b.ParentId)));
+            _branchSubtree = tree.Subtree(branchId).ToArray();
+        }
+        return await base.GetPagedAsync(query, cancellationToken);
+    }
+
     protected override IQueryable<Employee> ApplyFilters(IQueryable<Employee> query, BaseFilterQuery filter)
     {
         query = base.ApplyFilters(query, filter);
-        return filter is EmployeeFilterQuery { WithoutAccount: { } withoutAccount }
-            ? query.Where(e => (e.UserId == null) == withoutAccount)
-            : query;
+        if (filter is not EmployeeFilterQuery employeeFilter) return query;
+        if (employeeFilter.WithoutAccount is { } withoutAccount) query = query.Where(e => (e.UserId == null) == withoutAccount);
+        if (_branchSubtree is { } subtree) query = query.Where(e => subtree.Contains(e.BranchId));
+        return query;
     }
 
     protected override async Task BeforeCreateAsync(Employee entity, CreateEmployeeRequest dto, CancellationToken cancellationToken)

@@ -264,6 +264,18 @@ static class IamChecks
         t.Check((await new DepartmentLevelService(db).GetByIdAsync(foreignLevel.Id)) is not null && await new DepartmentLevelService(companyDb, companyUser).GetByIdAsync(foreignLevel.Id) is null,
             "department level lookup by id respects the caller's scope");
 
+        // Employee list filter by org tree node: the node and everything below it.
+        var branchStaff = new EmployeeService(db, Iam(db));
+        await branchStaff.CreateAsync(new CreateEmployeeRequest { Code = "E-BR-SUB", FullName = "Store employee", CompanyId = org.CompanyId, BranchId = org.HanoiSubBranchId, JobPositionId = org.JobPositions["SALES_ACC"] });
+        async Task<string[]> EmployeesUnder(int branchId) =>
+            (await branchStaff.GetPagedAsync(new EmployeeFilterQuery { BranchId = branchId, PageSize = 200 })).Items.Select(e => e.Code).OrderBy(c => c).ToArray();
+        var underHanoi = await EmployeesUnder(org.HanoiBranchId);
+        var underStore = await EmployeesUnder(org.HanoiSubBranchId);
+        var underHcm = await EmployeesUnder(org.HcmBranchId);
+        t.Check(underStore.SequenceEqual(["E-BR-SUB"]) && underHanoi.Contains("E-BR-SUB") && underHanoi.Length >= underStore.Length
+            && !underHcm.Contains("E-BR-SUB") && (await EmployeesUnder(org.CompanyId)).Length >= underHanoi.Length + underHcm.Length,
+            "employee list filters by org tree node including its descendants");
+
         // Retire the test accounts so the HTTP stage still bootstraps its administrator on an account-free database.
         foreach (var retired in await db.AppUsers.ToListAsync()) { retired.IsDeleted = true; retired.IsActive = false; }
         await db.SaveChangesAsync();
