@@ -408,6 +408,13 @@ public class WorkHistoryService(ApplicationDbContext context, IIamService iam, I
             || (own != null && w.Employee.UserId == own));
     }
 
+    protected override IQueryable<WorkHistory> ApplyFilters(IQueryable<WorkHistory> query, BaseFilterQuery filter)
+    {
+        query = base.ApplyFilters(query, filter);
+        if (filter is WorkHistoryFilterQuery { EmployeeId: { } employeeId }) query = query.Where(w => w.EmployeeId == employeeId);
+        return query;
+    }
+
     protected override async Task<WorkHistory?> FindEntityAsync(int id, CancellationToken cancellationToken) =>
         await PrepareQuery(DbSet).FirstOrDefaultAsync(w => w.Id == id, cancellationToken);
 

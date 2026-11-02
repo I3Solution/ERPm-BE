@@ -153,6 +153,12 @@ static class IamChecks
             && (await db.Employees.AsNoTracking().SingleAsync(e => e.Id == employee.Id)).BranchId == org.HcmBranchId,
             "a transfer in work history moves the employee cache and the IAM scope");
 
+        // The timeline of one employee: the filter keeps that employee's rows and nothing else.
+        var timeline = (await workHistories.GetPagedAsync(new WorkHistoryFilterQuery { EmployeeId = employee.Id, PageSize = 100 })).Items;
+        t.Check(timeline.Count >= 2 && timeline.All(w => w.EmployeeId == employee.Id)
+            && (await workHistories.GetPagedAsync(new WorkHistoryFilterQuery { EmployeeId = -1 })).Items.Count == 0,
+            "work history list filters by employee");
+
         // Privilege escalation guard, acting as the accountant (company A).
         var signedIn = new ScopeUser(account.Id, principal.ReadScope);
         await using var acting = t.Db(signedIn);
