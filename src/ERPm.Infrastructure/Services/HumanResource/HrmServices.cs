@@ -35,6 +35,15 @@ internal static class OrgRules
         PostingTransaction.Require(await branches.AnyAsync(b => b.Id == companyId && b.OrgUnitType == OrgUnitType.Company, cancellationToken), "error.validation.reference");
         PostingTransaction.Require(await branches.AnyAsync(b => b.Id == branchId && (b.Id == companyId || b.CompanyId == companyId), cancellationToken), "error.inventory.branch_mismatch");
         PostingTransaction.Require(departmentId == null || await context.Departments.AnyAsync(d => d.Id == departmentId && d.CompanyId == companyId && d.IsActive, cancellationToken), "error.validation.reference");
+        // A department sits in one branch and may serve that branch and every branch below it (a store shares the
+        // departments of its parent branch), but never a branch outside its subtree.
+        if (departmentId != null)
+        {
+            var departmentBranch = await context.Departments.AsNoTracking().Where(d => d.Id == departmentId).Select(d => (int?)d.BranchId).FirstOrDefaultAsync(cancellationToken);
+            var nodes = await branches.Select(b => new { b.Id, b.ParentId }).ToListAsync(cancellationToken);
+            var tree = new ERPm.Domain.Services.Iam.OrgTree(nodes.Select(b => (b.Id, b.ParentId)));
+            PostingTransaction.Require(departmentBranch != null && tree.Subtree(departmentBranch.Value).Contains(branchId), "error.inventory.branch_mismatch");
+        }
         PostingTransaction.Require(jobPositionId == null || await context.JobPositions.AnyAsync(p => p.Id == jobPositionId && p.IsActive && (p.CompanyId == null || p.CompanyId == companyId), cancellationToken), "error.validation.reference");
     }
 }
@@ -406,6 +415,13 @@ public class WorkHistoryService(ApplicationDbContext context, IIamService iam, I
         var branches = _scope.Branches; var departments = _scope.Departments; var own = _scope.OwnUserId;
         return query.Where(w => branches.Contains(w.Employee!.BranchId) || (w.Employee.DepartmentId != null && departments.Contains(w.Employee.DepartmentId.Value))
             || (own != null && w.Employee.UserId == own));
+    }
+
+    protected override IQueryable<WorkHistory> ApplyFilters(IQueryable<WorkHistory> query, BaseFilterQuery filter)
+    {
+        query = base.ApplyFilters(query, filter);
+        if (filter is WorkHistoryFilterQuery { EmployeeId: { } employeeId }) query = query.Where(w => w.EmployeeId == employeeId);
+        return query;
     }
 
     protected override async Task<WorkHistory?> FindEntityAsync(int id, CancellationToken cancellationToken) =>

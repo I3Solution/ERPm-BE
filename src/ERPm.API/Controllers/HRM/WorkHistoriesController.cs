@@ -1,5 +1,6 @@
 using ERPm.API.Controllers.Base;
 using ERPm.API.Security;
+using ERPm.Application.Common;
 using ERPm.Application.Common.Crud;
 using ERPm.Application.DTOs.HumanResource;
 using ERPm.Domain.Entities.HumanResource;
@@ -18,4 +19,15 @@ public class WorkHistoriesController : BaseCrudController<WorkHistory, WorkHisto
         : base(service)
     {
     }
+
+    /// <summary>Hidden: replaced by <see cref="Search"/>, which binds the extended filter.</summary>
+    [NonAction]
+    public override Task<ActionResult<ApiResponse<PagedResult<WorkHistoryDto>>>> GetPaged(BaseFilterQuery query, CancellationToken cancellationToken) =>
+        base.GetPaged(query, cancellationToken);
+
+    /// <summary>Paged list with the standard filters plus ?employeeId={id} for one employee's timeline.</summary>
+    [RequirePermission(":view")]
+    [HttpGet]
+    public Task<ActionResult<ApiResponse<PagedResult<WorkHistoryDto>>>> Search([FromQuery] WorkHistoryFilterQuery query, CancellationToken cancellationToken) =>
+        base.GetPaged(query, cancellationToken);
 }

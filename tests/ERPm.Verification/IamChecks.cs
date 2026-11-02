@@ -153,6 +153,21 @@ static class IamChecks
             && (await db.Employees.AsNoTracking().SingleAsync(e => e.Id == employee.Id)).BranchId == org.HcmBranchId,
             "a transfer in work history moves the employee cache and the IAM scope");
 
+        // The timeline of one employee: the filter keeps that employee's rows and nothing else.
+        var timeline = (await workHistories.GetPagedAsync(new WorkHistoryFilterQuery { EmployeeId = employee.Id, PageSize = 100 })).Items;
+        t.Check(timeline.Count >= 2 && timeline.All(w => w.EmployeeId == employee.Id)
+            && (await workHistories.GetPagedAsync(new WorkHistoryFilterQuery { EmployeeId = -1 })).Items.Count == 0,
+            "work history list filters by employee");
+
+        // A department belongs to one branch: placing someone in another branch with it is refused.
+        var departmentBranch = (await db.Departments.AsNoTracking().SingleAsync(d => d.Id == org.AccountingDepartmentId)).BranchId;
+        var otherBranch = departmentBranch == org.HanoiBranchId ? org.HcmBranchId : org.HanoiBranchId;
+        await t.Reject(() => workHistories.CreateAsync(new CreateWorkHistoryRequest
+        {
+            EmployeeId = employee.Id, DateEffective = new DateOnly(2026, 6, 2), CompanyId = org.CompanyId, BranchId = otherBranch,
+            DepartmentId = org.AccountingDepartmentId, JobPositionId = org.JobPositions["SALES_ACC"]
+        }), "error.inventory.branch_mismatch");
+
         // Privilege escalation guard, acting as the accountant (company A).
         var signedIn = new ScopeUser(account.Id, principal.ReadScope);
         await using var acting = t.Db(signedIn);
@@ -299,6 +314,16 @@ static class IamChecks
         t.Check(underStore.SequenceEqual(["E-BR-SUB"]) && underHanoi.Contains("E-BR-SUB") && underHanoi.Length >= underStore.Length
             && !underHcm.Contains("E-BR-SUB") && (await EmployeesUnder(org.CompanyId)).Length >= underHanoi.Length + underHcm.Length,
             "employee list filters by org tree node including its descendants");
+
+        // A store below the department's branch may use that department (a store shares its parent branch's departments).
+        var storeDepartmentBranch = (await db.Departments.AsNoTracking().SingleAsync(d => d.Id == org.AccountingDepartmentId)).BranchId;
+        var inStore = await branchStaff.CreateAsync(new CreateEmployeeRequest
+        {
+            Code = "E-BR-DEPT", FullName = "Store accountant", CompanyId = org.CompanyId, BranchId = org.HanoiSubBranchId,
+            DepartmentId = org.AccountingDepartmentId, JobPositionId = org.JobPositions["SALES_ACC"]
+        });
+        t.Check(storeDepartmentBranch == org.HanoiBranchId && inStore.DepartmentId == org.AccountingDepartmentId && inStore.BranchId == org.HanoiSubBranchId,
+            "a store below the department's branch can use the department");
 
         // Retire the test accounts so the HTTP stage still bootstraps its administrator on an account-free database.
         foreach (var retired in await db.AppUsers.ToListAsync()) { retired.IsDeleted = true; retired.IsActive = false; }

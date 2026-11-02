@@ -60,6 +60,12 @@ public class EmployeeFilterQuery : BaseFilterQuery
     public int? BranchId { get; set; }
 }
 
+/// <summary>Work-history list filter: the timeline of one employee.</summary>
+public class WorkHistoryFilterQuery : BaseFilterQuery
+{
+    public int? EmployeeId { get; set; }
+}
+
 public class CreateDepartmentRequest
 {
     public string Code { get; set; } = string.Empty;
