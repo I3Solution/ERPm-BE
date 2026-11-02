@@ -35,6 +35,8 @@ internal static class OrgRules
         PostingTransaction.Require(await branches.AnyAsync(b => b.Id == companyId && b.OrgUnitType == OrgUnitType.Company, cancellationToken), "error.validation.reference");
         PostingTransaction.Require(await branches.AnyAsync(b => b.Id == branchId && (b.Id == companyId || b.CompanyId == companyId), cancellationToken), "error.inventory.branch_mismatch");
         PostingTransaction.Require(departmentId == null || await context.Departments.AnyAsync(d => d.Id == departmentId && d.CompanyId == companyId && d.IsActive, cancellationToken), "error.validation.reference");
+        // A department sits in exactly one branch, so it must be the branch the person is placed in.
+        PostingTransaction.Require(departmentId == null || await context.Departments.AnyAsync(d => d.Id == departmentId && d.BranchId == branchId, cancellationToken), "error.inventory.branch_mismatch");
         PostingTransaction.Require(jobPositionId == null || await context.JobPositions.AnyAsync(p => p.Id == jobPositionId && p.IsActive && (p.CompanyId == null || p.CompanyId == companyId), cancellationToken), "error.validation.reference");
     }
 }

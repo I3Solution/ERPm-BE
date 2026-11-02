@@ -159,6 +159,15 @@ static class IamChecks
             && (await workHistories.GetPagedAsync(new WorkHistoryFilterQuery { EmployeeId = -1 })).Items.Count == 0,
             "work history list filters by employee");
 
+        // A department belongs to one branch: placing someone in another branch with it is refused.
+        var departmentBranch = (await db.Departments.AsNoTracking().SingleAsync(d => d.Id == org.AccountingDepartmentId)).BranchId;
+        var otherBranch = departmentBranch == org.HanoiBranchId ? org.HcmBranchId : org.HanoiBranchId;
+        await t.Reject(() => workHistories.CreateAsync(new CreateWorkHistoryRequest
+        {
+            EmployeeId = employee.Id, DateEffective = new DateOnly(2026, 6, 2), CompanyId = org.CompanyId, BranchId = otherBranch,
+            DepartmentId = org.AccountingDepartmentId, JobPositionId = org.JobPositions["SALES_ACC"]
+        }), "error.inventory.branch_mismatch");
+
         // Privilege escalation guard, acting as the accountant (company A).
         var signedIn = new ScopeUser(account.Id, principal.ReadScope);
         await using var acting = t.Db(signedIn);
