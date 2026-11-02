@@ -315,6 +315,16 @@ static class IamChecks
             && !underHcm.Contains("E-BR-SUB") && (await EmployeesUnder(org.CompanyId)).Length >= underHanoi.Length + underHcm.Length,
             "employee list filters by org tree node including its descendants");
 
+        // A store below the department's branch may use that department (a store shares its parent branch's departments).
+        var storeDepartmentBranch = (await db.Departments.AsNoTracking().SingleAsync(d => d.Id == org.AccountingDepartmentId)).BranchId;
+        var inStore = await branchStaff.CreateAsync(new CreateEmployeeRequest
+        {
+            Code = "E-BR-DEPT", FullName = "Store accountant", CompanyId = org.CompanyId, BranchId = org.HanoiSubBranchId,
+            DepartmentId = org.AccountingDepartmentId, JobPositionId = org.JobPositions["SALES_ACC"]
+        });
+        t.Check(storeDepartmentBranch == org.HanoiBranchId && inStore.DepartmentId == org.AccountingDepartmentId && inStore.BranchId == org.HanoiSubBranchId,
+            "a store below the department's branch can use the department");
+
         // Retire the test accounts so the HTTP stage still bootstraps its administrator on an account-free database.
         foreach (var retired in await db.AppUsers.ToListAsync()) { retired.IsDeleted = true; retired.IsActive = false; }
         await db.SaveChangesAsync();
