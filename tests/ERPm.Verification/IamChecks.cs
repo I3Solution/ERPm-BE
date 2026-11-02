@@ -166,7 +166,7 @@ static class IamChecks
         {
             EmployeeId = employee.Id, DateEffective = new DateOnly(2026, 6, 2), CompanyId = org.CompanyId, BranchId = otherBranch,
             DepartmentId = org.AccountingDepartmentId, JobPositionId = org.JobPositions["SALES_ACC"]
-        }), "error.inventory.branch_mismatch");
+        }), "error.org.department_branch_mismatch");
 
         // Privilege escalation guard, acting as the accountant (company A).
         var signedIn = new ScopeUser(account.Id, principal.ReadScope);
