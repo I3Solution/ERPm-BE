@@ -12,7 +12,7 @@ namespace ERPm.API.Controllers.SYS;
 /// (exception) roles / inline policies of accounts. Every grant passes the privilege escalation guard.
 /// </summary>
 [Route("api/v1/sys/roles")]
-public class RolesController(IRoleService roles) : BaseApiController
+public class RolesController(IRoleService roles, IIamService iam) : BaseApiController
 {
     [RequirePermission("sys:role:view"), HttpGet]
     public async Task<ActionResult<ApiResponse<List<RoleDto>>>> GetRoles(CancellationToken cancellationToken) =>
@@ -61,6 +61,10 @@ public class RolesController(IRoleService roles) : BaseApiController
     [RequirePermission("sys:role:view"), HttpGet("users/{userId:int}")]
     public async Task<ActionResult<ApiResponse<UserAccessPolicyDto>>> GetUserAccess(int userId, CancellationToken cancellationToken) =>
         Ok(ApiResponse<UserAccessPolicyDto>.Ok(await roles.GetUserAccessAsync(userId, cancellationToken)));
+
+    [RequirePermission("sys:role:view"), HttpGet("users/{userId:int}/effective")]
+    public async Task<ActionResult<ApiResponse<List<EffectivePermissionDto>>>> GetUserEffective(int userId, CancellationToken cancellationToken) =>
+        Ok(ApiResponse<List<EffectivePermissionDto>>.Ok(await iam.GetEffectiveAsync(userId, cancellationToken)));
 
     [RequirePermission("sys:role:edit"), HttpPut("users/{userId:int}")]
     public async Task<ActionResult<ApiResponse<UserAccessPolicyDto>>> SetUserAccess(int userId, [FromBody] UserAccessPolicyDto request, CancellationToken cancellationToken) =>

@@ -1,5 +1,6 @@
 using ERPm.Application.Common;
 using ERPm.Application.Common.Interfaces;
+using ERPm.Application.DTOs.System;
 using ERPm.Application.Features.System;
 using ERPm.Domain.Entities.System;
 using ERPm.Domain.Services.Iam;
@@ -61,26 +62,8 @@ public sealed class IamService(ApplicationDbContext context, IMemoryCache cache,
             DepartmentBranches = departments.ToDictionary(d => d.Id, d => d.BranchId)
         };
 
-        var statements = new List<IamStatement>();
-        var legacyCode = user.Role.ToUpperInvariant();
-        var legacy = await context.IamRoles.AsNoTracking()
-            .Where(r => r.IsActive && r.IsSystemRole && r.CompanyId == null && r.Code == legacyCode)
-            .Select(r => r.PolicyDocument).FirstOrDefaultAsync(cancellationToken);
-        if (legacy != null) statements.AddRange(legacy.Statements);
-
-        // Roles owned by another company never apply, even if assigned by mistake.
-        var companyId = position?.CompanyId;
-        var departmentParents = departments.ToDictionary(d => d.Id, d => d.ParentId);
-        if (position != null)
-            statements.AddRange(await PositionStatementsAsync([(position.DepartmentId, position.JobPositionId)], companyId, departmentParents, cancellationToken));
-        var userRoles = await (from link in context.UserRoles
-                               join role in context.IamRoles on link.RoleId equals role.Id
-                               where link.UserId == user.Id && role.IsActive && (role.CompanyId == null || role.CompanyId == companyId)
-                               select new { role.PolicyDocument, link.ScopeOverride }).AsNoTracking().ToListAsync(cancellationToken);
-        foreach (var grant in userRoles)
-            statements.AddRange(grant.PolicyDocument.Statements.Select(s => grant.ScopeOverride == null || IamPolicyEvaluator.IsDeny(s) ? s
-                : new IamStatement { Sid = s.Sid, Effect = s.Effect, Actions = s.Actions, Resources = s.Resources, DataScope = grant.ScopeOverride }));
-        if (user.InlinePolicy != null) statements.AddRange(user.InlinePolicy.Statements);
+        var labelled = await CollectStatementsAsync(user.Id, user.Role, user.InlinePolicy, position, departments.ToDictionary(d => d.Id, d => d.ParentId), cancellationToken);
+        var statements = labelled.Select(l => l.Statement).ToList();
 
         var principal = new IamPrincipal(statements, org, user.IsSuperAdmin || user.Role == "Admin")
         {
@@ -91,11 +74,62 @@ public sealed class IamService(ApplicationDbContext context, IMemoryCache cache,
         return principal;
     }
 
+    /// <summary>Statements of one account, each tagged with where it came from (for the effective-access preview).</summary>
+    private async Task<List<(IamStatement Statement, string Source)>> CollectStatementsAsync(int userId, string legacyRole, IamPolicyDocument? inlinePolicy,
+        Position? position, IReadOnlyDictionary<int, int?> departmentParents, CancellationToken cancellationToken)
+    {
+        var result = new List<(IamStatement, string)>();
+        var legacyCode = legacyRole.ToUpperInvariant();
+        var legacy = await context.IamRoles.AsNoTracking()
+            .Where(r => r.IsActive && r.IsSystemRole && r.CompanyId == null && r.Code == legacyCode)
+            .Select(r => r.PolicyDocument).FirstOrDefaultAsync(cancellationToken);
+        if (legacy != null) result.AddRange(legacy.Statements.Select(st => (st, $"account-role:{legacyCode}")));
+
+        // Roles owned by another company never apply, even if assigned by mistake.
+        var companyId = position?.CompanyId;
+        if (position != null)
+            result.AddRange(await PositionStatementsAsync([(position.DepartmentId, position.JobPositionId)], companyId, departmentParents, cancellationToken));
+        var userRoles = await (from link in context.UserRoles
+                               join role in context.IamRoles on link.RoleId equals role.Id
+                               where link.UserId == userId && role.IsActive && (role.CompanyId == null || role.CompanyId == companyId)
+                               select new { role.Code, role.PolicyDocument, link.ScopeOverride }).AsNoTracking().ToListAsync(cancellationToken);
+        foreach (var grant in userRoles)
+            result.AddRange(grant.PolicyDocument.Statements.Select(st => (grant.ScopeOverride == null || IamPolicyEvaluator.IsDeny(st) ? st
+                : new IamStatement { Sid = st.Sid, Effect = st.Effect, Actions = st.Actions, Resources = st.Resources, DataScope = grant.ScopeOverride }, $"user-role:{grant.Code}")));
+        if (inlinePolicy != null) result.AddRange(inlinePolicy.Statements.Select(st => (st, "inline-policy")));
+        return result;
+    }
+
+    public async Task<List<EffectivePermissionDto>> GetEffectiveAsync(int userId, CancellationToken cancellationToken = default)
+    {
+        var user = await context.AppUsers.IgnoreQueryFilters().AsNoTracking()
+            .Where(u => u.Id == userId && !u.IsDeleted)
+            .Select(u => new { u.Id, u.Role, u.IsSuperAdmin, u.InlinePolicy })
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw new BusinessException("error.auth.expired", 404);
+        var position = await CurrentPositionAsync(user.Id, cancellationToken);
+        var departmentParents = await context.Departments.AsNoTracking().Where(d => d.IsActive)
+            .ToDictionaryAsync(d => d.Id, d => d.ParentId, cancellationToken);
+        var labelled = await CollectStatementsAsync(user.Id, user.Role, user.InlinePolicy, position, departmentParents, cancellationToken);
+        var superAdmin = user.IsSuperAdmin || user.Role == "Admin";
+
+        return PermissionCatalog.All.Select(item =>
+        {
+            var matching = labelled.Where(l => IamPolicyEvaluator.Applies(l.Statement, item.Action)).ToList();
+            var sources = matching.Select(m => new EffectiveSourceDto(m.Source, m.Statement.Sid, m.Statement.Effect)).ToList();
+            var denied = matching.Any(m => IamPolicyEvaluator.IsDeny(m.Statement));
+            var allowed = matching.Any(m => !IamPolicyEvaluator.IsDeny(m.Statement));
+            // A super admin bypasses statements, but an explicit deny is still shown so the preview explains it.
+            var status = superAdmin ? EffectiveStatus.Allowed : denied ? EffectiveStatus.Denied : allowed ? EffectiveStatus.Allowed : EffectiveStatus.NotGranted;
+            return new EffectivePermissionDto(item.Action, item.Module, item.Resource, item.Verb, status, sources);
+        }).ToList();
+    }
+
     /// <summary>
     /// Statements granted by org positions: the job position's roles, the department's own roles and the roles of
     /// ancestor departments marked ApplyToChildren. Takes a list so concurrent assignments can be added later.
     /// </summary>
-    private async Task<List<IamStatement>> PositionStatementsAsync(IReadOnlyCollection<(int? DepartmentId, int? JobPositionId)> positions,
+    private async Task<List<(IamStatement, string)>> PositionStatementsAsync(IReadOnlyCollection<(int? DepartmentId, int? JobPositionId)> positions,
         int? companyId, IReadOnlyDictionary<int, int?> departmentParents, CancellationToken cancellationToken)
     {
         var jobPositionIds = positions.Where(p => p.JobPositionId != null).Select(p => p.JobPositionId!.Value).Distinct().ToArray();
@@ -111,13 +145,15 @@ public sealed class IamService(ApplicationDbContext context, IMemoryCache cache,
         var positionRoles = await (from link in context.JobPositionRoles
                                    join role in context.IamRoles on link.RoleId equals role.Id
                                    where jobPositionIds.Contains(link.JobPositionId) && role.IsActive && (role.CompanyId == null || role.CompanyId == companyId)
-                                   select role.PolicyDocument).AsNoTracking().ToListAsync(cancellationToken);
+                                   select new { role.Code, role.PolicyDocument }).AsNoTracking().ToListAsync(cancellationToken);
         var departmentRoles = await (from link in context.DepartmentRoles
                                      join role in context.IamRoles on link.RoleId equals role.Id
                                      where (ownDepartments.Contains(link.DepartmentId) || (link.ApplyToChildren && ancestorIds.Contains(link.DepartmentId)))
                                          && role.IsActive && (role.CompanyId == null || role.CompanyId == companyId)
-                                     select role.PolicyDocument).AsNoTracking().ToListAsync(cancellationToken);
-        return positionRoles.Concat(departmentRoles).SelectMany(p => p.Statements).ToList();
+                                     select new { role.Code, role.PolicyDocument }).AsNoTracking().ToListAsync(cancellationToken);
+        return positionRoles.Select(r => (r, "job-position"))
+            .Concat(departmentRoles.Select(r => (r, "department")))
+            .SelectMany(x => x.Item1.PolicyDocument.Statements.Select(st => (st, $"{x.Item2}:{x.Item1.Code}"))).ToList();
     }
 
     private sealed record Position(int EmployeeId, int CompanyId, int BranchId, int? DepartmentId, int? JobPositionId, string? DefaultScopeMode);

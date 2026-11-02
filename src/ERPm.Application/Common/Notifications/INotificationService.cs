@@ -27,4 +27,34 @@ public interface INotificationService
     Task<List<UserNotificationPreferenceDto>> GetPreferencesAsync(int userId, CancellationToken cancellationToken = default);
 
     Task<UserNotificationPreferenceDto> UpdatePreferenceAsync(int userId, UpdatePreferenceRequest request, CancellationToken cancellationToken = default);
+
+    // Template management methods
+    Task<List<NotificationTemplateDto>> GetTemplatesAsync(
+        string? category = null,
+        string? search = null,
+        bool? isActive = null,
+        CancellationToken cancellationToken = default);
+
+    Task<NotificationTemplateDto?> GetTemplateByIdAsync(int id, CancellationToken cancellationToken = default);
+
+    Task<NotificationTemplateDto> CreateTemplateAsync(
+        CreateNotificationTemplateRequest request,
+        int userId,
+        CancellationToken cancellationToken = default);
+
+    Task<NotificationTemplateDto> UpdateTemplateAsync(
+        int id,
+        UpdateNotificationTemplateRequest request,
+        int userId,
+        CancellationToken cancellationToken = default);
+
+    Task<PreviewNotificationTemplateResponse> PreviewTemplateAsync(
+        PreviewNotificationTemplateRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<NotificationResult> TestSendTemplateAsync(
+        int templateId,
+        int targetUserId,
+        Dictionary<string, object> sampleData,
+        CancellationToken cancellationToken = default);
 }

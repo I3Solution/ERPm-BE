@@ -87,3 +87,83 @@ public record NotificationResult(
     int? NotificationId,
     int RecipientCount,
     string? ErrorMessage = null);
+
+/// <summary>
+/// Data transfer object for a notification template definition.
+/// </summary>
+public class NotificationTemplateDto
+{
+    public int Id { get; set; }
+    public Guid ExternalId { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Category { get; set; } = "SYS";
+    public string DefaultSeverity { get; set; } = "INFO";
+    public List<string> SupportedChannels { get; set; } = [];
+    public string TitleTemplate { get; set; } = string.Empty;
+    public string BodyTemplate { get; set; } = string.Empty;
+    public Dictionary<string, TemplateTranslationDto> Translations { get; set; } = new();
+    public string? ActionUrlPattern { get; set; }
+    public bool IsDigestAllowed { get; set; }
+    public int DigestWindowSeconds { get; set; }
+    public bool IsActive { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
+    public DateTime? UpdatedAtUtc { get; set; }
+}
+
+public class TemplateTranslationDto
+{
+    public string Title { get; set; } = string.Empty;
+    public string Body { get; set; } = string.Empty;
+}
+
+public class CreateNotificationTemplateRequest
+{
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Category { get; set; } = "SYS";
+    public string DefaultSeverity { get; set; } = "INFO";
+    public List<string> SupportedChannels { get; set; } = ["IN_APP"];
+    public string TitleTemplate { get; set; } = string.Empty;
+    public string BodyTemplate { get; set; } = string.Empty;
+    public Dictionary<string, TemplateTranslationDto> Translations { get; set; } = new();
+    public string? ActionUrlPattern { get; set; }
+    public bool IsDigestAllowed { get; set; }
+    public int DigestWindowSeconds { get; set; }
+    public bool IsActive { get; set; } = true;
+}
+
+public class UpdateNotificationTemplateRequest
+{
+    public string Name { get; set; } = string.Empty;
+    public string Category { get; set; } = "SYS";
+    public string DefaultSeverity { get; set; } = "INFO";
+    public List<string> SupportedChannels { get; set; } = ["IN_APP"];
+    public string TitleTemplate { get; set; } = string.Empty;
+    public string BodyTemplate { get; set; } = string.Empty;
+    public Dictionary<string, TemplateTranslationDto> Translations { get; set; } = new();
+    public string? ActionUrlPattern { get; set; }
+    public bool IsDigestAllowed { get; set; }
+    public int DigestWindowSeconds { get; set; }
+    public bool IsActive { get; set; } = true;
+}
+
+public class PreviewNotificationTemplateRequest
+{
+    public string TitleTemplate { get; set; } = string.Empty;
+    public string BodyTemplate { get; set; } = string.Empty;
+    public Dictionary<string, TemplateTranslationDto> Translations { get; set; } = new();
+    public Dictionary<string, object> SampleData { get; set; } = new();
+}
+
+public class PreviewNotificationTemplateResponse
+{
+    public string RenderedTitleDefault { get; set; } = string.Empty;
+    public string RenderedBodyDefault { get; set; } = string.Empty;
+    public Dictionary<string, TemplateTranslationDto> RenderedTranslations { get; set; } = new();
+}
+
+public class TestSendTemplateRequest
+{
+    public Dictionary<string, object> SampleData { get; set; } = new();
+}

@@ -34,6 +34,11 @@ public partial class TemplateRenderer : ITemplateRenderer
         return (title, body);
     }
 
+    public string RenderString(string pattern, IDictionary<string, object> parameters)
+    {
+        return Format(pattern, parameters);
+    }
+
     private static string Format(string pattern, IDictionary<string, object> parameters)
     {
         if (string.IsNullOrEmpty(pattern) || parameters.Count == 0) return pattern;

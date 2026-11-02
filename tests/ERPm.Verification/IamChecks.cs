@@ -117,6 +117,30 @@ static class IamChecks
         principal = await Iam(db).GetPrincipalAsync(account.Id);
         t.Check(!principal.Can("sd:order:view") && principal.Can("sd:invoice:view") && !principal.Can("wms:stock:view"),
             "inline Deny overrides the inherited Allow and removed extra roles stop applying");
+
+        // Effective-access preview: explicit Deny is reported apart from "not granted", with the statement's origin.
+        await roles.SetUserAccessAsync(account.Id, new UserAccessPolicyDto { InlinePolicy = SystemRoles.Policy(SystemRoles.Deny("NoOrders", ["sd:order:*"])) });
+        var effective = (await Iam(db).GetEffectiveAsync(account.Id)).ToDictionary(e => e.Action);
+        t.Check(effective["sd:order:view"].Status == EffectiveStatus.Denied && effective["sd:order:view"].Sources.Any(s => s.Source == "inline-policy" && s.Sid == "NoOrders" && s.Effect == IamStatement.Deny)
+            && effective["sd:invoice:view"].Status == EffectiveStatus.Allowed && effective["sd:invoice:view"].Sources.Any(s => s.Source.StartsWith("job-position:"))
+            && effective["sys:role:delete"].Status == EffectiveStatus.NotGranted && effective["sys:role:delete"].Sources.Count == 0,
+            "effective access separates Denied from NotGranted and names the granting role or inline statement");
+
+        // Two editors: the second save with a stale version is refused and the first edit survives.
+        await using var editorA = t.Db(null);
+        await using var editorB = t.Db(null);
+        var concurrentRole = await new RoleService(editorA, Iam(editorA)).CreateRoleAsync(new SaveRoleRequest
+        {
+            Code = "CONCURRENT_ROLE", Name = "Concurrent", PolicyDocument = SystemRoles.Policy(SystemRoles.Allow("View", ["sd:order:view"]))
+        });
+        SaveRoleRequest Edit(string name) => new()
+        {
+            Code = "CONCURRENT_ROLE", Name = name, Version = concurrentRole.Version, PolicyDocument = SystemRoles.Policy(SystemRoles.Allow("View", ["sd:order:view"]))
+        };
+        await new RoleService(editorA, Iam(editorA)).UpdateRoleAsync(concurrentRole.Id, Edit("First edit"));
+        await t.Reject(() => new RoleService(editorB, Iam(editorB)).UpdateRoleAsync(concurrentRole.Id, Edit("Second edit")), "error.request.conflict");
+        await using var reader = t.Db(null);
+        t.Check((await reader.IamRoles.AsNoTracking().SingleAsync(r => r.Id == concurrentRole.Id)).Name == "First edit", "stale role edit is refused and the first save is kept");
         await roles.SetUserAccessAsync(account.Id, new UserAccessPolicyDto());
 
         var workHistories = new WorkHistoryService(db, Iam(db));
@@ -128,6 +152,21 @@ static class IamChecks
         t.Check(principal.Evaluate("sd:order:view").Scope.BranchIds.SetEquals([org.HcmBranchId])
             && (await db.Employees.AsNoTracking().SingleAsync(e => e.Id == employee.Id)).BranchId == org.HcmBranchId,
             "a transfer in work history moves the employee cache and the IAM scope");
+
+        // The timeline of one employee: the filter keeps that employee's rows and nothing else.
+        var timeline = (await workHistories.GetPagedAsync(new WorkHistoryFilterQuery { EmployeeId = employee.Id, PageSize = 100 })).Items;
+        t.Check(timeline.Count >= 2 && timeline.All(w => w.EmployeeId == employee.Id)
+            && (await workHistories.GetPagedAsync(new WorkHistoryFilterQuery { EmployeeId = -1 })).Items.Count == 0,
+            "work history list filters by employee");
+
+        // A department belongs to one branch: placing someone in another branch with it is refused.
+        var departmentBranch = (await db.Departments.AsNoTracking().SingleAsync(d => d.Id == org.AccountingDepartmentId)).BranchId;
+        var otherBranch = departmentBranch == org.HanoiBranchId ? org.HcmBranchId : org.HanoiBranchId;
+        await t.Reject(() => workHistories.CreateAsync(new CreateWorkHistoryRequest
+        {
+            EmployeeId = employee.Id, DateEffective = new DateOnly(2026, 6, 2), CompanyId = org.CompanyId, BranchId = otherBranch,
+            DepartmentId = org.AccountingDepartmentId, JobPositionId = org.JobPositions["SALES_ACC"]
+        }), "error.inventory.branch_mismatch");
 
         // Privilege escalation guard, acting as the accountant (company A).
         var signedIn = new ScopeUser(account.Id, principal.ReadScope);
@@ -275,6 +314,49 @@ static class IamChecks
         t.Check(underStore.SequenceEqual(["E-BR-SUB"]) && underHanoi.Contains("E-BR-SUB") && underHanoi.Length >= underStore.Length
             && !underHcm.Contains("E-BR-SUB") && (await EmployeesUnder(org.CompanyId)).Length >= underHanoi.Length + underHcm.Length,
             "employee list filters by org tree node including its descendants");
+
+        // A store below the department's branch may use that department (a store shares its parent branch's departments).
+        var storeDepartmentBranch = (await db.Departments.AsNoTracking().SingleAsync(d => d.Id == org.AccountingDepartmentId)).BranchId;
+        var inStore = await branchStaff.CreateAsync(new CreateEmployeeRequest
+        {
+            Code = "E-BR-DEPT", FullName = "Store accountant", CompanyId = org.CompanyId, BranchId = org.HanoiSubBranchId,
+            DepartmentId = org.AccountingDepartmentId, JobPositionId = org.JobPositions["SALES_ACC"]
+        });
+        t.Check(storeDepartmentBranch == org.HanoiBranchId && inStore.DepartmentId == org.AccountingDepartmentId && inStore.BranchId == org.HanoiSubBranchId,
+            "a store below the department's branch can use the department");
+
+        // Daily catch-up: a row whose date has arrived but was never applied (saved straight to the table, like a
+        // row that was future-dated when written) reaches the employee cache; a row still in the future does not.
+        var scheduled = await branchStaff.CreateAsync(new CreateEmployeeRequest
+        {
+            Code = "E-SNAP-01", FullName = "Scheduled transfer", CompanyId = org.CompanyId, BranchId = org.HanoiBranchId, JobPositionId = org.JobPositions["SALES_ACC"],
+            HireDate = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-10)
+        });
+        var snapToday = DateOnly.FromDateTime(DateTime.UtcNow);
+        db.WorkHistories.Add(new WorkHistory
+        {
+            EmployeeId = scheduled.Id, DateEffective = snapToday.AddDays(-1), CompanyId = org.CompanyId, BranchId = org.HcmBranchId,
+            JobPositionId = org.JobPositions["SALES_ACC"], IsApproved = true
+        });
+        db.WorkHistories.Add(new WorkHistory
+        {
+            EmployeeId = scheduled.Id, DateEffective = snapToday.AddDays(30), CompanyId = org.CompanyId, BranchId = org.HanoiBranchId,
+            JobPositionId = org.JobPositions["SALES_ACC"], IsApproved = true
+        });
+        await db.SaveChangesAsync();
+        var beforeRefresh = (await db.Employees.AsNoTracking().SingleAsync(e => e.Id == scheduled.Id)).BranchId;
+        var refresher = new EmployeeSnapshotRefresher(db, Iam(db));
+        var refreshed = await refresher.RefreshStaleAsync(snapToday);
+        var afterRefresh = (await db.Employees.AsNoTracking().SingleAsync(e => e.Id == scheduled.Id)).BranchId;
+        t.Check(beforeRefresh == org.HanoiBranchId && refreshed == 1 && afterRefresh == org.HcmBranchId,
+            "daily refresh applies a work-history row whose date has arrived and ignores a future one");
+        t.Check(await refresher.RefreshStaleAsync(snapToday) == 0 && await refresher.RefreshStaleAsync(snapToday.AddDays(31)) == 1
+            && (await db.Employees.AsNoTracking().SingleAsync(e => e.Id == scheduled.Id)).BranchId == org.HanoiBranchId,
+            "daily refresh is idempotent and picks up the future row once its day arrives");
+        t.Check(EmployeeSnapshotWorker.DelayUntilNextRun(new DateTime(2026, 11, 2, 0, 1, 0, DateTimeKind.Utc)) == TimeSpan.FromMinutes(4)
+            && EmployeeSnapshotWorker.DelayUntilNextRun(new DateTime(2026, 11, 2, 0, 5, 0, DateTimeKind.Utc)) == TimeSpan.FromDays(1)
+            && EmployeeSnapshotWorker.DelayUntilNextRun(new DateTime(2026, 11, 2, 23, 0, 0, DateTimeKind.Utc)) == TimeSpan.FromHours(1) + TimeSpan.FromMinutes(5),
+            "the worker waits until 00:05 UTC of the next day");
 
         // Retire the test accounts so the HTTP stage still bootstraps its administrator on an account-free database.
         foreach (var retired in await db.AppUsers.ToListAsync()) { retired.IsDeleted = true; retired.IsActive = false; }

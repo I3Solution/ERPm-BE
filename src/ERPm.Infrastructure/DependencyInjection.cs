@@ -71,6 +71,8 @@ public static class DependencyInjection
         services.AddScoped<IBaseCrudService<JobPosition, JobPositionDto, CreateJobPositionRequest, UpdateJobPositionRequest>, JobPositionService>();
         services.AddScoped<IBaseCrudService<Employee, EmployeeDto, CreateEmployeeRequest, UpdateEmployeeRequest>, EmployeeService>();
         services.AddScoped<IBaseCrudService<WorkHistory, WorkHistoryDto, CreateWorkHistoryRequest, UpdateWorkHistoryRequest>, WorkHistoryService>();
+        services.AddScoped<ERPm.Infrastructure.Services.HumanResource.EmployeeSnapshotRefresher>();
+        services.AddHostedService<ERPm.Infrastructure.Services.HumanResource.EmployeeSnapshotWorker>();
 
         // Enterprise Notification Engine (Step 21)
         services.AddSingleton<ITemplateRenderer, TemplateRenderer>();

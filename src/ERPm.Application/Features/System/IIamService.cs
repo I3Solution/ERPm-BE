@@ -7,6 +7,8 @@ namespace ERPm.Application.Features.System;
 /// <summary>Resolves and caches the effective IAM principal of an account.</summary>
 public interface IIamService
 {
+    /// <summary>Effective result per catalog action for one account, with the granting or denying statements.</summary>
+    Task<List<EffectivePermissionDto>> GetEffectiveAsync(int userId, CancellationToken cancellationToken = default);
     Task<IamPrincipal> GetPrincipalAsync(int userId, CancellationToken cancellationToken = default);
 
     /// <summary>Principal of the signed-in user; null for system (background / seeding) calls.</summary>
