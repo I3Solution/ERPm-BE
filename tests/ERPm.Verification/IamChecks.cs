@@ -325,6 +325,39 @@ static class IamChecks
         t.Check(storeDepartmentBranch == org.HanoiBranchId && inStore.DepartmentId == org.AccountingDepartmentId && inStore.BranchId == org.HanoiSubBranchId,
             "a store below the department's branch can use the department");
 
+        // Daily catch-up: a row whose date has arrived but was never applied (saved straight to the table, like a
+        // row that was future-dated when written) reaches the employee cache; a row still in the future does not.
+        var scheduled = await branchStaff.CreateAsync(new CreateEmployeeRequest
+        {
+            Code = "E-SNAP-01", FullName = "Scheduled transfer", CompanyId = org.CompanyId, BranchId = org.HanoiBranchId, JobPositionId = org.JobPositions["SALES_ACC"],
+            HireDate = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-10)
+        });
+        var snapToday = DateOnly.FromDateTime(DateTime.UtcNow);
+        db.WorkHistories.Add(new WorkHistory
+        {
+            EmployeeId = scheduled.Id, DateEffective = snapToday.AddDays(-1), CompanyId = org.CompanyId, BranchId = org.HcmBranchId,
+            JobPositionId = org.JobPositions["SALES_ACC"], IsApproved = true
+        });
+        db.WorkHistories.Add(new WorkHistory
+        {
+            EmployeeId = scheduled.Id, DateEffective = snapToday.AddDays(30), CompanyId = org.CompanyId, BranchId = org.HanoiBranchId,
+            JobPositionId = org.JobPositions["SALES_ACC"], IsApproved = true
+        });
+        await db.SaveChangesAsync();
+        var beforeRefresh = (await db.Employees.AsNoTracking().SingleAsync(e => e.Id == scheduled.Id)).BranchId;
+        var refresher = new EmployeeSnapshotRefresher(db, Iam(db));
+        var refreshed = await refresher.RefreshStaleAsync(snapToday);
+        var afterRefresh = (await db.Employees.AsNoTracking().SingleAsync(e => e.Id == scheduled.Id)).BranchId;
+        t.Check(beforeRefresh == org.HanoiBranchId && refreshed == 1 && afterRefresh == org.HcmBranchId,
+            "daily refresh applies a work-history row whose date has arrived and ignores a future one");
+        t.Check(await refresher.RefreshStaleAsync(snapToday) == 0 && await refresher.RefreshStaleAsync(snapToday.AddDays(31)) == 1
+            && (await db.Employees.AsNoTracking().SingleAsync(e => e.Id == scheduled.Id)).BranchId == org.HanoiBranchId,
+            "daily refresh is idempotent and picks up the future row once its day arrives");
+        t.Check(EmployeeSnapshotWorker.DelayUntilNextRun(new DateTime(2026, 11, 2, 0, 1, 0, DateTimeKind.Utc)) == TimeSpan.FromMinutes(4)
+            && EmployeeSnapshotWorker.DelayUntilNextRun(new DateTime(2026, 11, 2, 0, 5, 0, DateTimeKind.Utc)) == TimeSpan.FromDays(1)
+            && EmployeeSnapshotWorker.DelayUntilNextRun(new DateTime(2026, 11, 2, 23, 0, 0, DateTimeKind.Utc)) == TimeSpan.FromHours(1) + TimeSpan.FromMinutes(5),
+            "the worker waits until 00:05 UTC of the next day");
+
         // Retire the test accounts so the HTTP stage still bootstraps its administrator on an account-free database.
         foreach (var retired in await db.AppUsers.ToListAsync()) { retired.IsDeleted = true; retired.IsActive = false; }
         await db.SaveChangesAsync();

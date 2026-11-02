@@ -453,24 +453,7 @@ public class WorkHistoryService(ApplicationDbContext context, IIamService iam, I
     /// <summary>Copies the approved row in effect today onto the employee; a termination deactivates the profile.</summary>
     private async Task RefreshEmployeeAsync(int employeeId, CancellationToken cancellationToken)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var current = await Context.WorkHistories.AsNoTracking()
-            .Where(w => w.EmployeeId == employeeId && w.IsApproved && w.DateEffective <= today)
-            .OrderByDescending(w => w.DateEffective).ThenByDescending(w => w.CreatedAtUtc).ThenByDescending(w => w.Id)
-            .FirstOrDefaultAsync(cancellationToken);
-        var employee = await Context.Employees.FirstAsync(e => e.Id == employeeId, cancellationToken);
-        if (current != null)
-        {
-            employee.IsActive = !current.IsTermination;
-            if (!current.IsTermination)
-            {
-                employee.CompanyId = current.CompanyId;
-                employee.BranchId = current.BranchId;
-                employee.DepartmentId = current.DepartmentId;
-                employee.JobPositionId = current.JobPositionId;
-            }
-            await Context.SaveChangesAsync(cancellationToken);
-        }
+        await EmployeeSnapshot.ApplyAsync(Context, employeeId, DateOnly.FromDateTime(DateTime.UtcNow), cancellationToken);
         iam.Invalidate();
     }
 }
