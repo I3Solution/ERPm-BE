@@ -43,6 +43,7 @@ public interface IApplicationDbContext
     DbSet<PriceListItem> PriceListItems { get; }
     DbSet<SalesQuotation> SalesQuotations { get; }
     DbSet<SalesQuotationItem> SalesQuotationItems { get; }
+    DbSet<StockReservation> StockReservations { get; }
     DbSet<SalesInvoice> SalesInvoices { get; }
     DbSet<SalesInvoiceItem> SalesInvoiceItems { get; }
 

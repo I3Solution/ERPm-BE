@@ -10,6 +10,7 @@ public class StockBalance : BaseAuditableEntity
 
     // On-hand quantity and weighted average cost (Required decimal(18, 4))
     public decimal QuantityOnHand { get; set; } = 0m;
+    public decimal QuantityReserved { get; set; } = 0m;      // Held for confirmed sales orders; available = OnHand - Reserved
     public decimal AverageCostPrice { get; set; } = 0m;
     public decimal InventoryValue { get; set; } = 0m;
 

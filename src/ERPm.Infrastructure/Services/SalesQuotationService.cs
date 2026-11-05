@@ -152,7 +152,11 @@ public sealed class SalesQuotationService(ApplicationDbContext context, PostingT
             DepartmentId = quotation.DepartmentId,
             CustomerId = quotation.CustomerId,
             CustomerName = quotation.CustomerName,
-            Status = "Draft",
+            Status = SalesOrderStatus.Draft,
+            QuotationId = quotation.Id,
+            SalespersonId = quotation.SalespersonId,
+            PriceListId = quotation.PriceListId,
+            DeliveryAddress = await Context.Partners.Where(p => p.Id == quotation.CustomerId).Select(p => p.Address).SingleOrDefaultAsync(ct),
             Notes = quotation.QuotationNumber,
             // Orders carry line discounts inside the line total, so the header discount stays empty.
             SubTotal = quotation.Items.Sum(i => i.LineTotal),
@@ -172,10 +176,11 @@ public sealed class SalesQuotationService(ApplicationDbContext context, PostingT
         };
         order.TotalAmount = order.SubTotal + order.TaxAmount;
         Context.SalesOrders.Add(order);
-        quotation.ConvertedSalesOrder = order;
+        await Context.SaveChangesAsync(ct);   // the order id is needed to link back; the two rows point at each other
+        quotation.ConvertedSalesOrderId = order.Id;
         quotation.Status = QuotationStatus.Converted;
         quotation.LastModifiedAtUtc = DateTime.UtcNow;
-        await Context.SaveChangesAsync(ct);   // assigns the order id before it is reported
+        await Context.SaveChangesAsync(ct);
         return new ConvertQuotationResponse { QuotationId = quotation.Id, SalesOrderId = order.Id, OrderNumber = order.OrderNumber };
     }, ct);
 

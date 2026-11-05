@@ -1,6 +1,9 @@
 using ERPm.Application.Common.Crud;
 using ERPm.Application.DTOs.Sales;
+using ERPm.Domain.Entities.Catalog;
 using ERPm.Domain.Entities.Sales;
+using ERPm.Domain.Entities.Accounting;
+using ERPm.Domain.Entities.Inventory;
 using ERPm.Domain.Entities.Partner;
 using ERPm.Infrastructure.Persistence;
 using ERPm.Infrastructure.Services.Common;
@@ -8,75 +11,257 @@ using Microsoft.EntityFrameworkCore;
 using static ERPm.Infrastructure.Services.Common.PostingTransaction;
 namespace ERPm.Infrastructure.Services;
 public sealed class SalesOrderService(ApplicationDbContext context, PostingTransaction posting, ERPm.Application.Common.Notifications.INotificationEngine? notificationEngine = null)
-    : BaseCrudService<SalesOrder, SalesOrderDto, CreateSalesOrderRequest, UpdateSalesOrderRequest>(context), IOrderWorkflow<SalesOrderDto>
+    : BaseCrudService<SalesOrder, SalesOrderDto, CreateSalesOrderRequest, UpdateSalesOrderRequest>(context), IOrderWorkflow<SalesOrderDto>, IOrderApproval<SalesOrderDto>
 {
-    protected override IQueryable<SalesOrder> PrepareQuery(IQueryable<SalesOrder> query) => query.Include(o => o.Items);
-    protected override Task<SalesOrder?> FindEntityAsync(int id, CancellationToken ct) => Context.Set<SalesOrder>().Include(o => o.Items).SingleOrDefaultAsync(o => o.Id == id, ct);
+    // An order whose total reaches this share of the credit limit is flagged with a warning.
+    private const decimal CreditWarningRatio = 0.8m;
+    private static readonly string[] CommittedStatuses = [SalesOrderStatus.Confirmed, SalesOrderStatus.Processing];
+
+    protected override IQueryable<SalesOrder> PrepareQuery(IQueryable<SalesOrder> query) => query.Include(o => o.Items).Include(o => o.Branch).Include(o => o.Salesperson).Include(o => o.Quotation);
+    protected override Task<SalesOrder?> FindEntityAsync(int id, CancellationToken ct) => Context.Set<SalesOrder>().Include(o => o.Items).Include(o => o.Branch).Include(o => o.Salesperson).Include(o => o.Quotation).SingleOrDefaultAsync(o => o.Id == id, ct);
+    protected override IQueryable<SalesOrder> ApplyFilters(IQueryable<SalesOrder> query, BaseFilterQuery filter)
+    {
+        query = base.ApplyFilters(query, filter);
+        if (!string.IsNullOrWhiteSpace(filter.Status)) { var status = filter.Status.Trim(); query = query.Where(o => o.Status == status); }
+        return filter.SalespersonId.HasValue ? query.Where(o => o.SalespersonId == filter.SalespersonId) : query;
+    }
+    protected override SalesOrderDto MapToDto(SalesOrder o) => new()
+    {
+        Id = o.Id, OrderNumber = o.OrderNumber, OrderDate = o.OrderDate, BranchId = o.BranchId, BranchName = o.Branch?.Name, DepartmentId = o.DepartmentId,
+        CustomerId = o.CustomerId, CustomerName = o.CustomerName,
+        SubTotal = o.SubTotal, DiscountAmount = o.DiscountAmount, TaxAmount = o.TaxAmount, TotalAmount = o.TotalAmount, PaidAmount = o.PaidAmount,
+        Status = o.Status, CreditCheckStatus = o.CreditCheckStatus, ReservationStatus = o.ReservationStatus, Notes = o.Notes,
+        ExpectedDeliveryDate = o.ExpectedDeliveryDate, DeliveryAddress = o.DeliveryAddress, QuotationId = o.QuotationId, QuotationNumber = o.Quotation?.QuotationNumber,
+        SalespersonId = o.SalespersonId, SalespersonName = o.Salesperson?.FullName, PriceListId = o.PriceListId,
+        Items = o.Items.OrderBy(i => i.Id).Select(i => new SalesOrderItemDto
+        {
+            Id = i.Id, ItemId = i.ItemId, ItemCode = i.ItemCode, ItemName = i.ItemName, UnitName = i.UnitName, Quantity = i.Quantity,
+            UnitPrice = i.UnitPrice, DiscountAmount = i.DiscountAmount, LineTotal = i.LineTotal, InvoicedQuantity = i.InvoicedQuantity
+        }).ToList()
+    };
+    protected override SalesOrder MapToEntity(CreateSalesOrderRequest request) => new();
     protected override async Task BeforeCreateAsync(SalesOrder entity, CreateSalesOrderRequest request, CancellationToken ct)
     {
         await PrepareAsync(entity, request, ct);
         entity.OrderNumber = string.IsNullOrWhiteSpace(request.OrderNumber) ? await posting.NumberAsync("SO", ct) : request.OrderNumber.Trim();
-        entity.Status = "Draft";
+        entity.Status = SalesOrderStatus.Draft;
     }
     protected override async Task BeforeUpdateAsync(SalesOrder entity, UpdateSalesOrderRequest request, CancellationToken ct)
     {
-        Require(entity.Status == "Draft" && (request.Status == null || request.Status == "Draft"), "error.order.state", 409);
+        Require(entity.Status == SalesOrderStatus.Draft && (request.Status == null || request.Status == SalesOrderStatus.Draft), "error.order.state", 409);
         Context.RemoveRange(entity.Items);
         await PrepareAsync(entity, request, ct);
     }
     protected override void MapUpdateToEntity(UpdateSalesOrderRequest request, SalesOrder entity) { }
     protected override Task BeforeDeleteAsync(SalesOrder entity, CancellationToken ct)
     {
-        Require(entity.Status == "Draft", "error.order.state", 409);
+        Require(entity.Status == SalesOrderStatus.Draft, "error.order.state", 409);
         return Task.CompletedTask;
+    }
+    // The saved entity has no navigation data yet, so return the freshly loaded order.
+    public override async Task<SalesOrderDto> CreateAsync(CreateSalesOrderRequest request, CancellationToken ct = default)
+    {
+        var created = await base.CreateAsync(request, ct);
+        Context.ChangeTracker.Clear();
+        return (await GetByIdAsync(created.Id, ct))!;
     }
     public override Task<SalesOrderDto?> UpdateAsync(int id, UpdateSalesOrderRequest request, CancellationToken ct = default) => posting.RunAsync(async () =>
     {
         await posting.LockAsync($"order:Sales:{id}", ct);
-        return await base.UpdateAsync(id, request, ct);
+        var updated = await base.UpdateAsync(id, request, ct);
+        if (updated == null) return null;
+        Context.ChangeTracker.Clear();
+        return await GetByIdAsync(id, ct);
     }, ct);
     public override Task<bool> DeleteAsync(int id, CancellationToken ct = default) => posting.RunAsync(async () =>
     {
         await posting.LockAsync($"order:Sales:{id}", ct);
         return await base.DeleteAsync(id, ct);
     }, ct);
-    public Task<SalesOrderDto> ConfirmAsync(int id, CancellationToken ct) => posting.RunAsync(async () =>
+
+    /// <summary>
+    /// Confirms a Draft order. The customer's credit is checked first: an order over the limit waits for
+    /// <c>sd:order:approve_credit</c> and holds no stock; otherwise it is confirmed and its stock reserved.
+    /// </summary>
+    public async Task<SalesOrderDto> ConfirmAsync(int id, CancellationToken ct)
     {
-        await posting.LockAsync($"order:Sales:{id}", ct);
-        var entity = await FindEntityAsync(id, ct);
-        Require(entity != null, "error.order.not_found", 404);
-        Require(entity!.Status == "Draft", "error.order.state", 409);
-        entity.Status = "Confirmed";
-        await Context.SaveChangesAsync(ct);
-
-        if (notificationEngine != null)
+        ERPm.Domain.Events.NotificationEvent? publish = null;
+        var dto = await posting.RunAsync(async () =>
         {
-            var customerName = entity.CustomerId.HasValue
-                ? await Context.Set<Partner>().Where(p => p.Id == entity.CustomerId).Select(p => p.Name).FirstOrDefaultAsync(ct)
-                : "Khách lẻ";
+            await posting.LockAsync($"order:Sales:{id}", ct);
+            var entity = await FindEntityAsync(id, ct);
+            Require(entity != null, "error.order.not_found", 404);
+            Require(entity!.Status == SalesOrderStatus.Draft, "error.order.state", 409);
 
-            _ = notificationEngine.PublishAsync(new ERPm.Domain.Events.NotificationEvent(
-                "SD_ORDER_NEW",
-                ERPm.Domain.Enums.NotificationCategory.SD,
-                ERPm.Domain.Enums.NotificationSeverity.INFO,
-                ERPm.Domain.Enums.NotificationTargetType.BranchTree,
-                branchId: entity.BranchId,
-                parameters: new Dictionary<string, object>
-                {
-                    ["order_code"] = entity.OrderNumber,
-                    ["customer_name"] = customerName ?? "Khách lẻ",
-                    ["total_amount"] = entity.TotalAmount
-                },
-                actionUrl: "/sales/pos"
-            ));
+            entity.CreditCheckStatus = await CheckCreditAsync(entity, ct);
+            if (entity.CreditCheckStatus == CreditCheckStatus.PendingApproval)
+            {
+                entity.Status = SalesOrderStatus.PendingApproval;
+                publish = OrderEvent("SD_ORDER_CREDIT_PENDING", ERPm.Domain.Enums.NotificationSeverity.WARNING, entity, null);
+            }
+            else
+            {
+                await ReserveAsync(entity, ct);
+                entity.Status = SalesOrderStatus.Confirmed;
+                publish = OrderEvent("SD_ORDER_NEW", ERPm.Domain.Enums.NotificationSeverity.INFO, entity, null);
+            }
+            await Context.SaveChangesAsync(ct);
+            return MapToDto(entity);
+        }, ct);
+        Publish(publish);
+        return dto;
+    }
+
+    public async Task<SalesOrderDto> ApproveCreditAsync(int id, string reason, CancellationToken ct)
+    {
+        Require(!string.IsNullOrWhiteSpace(reason) && reason.Trim().Length <= 500, "error.validation.request");
+        ERPm.Domain.Events.NotificationEvent? publish = null;
+        var dto = await posting.RunAsync(async () =>
+        {
+            await posting.LockAsync($"order:Sales:{id}", ct);
+            var entity = await FindEntityAsync(id, ct);
+            Require(entity != null, "error.order.not_found", 404);
+            Require(entity!.Status == SalesOrderStatus.PendingApproval, "error.sd.order_invalid_status_for_action", 409);
+
+            await ReserveAsync(entity, ct);
+            entity.CreditCheckStatus = CreditCheckStatus.Overridden;
+            entity.CreditApprovalReason = reason.Trim();
+            entity.Status = SalesOrderStatus.Confirmed;
+            publish = OrderEvent("SD_ORDER_CREDIT_APPROVED", ERPm.Domain.Enums.NotificationSeverity.INFO, entity, reason.Trim());
+            await Context.SaveChangesAsync(ct);
+            return MapToDto(entity);
+        }, ct);
+        Publish(publish);
+        return dto;
+    }
+
+    public async Task<SalesOrderDto> CancelAsync(int id, string reason, CancellationToken ct)
+    {
+        Require(!string.IsNullOrWhiteSpace(reason) && reason.Trim().Length <= 500, "error.validation.request");
+        ERPm.Domain.Events.NotificationEvent? publish = null;
+        var dto = await posting.RunAsync(async () =>
+        {
+            await posting.LockAsync($"order:Sales:{id}", ct);
+            var entity = await FindEntityAsync(id, ct);
+            Require(entity != null, "error.order.not_found", 404);
+            Require(entity!.Items.All(i => i.InvoicedQuantity == 0), "error.sd.cannot_cancel_invoiced_order", 409);
+            Require(entity.Status is SalesOrderStatus.Draft or SalesOrderStatus.PendingApproval or SalesOrderStatus.Confirmed, "error.sd.order_invalid_status_for_action", 409);
+
+            await ReleaseAsync(entity, ct);
+            entity.Status = SalesOrderStatus.Cancelled;
+            entity.CancelReason = reason.Trim();
+            publish = OrderEvent("SD_ORDER_CANCELLED", ERPm.Domain.Enums.NotificationSeverity.WARNING, entity, reason.Trim());
+            await Context.SaveChangesAsync(ct);
+            return MapToDto(entity);
+        }, ct);
+        Publish(publish);
+        return dto;
+    }
+
+    /// <summary>
+    /// Credit exposure is posted receivables plus the value of other confirmed orders not invoiced yet plus this order.
+    /// A customer-less (retail) order is not credit checked. Like invoice posting, a limit of 0 allows no credit.
+    /// </summary>
+    private async Task<string> CheckCreditAsync(SalesOrder order, CancellationToken ct)
+    {
+        if (!order.CustomerId.HasValue) return CreditCheckStatus.Passed;
+        await posting.LockAsync($"partner:{order.CustomerId}", ct);
+        var limit = await Context.Partners.Where(p => p.Id == order.CustomerId).Select(p => p.CreditLimit).SingleAsync(ct);
+        var receivables = await Context.SalesInvoices.IgnoreQueryFilters()
+            .Where(i => !i.IsDeleted && i.Status == VoucherStatus.Posted && i.CustomerId == order.CustomerId).SumAsync(i => i.RemainingDebt, ct);
+        var committed = await Context.SalesOrders.IgnoreQueryFilters()
+            .Where(o => !o.IsDeleted && o.CustomerId == order.CustomerId && o.Id != order.Id && CommittedStatuses.Contains(o.Status)).SumAsync(o => o.TotalAmount, ct);
+        var exposure = receivables + committed + order.TotalAmount;
+        if (exposure > limit) return CreditCheckStatus.PendingApproval;
+        return exposure >= limit * CreditWarningRatio ? CreditCheckStatus.Warning : CreditCheckStatus.Passed;
+    }
+
+    /// <summary>
+    /// Holds the goods of every line in the warehouses of the order's branch (largest available first).
+    /// All lines are reserved or none: a shortage rejects the whole request.
+    /// </summary>
+    private async Task ReserveAsync(SalesOrder order, CancellationToken ct)
+    {
+        var itemIds = order.Items.Select(i => i.ItemId).Distinct().Order().ToArray();
+        var goods = await Context.Items.Where(i => itemIds.Contains(i.Id) && i.ItemType == ItemType.Goods).Select(i => i.Id).ToListAsync(ct);
+        var lines = order.Items.Where(i => goods.Contains(i.ItemId)).ToList();
+        if (lines.Count == 0) { order.ReservationStatus = OrderReservationStatus.None; return; }
+
+        var warehouseIds = await Context.Warehouses.IgnoreQueryFilters().Where(w => !w.IsDeleted && w.IsActive && w.BranchId == order.BranchId).Select(w => w.Id).OrderBy(w => w).ToListAsync(ct);
+        var goodsIds = goods.Order().ToArray();
+        foreach (var warehouseId in warehouseIds)
+            foreach (var itemId in goodsIds) await posting.LockAsync($"stock:{warehouseId}:{itemId}", ct);
+
+        var balances = await Context.StockBalances.IgnoreQueryFilters()
+            .Where(b => !b.IsDeleted && warehouseIds.Contains(b.WarehouseId) && goodsIds.Contains(b.ItemId)).ToListAsync(ct);
+        foreach (var line in lines)
+        {
+            var need = line.Quantity;
+            foreach (var balance in balances.Where(b => b.ItemId == line.ItemId).OrderByDescending(b => b.QuantityOnHand - b.QuantityReserved).ThenBy(b => b.WarehouseId))
+            {
+                var take = Math.Min(need, balance.QuantityOnHand - balance.QuantityReserved);
+                if (take <= 0) continue;
+                balance.QuantityReserved += take;
+                Context.StockReservations.Add(new StockReservation { SalesOrderId = order.Id, SalesOrderItemId = line.Id, WarehouseId = balance.WarehouseId, ItemId = line.ItemId, Quantity = take });
+                need -= take;
+                if (need == 0) break;
+            }
+            Require(need == 0, "error.sd.insufficient_available_stock", 409);
         }
-        return MapToDto(entity);
-    }, ct);
+        order.ReservationStatus = OrderReservationStatus.Reserved;
+    }
+
+    /// <summary>Gives the order's active reservations back to the available stock.</summary>
+    private async Task ReleaseAsync(SalesOrder order, CancellationToken ct)
+    {
+        var active = await Context.StockReservations.Where(r => r.SalesOrderId == order.Id && r.Status == ReservationRecordStatus.Active).ToListAsync(ct);
+        if (active.Count == 0) return;
+        foreach (var key in active.Select(r => (r.WarehouseId, r.ItemId)).Distinct().Order())
+            await posting.LockAsync($"stock:{key.WarehouseId}:{key.ItemId}", ct);
+
+        var warehouseIds = active.Select(r => r.WarehouseId).Distinct().ToArray();
+        var itemIds = active.Select(r => r.ItemId).Distinct().ToArray();
+        var balances = await Context.StockBalances.IgnoreQueryFilters().Where(b => warehouseIds.Contains(b.WarehouseId) && itemIds.Contains(b.ItemId)).ToListAsync(ct);
+        foreach (var reservation in active)
+        {
+            var balance = balances.Single(b => b.WarehouseId == reservation.WarehouseId && b.ItemId == reservation.ItemId);
+            balance.QuantityReserved = Math.Max(0m, balance.QuantityReserved - reservation.Quantity);
+            reservation.Status = ReservationRecordStatus.Released;
+            reservation.ReleasedAtUtc = DateTime.UtcNow;
+        }
+        order.ReservationStatus = OrderReservationStatus.Released;
+    }
+
+    private static ERPm.Domain.Events.NotificationEvent OrderEvent(string template, string severity, SalesOrder order, string? reason) => new(
+        template,
+        ERPm.Domain.Enums.NotificationCategory.SD,
+        severity,
+        ERPm.Domain.Enums.NotificationTargetType.BranchTree,
+        branchId: order.BranchId,
+        parameters: new Dictionary<string, object>
+        {
+            ["order_code"] = order.OrderNumber,
+            ["customer_name"] = order.CustomerName,
+            ["total_amount"] = order.TotalAmount,
+            ["reason"] = reason ?? string.Empty
+        },
+        actionUrl: "/sales/pos");
+
+    // Sent after the transaction committed so a rolled back change never notifies anybody.
+    private void Publish(ERPm.Domain.Events.NotificationEvent? notification)
+    {
+        if (notificationEngine != null && notification != null) _ = notificationEngine.PublishAsync(notification);
+    }
+
     private async Task PrepareAsync(SalesOrder entity, CreateSalesOrderRequest request, CancellationToken ct)
     {
         Require(request.Items is { Count: > 0 and <= 200 } && await Context.Branches.AnyAsync(b => b.Id == request.BranchId && b.IsActive, ct), "error.validation.request");
         Require(request.PaidAmount == 0, "error.validation.request");
         ValidateNumber(request.DiscountAmount); ValidateNumber(request.TaxAmount);
+        Require(request.SalespersonId == null || await Context.Employees.AnyAsync(e => e.Id == request.SalespersonId && e.IsActive, ct), "error.validation.reference");
+        Require(request.QuotationId == null || await Context.SalesQuotations.AnyAsync(q => q.Id == request.QuotationId, ct), "error.validation.reference");
+        Require(request.ExpectedDeliveryDate == null || request.ExpectedDeliveryDate.Value.Kind == DateTimeKind.Utc, "error.validation.request");
+        Require(request.DeliveryAddress == null || request.DeliveryAddress.Length <= 500, "error.validation.request");
         var partner = request.CustomerId.HasValue ? await Context.Partners.SingleOrDefaultAsync(p => p.Id == request.CustomerId && p.IsActive, ct) : null;
         Require(!request.CustomerId.HasValue || partner != null && partner.PartnerType.HasFlag(PartnerType.Customer), "error.sales.customer");
         var ids = request.Items.Select(i => i.ItemId).Distinct().ToArray();
@@ -92,6 +277,8 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
             return new SalesOrderItem { ItemId = item.Id, ItemCode = item.Code, ItemName = item.Name, UnitName = item.BaseUom?.Name, Quantity = line.Quantity, UnitPrice = line.UnitPrice, DiscountAmount = discount, LineTotal = amount };
         }).ToList();
         entity.BranchId = request.BranchId; entity.DepartmentId = request.DepartmentId; entity.CustomerId = partner?.Id; entity.CustomerName = partner?.Name ?? request.CustomerName.Trim();
+        entity.ExpectedDeliveryDate = request.ExpectedDeliveryDate; entity.QuotationId = request.QuotationId; entity.SalespersonId = request.SalespersonId;
+        entity.DeliveryAddress = string.IsNullOrWhiteSpace(request.DeliveryAddress) ? partner?.Address : request.DeliveryAddress.Trim();
         entity.SubTotal = entity.Items.Sum(i => i.LineTotal);
         Require(request.DiscountAmount <= entity.SubTotal, "error.sales.discount");
         entity.DiscountAmount = request.DiscountAmount;
