@@ -34,6 +34,7 @@ public static class PermissionCatalog
         ("wms:uom", [View, Create, Edit, Delete]),
         ("wms:stock", [View]),
         ("wms:receipt", [Create]),
+        ("sd:pricelist", [View, Create, Edit, Delete]),
         ("sd:order", [View, Create, Edit, Delete, Confirm]),
         ("sd:invoice", [View, Create, Cancel]),
         ("pur:order", [View, Create, Edit, Delete, Confirm]),

@@ -1,0 +1,86 @@
+namespace ERPm.Application.DTOs.Sales;
+
+public class PriceListItemDto
+{
+    public int? Id { get; set; }
+    public int ItemId { get; set; }
+    public string ItemCode { get; set; } = string.Empty;
+    public string ItemName { get; set; } = string.Empty;
+    public string? UnitName { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal MinQuantity { get; set; }
+    public decimal DiscountPercent { get; set; }
+}
+
+/// <summary>Price list header; <see cref="Items"/> is filled by the detail endpoint only, the paged list leaves it empty.</summary>
+public class PriceListDetailDto
+{
+    public int Id { get; set; }
+    public Guid ExternalId { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Currency { get; set; } = string.Empty;
+    public DateTime EffectiveFrom { get; set; }
+    public DateTime? EffectiveTo { get; set; }
+    public int? BranchId { get; set; }
+    public string? BranchName { get; set; }
+    public bool IsActive { get; set; }
+    public string? Notes { get; set; }
+    public List<PriceListItemDto> Items { get; set; } = new();
+}
+
+public class PriceListLineRequest
+{
+    public int ItemId { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal MinQuantity { get; set; }
+    public decimal DiscountPercent { get; set; }
+}
+
+public class CreatePriceListRequest
+{
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Currency { get; set; } = "VND";
+    public DateTime EffectiveFrom { get; set; }
+    public DateTime? EffectiveTo { get; set; }
+    public int? BranchId { get; set; }
+    public bool IsActive { get; set; } = true;
+    public string? Notes { get; set; }
+    public List<PriceListLineRequest> Items { get; set; } = new();
+}
+
+/// <summary>Same shape as create; the line list replaces the stored lines.</summary>
+public class UpdatePriceListRequest : CreatePriceListRequest
+{
+}
+
+public class CalculatePriceLineRequest
+{
+    public int ItemId { get; set; }
+    public decimal Quantity { get; set; }
+}
+
+public class CalculatePriceRequest
+{
+    public int? CustomerId { get; set; }
+    public int BranchId { get; set; }
+    public List<CalculatePriceLineRequest> Items { get; set; } = new();
+}
+
+public class CalculatePriceLineDto
+{
+    public int ItemId { get; set; }
+    public int? AppliedPriceListId { get; set; }
+    public string? AppliedPriceListName { get; set; }
+    public decimal OriginalPrice { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal DiscountPercent { get; set; }
+    public decimal DiscountAmount { get; set; }
+    public decimal LineTotal { get; set; }
+}
+
+public class CalculatePriceResponse
+{
+    public List<CalculatePriceLineDto> Items { get; set; } = new();
+}
