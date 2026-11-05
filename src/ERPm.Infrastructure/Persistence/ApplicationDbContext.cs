@@ -62,6 +62,8 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<SalesQuotation> SalesQuotations => Set<SalesQuotation>();
     public DbSet<SalesQuotationItem> SalesQuotationItems => Set<SalesQuotationItem>();
     public DbSet<StockReservation> StockReservations => Set<StockReservation>();
+    public DbSet<SalesReturn> SalesReturns => Set<SalesReturn>();
+    public DbSet<SalesReturnItem> SalesReturnItems => Set<SalesReturnItem>();
     public DbSet<SalesInvoice> SalesInvoices => Set<SalesInvoice>();
     public DbSet<SalesInvoiceItem> SalesInvoiceItems => Set<SalesInvoiceItem>();
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
@@ -813,6 +815,53 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.ToTable(t => t.HasCheckConstraint("CK_tbl_SD_StockReservation_Quantity", "quantity > 0"));
         });
 
+        // 5.0d SALE - Returns
+        modelBuilder.Entity<SalesReturn>(entity =>
+        {
+            entity.ToTable("tbl_SD_SalesReturn");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.ReturnNumber).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.CustomerName).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.Reason).HasMaxLength(500).IsRequired();
+            entity.Property(e => e.TotalRefundAmount).HasPrecision(18, 4);
+            entity.Property(e => e.TotalCostAmount).HasPrecision(18, 4);
+
+            entity.HasOne(e => e.Invoice).WithMany().HasForeignKey(e => e.InvoiceId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Warehouse).WithMany().HasForeignKey(e => e.WarehouseId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.StockReceipt).WithMany().HasForeignKey(e => e.StockReceiptId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.JournalEntry).WithMany().HasForeignKey(e => e.JournalEntryId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Department>().WithMany().HasForeignKey(e => e.DepartmentId).OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => e.ReturnNumber).IsUnique();
+            entity.HasIndex(e => e.InvoiceId);
+            entity.HasIndex(e => e.CustomerId);
+            entity.ToTable(t => t.HasCheckConstraint("CK_tbl_SD_SalesReturn_Amounts", "total_refund_amount >= 0 AND total_cost_amount >= 0"));
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<SalesReturnItem>(entity =>
+        {
+            entity.ToTable("tbl_SD_SalesReturnItem");
+            ConfigureDualKeyEntity(entity);
+            entity.Property(e => e.ItemCode).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.ItemName).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.UnitName).HasMaxLength(50);
+            entity.Property(e => e.Reason).HasMaxLength(500);
+            entity.Property(e => e.ReturnQuantity).HasPrecision(18, 4);
+            entity.Property(e => e.UnitPrice).HasPrecision(18, 4);
+            entity.Property(e => e.RefundAmount).HasPrecision(18, 4);
+            entity.Property(e => e.CostAmount).HasPrecision(18, 4);
+
+            entity.HasOne(e => e.SalesReturn).WithMany(r => r.Items).HasForeignKey(e => e.SalesReturnId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.InvoiceItem).WithMany().HasForeignKey(e => e.InvoiceItemId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Item).WithMany().HasForeignKey(e => e.ItemId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => e.SalesReturnId);
+            entity.HasIndex(e => e.InvoiceItemId);
+            entity.ToTable(t => t.HasCheckConstraint("CK_tbl_SD_SalesReturnItem_Values", "return_quantity > 0 AND unit_price >= 0 AND refund_amount >= 0 AND cost_amount >= 0"));
+        });
+
         // 5.1 SALE - Orders
         modelBuilder.Entity<SalesOrder>(entity =>
         {
@@ -1023,6 +1072,10 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<PriceListItem>().HasQueryFilter(e => !e.PriceList!.IsDeleted);
         modelBuilder.Entity<SalesQuotation>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)
             || (e.DepartmentId != null && AllowedDepartmentIds.Contains(e.DepartmentId.Value)) || (OwnRecordsUserId != null && e.CreatedBy == OwnRecordsUserId)));
+        modelBuilder.Entity<SalesReturn>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)
+            || (e.DepartmentId != null && AllowedDepartmentIds.Contains(e.DepartmentId.Value)) || (OwnRecordsUserId != null && e.CreatedBy == OwnRecordsUserId)));
+        modelBuilder.Entity<SalesReturnItem>().HasQueryFilter(e => !e.SalesReturn!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.SalesReturn.BranchId)
+            || (e.SalesReturn.DepartmentId != null && AllowedDepartmentIds.Contains(e.SalesReturn.DepartmentId.Value)) || (OwnRecordsUserId != null && e.SalesReturn.CreatedBy == OwnRecordsUserId)));
         modelBuilder.Entity<StockReservation>().HasQueryFilter(e => !e.SalesOrder!.IsDeleted);
         modelBuilder.Entity<SalesQuotationItem>().HasQueryFilter(e => !e.SalesQuotation!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.SalesQuotation.BranchId)
             || (e.SalesQuotation.DepartmentId != null && AllowedDepartmentIds.Contains(e.SalesQuotation.DepartmentId.Value)) || (OwnRecordsUserId != null && e.SalesQuotation.CreatedBy == OwnRecordsUserId)));
@@ -1089,6 +1142,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
                 {
                     SalesInvoiceItem => await SalesInvoices.IgnoreQueryFilters().AnyAsync(i => i.Id == entry.OriginalValues.GetValue<int>("SalesInvoiceId") && i.Status != VoucherStatus.Draft, cancellationToken),
                     StockReceiptItem => await StockReceipts.IgnoreQueryFilters().AnyAsync(i => i.Id == entry.OriginalValues.GetValue<int>("StockReceiptId") && i.Status != VoucherStatus.Draft, cancellationToken),
+                    SalesReturnItem => await SalesReturns.IgnoreQueryFilters().AnyAsync(i => i.Id == entry.OriginalValues.GetValue<int>("SalesReturnId") && i.Status != VoucherStatus.Draft, cancellationToken),
                     StockIssueItem => await StockIssues.IgnoreQueryFilters().AnyAsync(i => i.Id == entry.OriginalValues.GetValue<int>("StockIssueId") && i.Status != VoucherStatus.Draft, cancellationToken),
                     JournalEntryLine => await JournalEntries.IgnoreQueryFilters().AnyAsync(i => i.Id == entry.OriginalValues.GetValue<int>("JournalEntryId") && i.Status != VoucherStatus.Draft, cancellationToken),
                     _ => false
@@ -1098,7 +1152,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         }
         foreach (var entry in ChangeTracker.Entries().Where(e => e.State is EntityState.Modified or EntityState.Deleted))
         {
-            if (entry.Entity is SalesInvoice or StockReceipt or StockIssue or JournalEntry)
+            if (entry.Entity is SalesInvoice or SalesReturn or StockReceipt or StockIssue or JournalEntry)
             {
                 var originalStatus = entry.OriginalValues.GetValue<VoucherStatus>("Status");
                 if (originalStatus != VoucherStatus.Draft && !AllowCancellation)

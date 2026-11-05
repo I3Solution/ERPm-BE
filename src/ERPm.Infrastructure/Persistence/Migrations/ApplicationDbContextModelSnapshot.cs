@@ -3226,6 +3226,254 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("ERPm.Domain.Entities.Sales.SalesReturn", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("BranchId")
+                        .HasColumnType("integer")
+                        .HasColumnName("branch_id");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("created_by");
+
+                    b.Property<int?>("CustomerId")
+                        .HasColumnType("integer")
+                        .HasColumnName("customer_id");
+
+                    b.Property<string>("CustomerName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("customer_name");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at_utc");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("deleted_by");
+
+                    b.Property<int?>("DepartmentId")
+                        .HasColumnType("integer")
+                        .HasColumnName("department_id");
+
+                    b.Property<Guid>("ExternalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("external_id");
+
+                    b.Property<int?>("InvoiceId")
+                        .HasColumnType("integer")
+                        .HasColumnName("invoice_id");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
+                    b.Property<int?>("JournalEntryId")
+                        .HasColumnType("integer")
+                        .HasColumnName("journal_entry_id");
+
+                    b.Property<DateTime?>("LastModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_modified_at_utc");
+
+                    b.Property<string>("LastModifiedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("last_modified_by");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("text")
+                        .HasColumnName("notes");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reason");
+
+                    b.Property<int>("RefundMethod")
+                        .HasColumnType("integer")
+                        .HasColumnName("refund_method");
+
+                    b.Property<DateTime>("ReturnDate")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("return_date");
+
+                    b.Property<string>("ReturnNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("return_number");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.Property<int?>("StockReceiptId")
+                        .HasColumnType("integer")
+                        .HasColumnName("stock_receipt_id");
+
+                    b.Property<int?>("TenantId")
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<decimal>("TotalCostAmount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("total_cost_amount");
+
+                    b.Property<decimal>("TotalRefundAmount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("total_refund_amount");
+
+                    b.Property<int>("WarehouseId")
+                        .HasColumnType("integer")
+                        .HasColumnName("warehouse_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_sd_sales_return");
+
+                    b.HasIndex("BranchId")
+                        .HasDatabaseName("ix_tbl_sd_sales_return_branch_id");
+
+                    b.HasIndex("CustomerId")
+                        .HasDatabaseName("ix_tbl_sd_sales_return_customer_id");
+
+                    b.HasIndex("DepartmentId")
+                        .HasDatabaseName("ix_tbl_sd_sales_return_department_id");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_sd_sales_return_external_id");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id", "IsDeleted" });
+
+                    b.HasIndex("InvoiceId")
+                        .HasDatabaseName("ix_tbl_sd_sales_return_invoice_id");
+
+                    b.HasIndex("JournalEntryId")
+                        .HasDatabaseName("ix_tbl_sd_sales_return_journal_entry_id");
+
+                    b.HasIndex("ReturnNumber")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_sd_sales_return_return_number");
+
+                    b.HasIndex("StockReceiptId")
+                        .HasDatabaseName("ix_tbl_sd_sales_return_stock_receipt_id");
+
+                    b.HasIndex("WarehouseId")
+                        .HasDatabaseName("ix_tbl_sd_sales_return_warehouse_id");
+
+                    b.ToTable("tbl_SD_SalesReturn", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_tbl_SD_SalesReturn_Amounts", "total_refund_amount >= 0 AND total_cost_amount >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Sales.SalesReturnItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("CostAmount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("cost_amount");
+
+                    b.Property<Guid>("ExternalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("external_id");
+
+                    b.Property<int?>("InvoiceItemId")
+                        .HasColumnType("integer")
+                        .HasColumnName("invoice_item_id");
+
+                    b.Property<string>("ItemCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("item_code");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("integer")
+                        .HasColumnName("item_id");
+
+                    b.Property<string>("ItemName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("item_name");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reason");
+
+                    b.Property<decimal>("RefundAmount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("refund_amount");
+
+                    b.Property<decimal>("ReturnQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("return_quantity");
+
+                    b.Property<int>("SalesReturnId")
+                        .HasColumnType("integer")
+                        .HasColumnName("sales_return_id");
+
+                    b.Property<string>("UnitName")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("unit_name");
+
+                    b.Property<decimal>("UnitPrice")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("unit_price");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_sd_sales_return_item");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_sd_sales_return_item_external_id");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id" });
+
+                    b.HasIndex("InvoiceItemId")
+                        .HasDatabaseName("ix_tbl_sd_sales_return_item_invoice_item_id");
+
+                    b.HasIndex("ItemId")
+                        .HasDatabaseName("ix_tbl_sd_sales_return_item_item_id");
+
+                    b.HasIndex("SalesReturnId")
+                        .HasDatabaseName("ix_tbl_sd_sales_return_item_sales_return_id");
+
+                    b.ToTable("tbl_SD_SalesReturnItem", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_tbl_SD_SalesReturnItem_Values", "return_quantity > 0 AND unit_price >= 0 AND refund_amount >= 0 AND cost_amount >= 0");
+                        });
+                });
+
             modelBuilder.Entity("ERPm.Domain.Entities.Sales.StockReservation", b =>
                 {
                     b.Property<int>("Id")
@@ -5046,6 +5294,94 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     b.Navigation("SalesQuotation");
                 });
 
+            modelBuilder.Entity("ERPm.Domain.Entities.Sales.SalesReturn", b =>
+                {
+                    b.HasOne("ERPm.Domain.Entities.System.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_sd_sales_return_tbl_sys_branch_branch_id");
+
+                    b.HasOne("ERPm.Domain.Entities.Partner.Partner", "Customer")
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_sd_sales_return_tbl_crm_partner_customer_id");
+
+                    b.HasOne("ERPm.Domain.Entities.HumanResource.Department", null)
+                        .WithMany()
+                        .HasForeignKey("DepartmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_sd_sales_return_tbl_hrm_department_department_id");
+
+                    b.HasOne("ERPm.Domain.Entities.Sales.SalesInvoice", "Invoice")
+                        .WithMany()
+                        .HasForeignKey("InvoiceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_sd_sales_return_tbl_sale_invoice_invoice_id");
+
+                    b.HasOne("ERPm.Domain.Entities.Accounting.JournalEntry", "JournalEntry")
+                        .WithMany()
+                        .HasForeignKey("JournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_sd_sales_return_journal_entries_journal_entry_id");
+
+                    b.HasOne("ERPm.Domain.Entities.Inventory.StockReceipt", "StockReceipt")
+                        .WithMany()
+                        .HasForeignKey("StockReceiptId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_sd_sales_return_tbl_wms_stock_receipt_stock_receipt_id");
+
+                    b.HasOne("ERPm.Domain.Entities.Inventory.Warehouse", "Warehouse")
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_sd_sales_return_tbl_wms_warehouse_warehouse_id");
+
+                    b.Navigation("Branch");
+
+                    b.Navigation("Customer");
+
+                    b.Navigation("Invoice");
+
+                    b.Navigation("JournalEntry");
+
+                    b.Navigation("StockReceipt");
+
+                    b.Navigation("Warehouse");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Sales.SalesReturnItem", b =>
+                {
+                    b.HasOne("ERPm.Domain.Entities.Sales.SalesInvoiceItem", "InvoiceItem")
+                        .WithMany()
+                        .HasForeignKey("InvoiceItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_sd_sales_return_item_tbl_sale_invoice_item_invoice_item_id");
+
+                    b.HasOne("ERPm.Domain.Entities.Catalog.Item", "Item")
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_sd_sales_return_item_tbl_wms_item_item_id");
+
+                    b.HasOne("ERPm.Domain.Entities.Sales.SalesReturn", "SalesReturn")
+                        .WithMany("Items")
+                        .HasForeignKey("SalesReturnId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_sd_sales_return_item_tbl_sd_sales_return_sales_return_id");
+
+                    b.Navigation("InvoiceItem");
+
+                    b.Navigation("Item");
+
+                    b.Navigation("SalesReturn");
+                });
+
             modelBuilder.Entity("ERPm.Domain.Entities.Sales.StockReservation", b =>
                 {
                     b.HasOne("ERPm.Domain.Entities.Catalog.Item", "Item")
@@ -5330,6 +5666,11 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                 });
 
             modelBuilder.Entity("ERPm.Domain.Entities.Sales.SalesQuotation", b =>
+                {
+                    b.Navigation("Items");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Sales.SalesReturn", b =>
                 {
                     b.Navigation("Items");
                 });

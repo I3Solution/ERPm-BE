@@ -39,6 +39,7 @@ public static class PermissionCatalog
         ("sd:quotation", [View, Create, Edit, Delete]),
         ("sd:order", [View, Create, Edit, Delete, Confirm, ApproveCredit, Cancel]),
         ("sd:invoice", [View, Create, Cancel]),
+        ("sd:return", [View, Create]),
         ("pur:order", [View, Create, Edit, Delete, Confirm]),
         ("crm:partner", [View, Create]),
         ("dashboard:metrics", [View]),

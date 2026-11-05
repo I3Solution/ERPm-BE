@@ -139,8 +139,7 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
             if (invoice.RemainingDebt > 0)
             {
                 Require(customer != null, "error.sales.customer_required");
-                var receivables = await context.SalesInvoices.IgnoreQueryFilters().Where(i => !i.IsDeleted && i.Status == VoucherStatus.Posted && i.CustomerId == request.CustomerId)
-                    .SumAsync(i => i.RemainingDebt, cancellationToken);
+                var receivables = await posting.ReceivablesAsync(customer!.Id, cancellationToken);
                 Require(customer!.CreditLimit >= receivables + invoice.RemainingDebt, "error.sales.credit_limit", 409);
                 customer.DebtBalance += invoice.RemainingDebt;
             }

@@ -87,7 +87,9 @@ public sealed class PriceListService(ApplicationDbContext context)
 
     protected override async Task BeforeDeleteAsync(PriceList entity, CancellationToken ct)
     {
-        Require(!await Context.Partners.AnyAsync(p => p.PriceListId == entity.Id, ct), "error.sd.pricelist_in_use", 409);
+        var inUse = await Context.Partners.IgnoreQueryFilters().AnyAsync(p => !p.IsDeleted && p.PriceListId == entity.Id, ct)
+            || await Context.SalesOrders.IgnoreQueryFilters().AnyAsync(o => !o.IsDeleted && o.PriceListId == entity.Id, ct);
+        Require(!inUse, "error.sd.pricelist_in_use", 409);
     }
 
     // The saved entity has no navigation data yet, so return the freshly loaded detail.
@@ -108,7 +110,8 @@ public sealed class PriceListService(ApplicationDbContext context)
 
     public async Task<CalculatePriceResponse> CalculateAsync(CalculatePriceRequest request, CancellationToken ct = default)
     {
-        Require(request.Items is { Count: > 0 and <= 200 } && await Context.Branches.AnyAsync(b => b.Id == request.BranchId && b.IsActive, ct), "error.validation.request");
+        // Pricing only reads prices, so the branch is checked outside the caller's data scope: a SELF-scoped seller has no branches of their own.
+        Require(request.Items is { Count: > 0 and <= 200 } && await Context.Branches.IgnoreQueryFilters().AnyAsync(b => !b.IsDeleted && b.Id == request.BranchId && b.IsActive, ct), "error.validation.request");
         foreach (var line in request.Items) ValidateNumber(line.Quantity, true);
 
         int? customerListId = null;
@@ -177,7 +180,7 @@ public sealed class PriceListService(ApplicationDbContext context)
         Require(code.Length is > 0 and <= 50 && !string.IsNullOrWhiteSpace(request.Name) && request.Name.Trim().Length <= 255, "error.validation.request");
         Require(request.Currency?.Trim().Length == 3, "error.validation.request");
         Require(request.EffectiveFrom.Kind == DateTimeKind.Utc && (request.EffectiveTo == null || request.EffectiveTo.Value.Kind == DateTimeKind.Utc && request.EffectiveTo >= request.EffectiveFrom), "error.validation.request");
-        Require(request.BranchId == null || await Context.Branches.AnyAsync(b => b.Id == request.BranchId && b.IsActive, ct), "error.validation.reference");
+        Require(request.BranchId == null || await Context.Branches.IgnoreQueryFilters().AnyAsync(b => !b.IsDeleted && b.Id == request.BranchId && b.IsActive, ct), "error.validation.reference");
         var normalized = code.ToUpperInvariant();
         Require(!await Context.PriceLists.AnyAsync(p => p.Code == normalized && p.Id != selfId, ct), "error.sd.pricelist_duplicate_code", 409);
 

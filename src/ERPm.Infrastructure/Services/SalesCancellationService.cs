@@ -18,6 +18,8 @@ public partial class SalesInvoiceService
                 .Include(i => i.JournalEntry!).ThenInclude(j => j.Lines).SingleOrDefaultAsync(i => i.Id == id, cancellationToken);
             Require(invoice != null && invoice.Status != VoucherStatus.Draft, "error.sales.cancelled", 409);
             if (invoice!.Status == VoucherStatus.Cancelled) return Map(invoice);
+            // Returned goods are already back in stock and refunded; cancelling the invoice too would count them twice.
+            Require(!await context.SalesReturns.IgnoreQueryFilters().AnyAsync(r => !r.IsDeleted && r.InvoiceId == id && r.Status == VoucherStatus.Posted, cancellationToken), "error.sd.invoice_has_returns", 409);
             Require(invoice.JournalEntry != null, "error.accounting.accounts_missing", 409);
             var goods = invoice.Items.Where(i => i.CostPrice > 0 || invoice.StockIssue != null).GroupBy(i => i.ItemId).OrderBy(g => g.Key);
             foreach (var group in goods) await posting.LockAsync($"stock:{invoice.WarehouseId}:{group.Key}", cancellationToken);

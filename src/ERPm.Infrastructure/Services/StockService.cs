@@ -81,6 +81,8 @@ public class StockService : IStockService
                 Barcode = b.Item != null ? b.Item.Barcode : null,
                 UomName = b.Item != null && b.Item.BaseUom != null ? b.Item.BaseUom.Name : "Cái",
                 QuantityOnHand = b.QuantityOnHand,
+                QuantityReserved = b.QuantityReserved,
+                QuantityAvailable = b.QuantityOnHand - b.QuantityReserved,
                 AverageCostPrice = b.AverageCostPrice,
                 TotalValue = b.InventoryValue,
                 IsLowStock = b.Item != null && b.QuantityOnHand <= b.Item.MinStockAlert

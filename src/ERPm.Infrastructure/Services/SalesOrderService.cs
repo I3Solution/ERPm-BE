@@ -48,14 +48,14 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
     }
     protected override async Task BeforeUpdateAsync(SalesOrder entity, UpdateSalesOrderRequest request, CancellationToken ct)
     {
-        Require(entity.Status == SalesOrderStatus.Draft && (request.Status == null || request.Status == SalesOrderStatus.Draft), "error.order.state", 409);
+        Require(entity.Status == SalesOrderStatus.Draft && (request.Status == null || request.Status == SalesOrderStatus.Draft), "error.sd.order_invalid_status_for_action", 409);
         Context.RemoveRange(entity.Items);
         await PrepareAsync(entity, request, ct);
     }
     protected override void MapUpdateToEntity(UpdateSalesOrderRequest request, SalesOrder entity) { }
     protected override Task BeforeDeleteAsync(SalesOrder entity, CancellationToken ct)
     {
-        Require(entity.Status == SalesOrderStatus.Draft, "error.order.state", 409);
+        Require(entity.Status == SalesOrderStatus.Draft, "error.sd.order_invalid_status_for_action", 409);
         return Task.CompletedTask;
     }
     // The saved entity has no navigation data yet, so return the freshly loaded order.
@@ -91,7 +91,7 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
             await posting.LockAsync($"order:Sales:{id}", ct);
             var entity = await FindEntityAsync(id, ct);
             Require(entity != null, "error.order.not_found", 404);
-            Require(entity!.Status == SalesOrderStatus.Draft, "error.order.state", 409);
+            Require(entity!.Status == SalesOrderStatus.Draft, "error.sd.order_invalid_status_for_action", 409);
 
             entity.CreditCheckStatus = await CheckCreditAsync(entity, ct);
             if (entity.CreditCheckStatus == CreditCheckStatus.PendingApproval)
@@ -167,8 +167,7 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
         if (!order.CustomerId.HasValue) return CreditCheckStatus.Passed;
         await posting.LockAsync($"partner:{order.CustomerId}", ct);
         var limit = await Context.Partners.Where(p => p.Id == order.CustomerId).Select(p => p.CreditLimit).SingleAsync(ct);
-        var receivables = await Context.SalesInvoices.IgnoreQueryFilters()
-            .Where(i => !i.IsDeleted && i.Status == VoucherStatus.Posted && i.CustomerId == order.CustomerId).SumAsync(i => i.RemainingDebt, ct);
+        var receivables = await posting.ReceivablesAsync(order.CustomerId.Value, ct);
         var committed = await Context.SalesOrders.IgnoreQueryFilters()
             .Where(o => !o.IsDeleted && o.CustomerId == order.CustomerId && o.Id != order.Id && CommittedStatuses.Contains(o.Status)).SumAsync(o => o.TotalAmount, ct);
         var exposure = receivables + committed + order.TotalAmount;
