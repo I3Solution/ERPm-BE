@@ -49,6 +49,8 @@ public class SalesInvoiceDto
 
 public class SalesInvoiceItemDto
 {
+    /// <summary>Invoice line id; a return against the invoice names it as <c>invoiceItemId</c>.</summary>
+    public int Id { get; set; }
     public int ItemId { get; set; }
     public string ItemCode { get; set; } = string.Empty;
     public string ItemName { get; set; } = string.Empty;

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ERPm.Application.Common;
+using ERPm.Domain.Entities.HumanResource;
 using ERPm.Domain.Entities.Inventory;
 using ERPm.Application.Common.Crud;
 using ERPm.Domain.Services.Iam;
@@ -371,10 +372,52 @@ try
     var discountedLine = (await db.SalesInvoiceItems.AsNoTracking().SingleAsync(i => i.SalesInvoiceId == discounted.Id)).Id;
     var shareRefund = await returns.CreateAsync(new CreateSalesReturnRequest { InvoiceId = discounted.Id, BranchId = branch.Id, WarehouseId = warehouse.Id, RefundMethod = (int)RefundMethod.Cash, Reason = "Changed mind", Items = [new() { InvoiceItemId = discountedLine, ItemId = ret.Id, Quantity = 1 }] });
     Check(shareRefund.TotalRefundAmount == 90 && shareRefund.CustomerName == discounted.CustomerName, "an invoice discount is shared across the returned quantity");
+    var invoiceDetail = await Sales(db).GetInvoiceAsync(soldInvoice.Id);
+    Check(invoiceDetail != null && invoiceDetail.Items.Single().Id == soldLine && await Sales(db).GetInvoiceAsync(999999) == null, "an invoice is readable by id with its line ids for returns");
     var listed = await returns.GetPagedAsync(new BaseFilterQuery { Keyword = creditRefund.ReturnNumber, Status = "Posted" });
     Check(listed.TotalCount == 1 && listed.Items.Single().Items.Count == 0, "the return page filters by number and status and returns headers only");
     Check(PermissionCatalog.Contains("sd:return:view") && PermissionCatalog.Contains("sd:return:create"), "return permissions are in the catalog");
     (await db.Accounts.SingleAsync(a => a.Code == "511")).IsActive = false; await db.SaveChangesAsync();   // restore the state the next checks expect
+    // Sales analytics (Dapper SQL) cross-checked against EF queries over the same data.
+    var analytics = new SalesAnalyticsService(db, new BranchService(db));
+    var allTime = new SalesAnalyticsQuery { From = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), To = DateTime.UtcNow.AddDays(1) };
+    var sellerPosition = await db.JobPositions.FirstOrDefaultAsync() ?? db.JobPositions.Add(new JobPosition { Code = "SELLER", Name = "Seller", CompanyId = branch.Id }).Entity;
+    await db.SaveChangesAsync();
+    var seller = await db.Employees.FirstOrDefaultAsync() ?? db.Employees.Add(new Employee { Code = "SELLER", FullName = "Seller", CompanyId = branch.Id, BranchId = branch.Id, JobPositionId = sellerPosition.Id }).Entity;
+    await db.SaveChangesAsync();
+    await db.SalesOrders.Where(o => o.Id == approved.Id).ExecuteUpdateAsync(o => o.SetProperty(x => x.SalespersonId, seller.Id));
+    var summary = await analytics.GetSummaryAsync(allTime);
+    var invoiced = await db.SalesInvoices.Where(i => i.Status == VoucherStatus.Posted).SumAsync(i => i.TotalAmount);
+    var invoicedCost = await db.SalesInvoiceItems.Where(i => i.SalesInvoice!.Status == VoucherStatus.Posted).SumAsync(i => i.CostAmount);
+    var refunded = await db.SalesReturns.Where(r => r.Status == VoucherStatus.Posted).SumAsync(r => r.TotalRefundAmount);
+    var restocked = await db.SalesReturns.Where(r => r.Status == VoucherStatus.Posted).SumAsync(r => r.TotalCostAmount);
+    Check(summary.TotalRevenue == invoiced - refunded && summary.TotalCost == invoicedCost - restocked && summary.GrossProfit == summary.TotalRevenue - summary.TotalCost && refunded > 0 && summary.TotalRevenue > 0,
+        "the sales summary nets posted returns off revenue and cost");
+    Check(summary.GrossMarginPercent == Math.Round(summary.GrossProfit / summary.TotalRevenue * 100m, 2), "the gross margin is profit over revenue");
+    Check(summary.TotalOrders == await db.SalesOrders.CountAsync() && summary.CancelledOrders == await db.SalesOrders.CountAsync(o => o.Status == "Cancelled") && summary.CancelledOrders > 0 && summary.CompletedOrders == 0, "the sales summary counts orders by status");
+    var funnel = await analytics.GetFunnelAsync(allTime);
+    var liveOrders = db.SalesOrders.Where(o => o.Status == "Confirmed" || o.Status == "Processing" || o.Status == "Completed");
+    var quotationCount = await db.SalesQuotations.CountAsync();
+    Check(funnel.QuotationCount == quotationCount && funnel.QuotationTotalAmount == await db.SalesQuotations.SumAsync(q => q.TotalAmount) && funnel.OrderCount == await liveOrders.CountAsync() && funnel.OrderTotalAmount == await liveOrders.SumAsync(o => o.TotalAmount)
+        && funnel.InvoiceCount == await db.SalesInvoices.CountAsync(i => i.Status == VoucherStatus.Posted) && funnel.InvoiceTotalAmount == invoiced, "the sales funnel counts quotations, live orders and posted invoices");
+    Check(funnel.ConversionRatePercent == Math.Round(await db.SalesQuotations.CountAsync(q => q.Status == "Converted") * 100m / quotationCount, 2) && funnel.ConversionRatePercent > 0, "the funnel reports the quotation conversion rate");
+    var kpi = await analytics.GetSalespersonKpiAsync(allTime);
+    var sellerOrders = liveOrders.Where(o => o.SalespersonId == seller.Id);
+    Check(kpi.Count == 1 && kpi[0].SalespersonId == seller.Id && kpi[0].SalespersonName == seller.FullName && kpi[0].TotalOrders == await sellerOrders.CountAsync() && kpi[0].TotalRevenue == await sellerOrders.SumAsync(o => o.TotalAmount) && kpi[0].TargetRevenue == null,
+        "the salesperson KPI totals the live orders of each seller");
+    var thisBranch = await analytics.GetSummaryAsync(new SalesAnalyticsQuery { From = allTime.From, To = allTime.To, BranchId = branch.Id });
+    Check(thisBranch.TotalRevenue == summary.TotalRevenue && thisBranch.TotalOrders == summary.TotalOrders, "the branch filter keeps the figures of that branch");
+    var future = await analytics.GetSummaryAsync(new SalesAnalyticsQuery { From = DateTime.UtcNow.AddDays(30), To = DateTime.UtcNow.AddDays(60) });
+    Check(future.TotalRevenue == 0 && future.TotalOrders == 0 && (await analytics.GetSalespersonKpiAsync(new SalesAnalyticsQuery { From = DateTime.UtcNow.AddDays(30), To = DateTime.UtcNow.AddDays(60) })).Count == 0, "a period without activity reports zero");
+    await Reject(async () => await analytics.GetSummaryAsync(new SalesAnalyticsQuery { From = allTime.To, To = allTime.From }), "error.validation.request");
+    await using (var elsewhere = Db(new TestUser(false, [999999])))
+    {
+        var hidden = new SalesAnalyticsService(elsewhere, new BranchService(elsewhere));
+        var none = await hidden.GetSummaryAsync(allTime);
+        var noFunnel = await hidden.GetFunnelAsync(allTime);
+        Check(none.TotalRevenue == 0 && none.TotalOrders == 0 && noFunnel.OrderCount == 0 && noFunnel.QuotationCount == 0 && noFunnel.InvoiceCount == 0 && (await hidden.GetSalespersonKpiAsync(allTime)).Count == 0, "analytics only count records inside the caller's data scope");
+    }
+    Check(PermissionCatalog.Contains("sd:report:view"), "the report permission is in the catalog");
     await using var denied = Db(new TestUser(false, [999999]));
     Check(!await denied.SalesInvoices.AnyAsync() && !await denied.StockBalances.AnyAsync(), "server filters inaccessible branches");
     db.ChangeTracker.Clear(); var immutable = await db.SalesInvoices.FirstAsync(); immutable.TotalAmount = 1;
@@ -495,6 +538,9 @@ try
         Check((await http.PostAsJsonAsync("/api/v1/sales/orders/999999/approve-credit", new { reason = "x" })).StatusCode == HttpStatusCode.NotFound, "approving credit of a missing order answers not found");
         Check((await http.GetAsync("/api/v1/sales/returns")).IsSuccessStatusCode, "admin reads the sales return page over HTTP");
         Check((await http.GetAsync("/api/v1/sales/returns/999999")).StatusCode == HttpStatusCode.NotFound, "reading a missing return answers not found");
+        Check((await http.GetAsync("/api/v1/sales/analytics/summary")).IsSuccessStatusCode && (await http.GetAsync("/api/v1/sales/analytics/salesperson-kpi")).IsSuccessStatusCode && (await http.GetAsync("/api/v1/sales/analytics/funnel")).IsSuccessStatusCode, "admin reads the three sales analytics endpoints over HTTP");
+        Check((await http.GetAsync("/api/v1/sales/analytics/summary?from=2026-02-01T00:00:00Z&to=2026-01-01T00:00:00Z")).StatusCode == HttpStatusCode.BadRequest, "an inverted analytics period answers bad request");
+        Check((await http.GetAsync("/api/v1/sales/invoices/999999")).StatusCode == HttpStatusCode.NotFound, "reading a missing invoice answers not found");
         http.DefaultRequestHeaders.Authorization = new("Bearer", viewerToken);
         Check((await http.PostAsync("/api/v1/sales/quotations/1/send", null)).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without sd:quotation:edit cannot send a quotation");
         Check((await http.PostAsJsonAsync("/api/v1/sales/orders/1/approve-credit", new { reason = "x" })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden && (await http.PostAsJsonAsync("/api/v1/sales/orders/1/cancel", new { reason = "x" })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without the permission cannot approve credit or cancel an order");

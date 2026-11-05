@@ -29,6 +29,13 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
         return invoices.Select(Map).ToList();
     }
 
+    public async Task<SalesInvoiceDto?> GetInvoiceAsync(int id, CancellationToken cancellationToken = default)
+    {
+        var invoice = await context.SalesInvoices.AsNoTracking().Include(i => i.Branch).Include(i => i.Items).ThenInclude(i => i.Item)
+            .SingleOrDefaultAsync(i => i.Id == id, cancellationToken);
+        return invoice == null ? null : Map(invoice);
+    }
+
     public Task<SalesInvoiceDto> CreateInvoiceAsync(CreateSalesInvoiceRequest request, CancellationToken cancellationToken = default)
     {
         Require(request.RequestId != Guid.Empty && request.WarehouseId > 0 && request.Items is { Count: > 0 and <= 200 }, "error.validation.request");
@@ -185,7 +192,7 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
         TotalAmount = i.TotalAmount, PaidAmount = i.PaidAmount, TenderedAmount = i.TenderedAmount, ChangeAmount = i.ChangeAmount, RemainingDebt = i.RemainingDebt,
         Items = i.Items.Select(l => new SalesInvoiceItemDto
         {
-            ItemId = l.ItemId, ItemCode = string.IsNullOrEmpty(l.ItemCode) ? l.Item?.Code ?? "" : l.ItemCode,
+            Id = l.Id, ItemId = l.ItemId, ItemCode = string.IsNullOrEmpty(l.ItemCode) ? l.Item?.Code ?? "" : l.ItemCode,
             ItemName = string.IsNullOrEmpty(l.ItemName) ? l.Item?.Name ?? "" : l.ItemName,
             Quantity = l.Quantity, UnitPrice = l.UnitPrice, Amount = l.Amount
         }).ToList()
