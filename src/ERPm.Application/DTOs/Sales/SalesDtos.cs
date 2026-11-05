@@ -1,4 +1,4 @@
-using ERPm.Domain.Entities.Sales;
+﻿using ERPm.Domain.Entities.Sales;
 
 namespace ERPm.Application.DTOs.Sales;
 
@@ -6,6 +6,7 @@ public class CreateSalesInvoiceRequest
 {
     public Guid RequestId { get; set; }
     public int? BranchId { get; set; }                     // Originating branch ID
+    public int? DepartmentId { get; set; }
     public int? CustomerId { get; set; }
     public string CustomerName { get; set; } = "Khách lẻ";
     public int WarehouseId { get; set; }
@@ -30,6 +31,7 @@ public class SalesInvoiceDto
     public string InvoiceNumber { get; set; } = string.Empty;
     public DateTime InvoiceDate { get; set; }
     public int BranchId { get; set; }
+    public int? DepartmentId { get; set; }
     public string? BranchCode { get; set; }
     public string? BranchName { get; set; }
     public string CustomerName { get; set; } = string.Empty;

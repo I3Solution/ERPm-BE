@@ -1,4 +1,4 @@
-using ERPm.Application.Common.Interfaces;
+﻿using ERPm.Application.Common.Interfaces;
 using ERPm.Application.DTOs.Inventory;
 using ERPm.Domain.Entities.Accounting;
 using ERPm.Domain.Entities.Catalog;
@@ -49,7 +49,7 @@ public sealed class StockReceiptPostingService(ApplicationDbContext context, Pos
             var accounts = await posting.AccountsAsync(["156", request.IsOpeningBalance ? "411" : "331"], ct);
             var receipt = new StockReceipt
             {
-                RequestId = request.RequestId, RequestHash = hash, BranchId = warehouse!.BranchId, WarehouseId = warehouse.Id,
+                RequestId = request.RequestId, RequestHash = hash, BranchId = warehouse!.BranchId, DepartmentId = request.DepartmentId, WarehouseId = warehouse.Id,
                 SupplierId = request.SupplierId, Code = await posting.NumberAsync("PNK", ct), Notes = request.Notes, Status = VoucherStatus.Posted
             };
             var balances = await context.StockBalances.Where(b => b.WarehouseId == warehouse.Id && ids.Contains(b.ItemId)).ToDictionaryAsync(b => b.ItemId, ct);

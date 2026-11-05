@@ -18,6 +18,7 @@ public class PurchaseOrderDto
     public string OrderNumber { get; set; } = string.Empty;
     public DateTime OrderDate { get; set; }
     public int BranchId { get; set; }
+    public int? DepartmentId { get; set; }
     public int? SupplierId { get; set; }
     public string SupplierName { get; set; } = string.Empty;
 
@@ -47,6 +48,7 @@ public class CreatePurchaseOrderRequest
     public string? OrderNumber { get; set; }
     public DateTime? OrderDate { get; set; }
     public int BranchId { get; set; }
+    public int? DepartmentId { get; set; }
     public int? SupplierId { get; set; }
     public string SupplierName { get; set; } = string.Empty;
 

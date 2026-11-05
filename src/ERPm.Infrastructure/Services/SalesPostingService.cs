@@ -1,4 +1,4 @@
-using ERPm.Application.DTOs.Sales;
+﻿using ERPm.Application.DTOs.Sales;
 using ERPm.Application.Common.Interfaces;
 using ERPm.Application.Features.Sales;
 using ERPm.Application.Features.System;
@@ -69,13 +69,13 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
             var invoice = new SalesInvoice
             {
                 RequestId = request.RequestId, RequestHash = hash,
-                InvoiceNumber = await posting.NumberAsync("HD", cancellationToken), BranchId = warehouse!.BranchId,
+                InvoiceNumber = await posting.NumberAsync("HD", cancellationToken), BranchId = warehouse!.BranchId, DepartmentId = request.DepartmentId,
                 WarehouseId = warehouse.Id, CustomerId = request.CustomerId, PaymentMethod = request.PaymentMethod,
                 CustomerName = request.CustomerName.Trim(), DiscountAmount = request.DiscountAmount, Notes = request.Notes, Status = VoucherStatus.Posted
             };
             var issue = new StockIssue
             {
-                Code = await posting.NumberAsync("PXK", cancellationToken), BranchId = warehouse.BranchId,
+                Code = await posting.NumberAsync("PXK", cancellationToken), BranchId = warehouse.BranchId, DepartmentId = request.DepartmentId,
                 WarehouseId = warehouse.Id, CustomerId = request.CustomerId, Status = VoucherStatus.Posted, Reason = invoice.InvoiceNumber
             };
             foreach (var line in request.Items)
@@ -179,7 +179,7 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
 
     private static SalesInvoiceDto Map(SalesInvoice i) => new()
     {
-        Id = i.Id, InvoiceNumber = i.InvoiceNumber, InvoiceDate = i.InvoiceDate, BranchId = i.BranchId,
+        Id = i.Id, InvoiceNumber = i.InvoiceNumber, InvoiceDate = i.InvoiceDate, BranchId = i.BranchId, DepartmentId = i.DepartmentId,
         BranchCode = i.Branch?.Code, BranchName = i.Branch?.Name, CustomerName = i.CustomerName,
         PaymentMethodName = i.PaymentMethod switch { PaymentMethod.Cash => "sales.cash", PaymentMethod.BankTransfer => "sales.bank_transfer", _ => "sales.credit" },
         Status = i.Status.ToString(), SubTotal = i.SubTotal, DiscountAmount = i.DiscountAmount,

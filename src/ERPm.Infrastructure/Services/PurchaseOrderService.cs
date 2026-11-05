@@ -1,4 +1,4 @@
-using ERPm.Application.Common.Crud;
+﻿using ERPm.Application.Common.Crud;
 using ERPm.Application.DTOs.Purchase;
 using ERPm.Domain.Entities.Purchase;
 using ERPm.Domain.Entities.Partner;
@@ -69,7 +69,7 @@ public sealed class PurchaseOrderService(ApplicationDbContext context, PostingTr
             var item = items[line.ItemId];
             return new PurchaseOrderItem { ItemId = item.Id, ItemCode = item.Code, ItemName = item.Name, UnitName = item.BaseUom?.Name, Quantity = line.Quantity, UnitPrice = line.UnitPrice, LineTotal = amount };
         }).ToList();
-        entity.BranchId = request.BranchId; entity.SupplierId = partner?.Id; entity.SupplierName = partner?.Name ?? request.SupplierName.Trim();
+        entity.BranchId = request.BranchId; entity.DepartmentId = request.DepartmentId; entity.SupplierId = partner?.Id; entity.SupplierName = partner?.Name ?? request.SupplierName.Trim();
         entity.SubTotal = entity.Items.Sum(i => i.LineTotal);
         Require(0m <= entity.SubTotal, "error.sales.discount");
 
