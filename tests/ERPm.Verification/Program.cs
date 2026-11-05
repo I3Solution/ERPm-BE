@@ -1,5 +1,8 @@
 using System.Text.Json;
 using ERPm.Application.Common;
+using ERPm.Application.Common.Crud;
+using ERPm.Domain.Services.Iam;
+using ERPm.Domain.Services.Sales;
 using ERPm.Application.Common.Interfaces;
 using ERPm.Application.DTOs.Inventory;
 using ERPm.Application.DTOs.Sales;
@@ -157,6 +160,56 @@ try
     Check(!await db.PriceLists.AnyAsync() && !await db.PriceListItems.AnyAsync(), "deleted price list and its lines are hidden");
     db.PriceLists.Add(new PriceList { Code = "PL-RETAIL", Name = "Reused code" }); await db.SaveChangesAsync();
     Check(await db.PriceLists.CountAsync() == 1, "deleted price list code can be reused");
+    // Pricing engine (pure rules) and price list service.
+    PriceTier T(decimal min, decimal price, decimal pct = 0) => new(min, price, pct);
+    PriceCandidate L(int id, bool own, bool branchOnly, params PriceTier[] tiers) => new(id, "L" + id, own, branchOnly, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), tiers);
+    var tiered = PricingEngine.Price(100, 12, [L(1, false, false, T(0, 90), T(10, 80, 5))]);
+    Check(tiered.UnitPrice == 80 && tiered.DiscountAmount == 48 && tiered.LineTotal == 912 && tiered.AppliedPriceListId == 1 && tiered.OriginalPrice == 100, "pricing picks the highest quantity tier and its discount");
+    Check(PricingEngine.Price(100, 5, [L(1, false, false, T(10, 80))]).UnitPrice == 100 && PricingEngine.Price(100, 5, []).AppliedPriceListId == null, "pricing falls back to the catalogue price");
+    Check(PricingEngine.Price(100, 1, [L(1, false, false, T(0, 70)), L(2, false, false, T(0, 80, 20))]).AppliedPriceListId == 2, "pricing without own list picks the lowest net price");
+    Check(PricingEngine.Price(100, 1, [L(1, false, false, T(0, 60)), L(2, true, false, T(0, 90))]).AppliedPriceListId == 2, "the customer's own list wins over a cheaper one");
+    Check(PricingEngine.Price(100, 1, [L(1, false, false, T(0, 70)), L(2, false, true, T(0, 70))]).AppliedPriceListId == 2, "equal prices prefer the branch-specific list");
+    Check(PermissionCatalog.Contains("sd:pricelist:view") && PermissionCatalog.Contains("sd:pricelist:delete"), "price list permissions are in the catalog");
+
+    var lists = new PriceListService(db);
+    var from = DateTime.UtcNow.AddDays(-1);
+    CreatePriceListRequest ListRequest(string code, decimal price, int? branchId = null, bool active = true, DateTime? to = null) =>
+        new() { Code = code, Name = code, Currency = "vnd", EffectiveFrom = from, EffectiveTo = to, BranchId = branchId, IsActive = active, Items = [new() { ItemId = item.Id, UnitPrice = price }] };
+    var wholesale = await lists.CreateAsync(ListRequest("wholesale", 70));
+    Check(wholesale.Code == "WHOLESALE" && wholesale.Currency == "VND" && wholesale.Items.Single().ItemCode == "ITEM" && wholesale.Items.Single().UnitName != null, "price list is created normalized and returns its lines");
+    await Reject(async () => await lists.CreateAsync(ListRequest("Wholesale", 1)), "error.sd.pricelist_duplicate_code");
+    var bad = ListRequest("BAD", 1); bad.Items[0].DiscountPercent = 101;
+    await Reject(async () => await lists.CreateAsync(bad), "error.validation.number");
+    var twice = ListRequest("TWICE", 1); twice.Items.Add(new() { ItemId = item.Id, UnitPrice = 2 });
+    await Reject(async () => await lists.CreateAsync(twice), "error.validation.request");
+    var backwards = ListRequest("BACK", 1, to: from.AddDays(-1));
+    await Reject(async () => await lists.CreateAsync(backwards), "error.validation.request");
+    var vip = await lists.CreateAsync(ListRequest("VIP", 60, branch.Id));
+    await lists.CreateAsync(ListRequest("OFF", 10, active: false));
+    await lists.CreateAsync(ListRequest("OLD", 5, to: from.AddHours(1)));
+    var paged = await lists.GetPagedAsync(new BaseFilterQuery { Keyword = "vip" });
+    Check(paged.TotalCount == 1 && paged.Items.Single().BranchName == branch.Name && paged.Items.Single().Items.Count == 0, "price list page returns headers without lines");
+
+    var pricing = (IPricingService)lists;
+    CalculatePriceRequest Quote(int? customerId, decimal quantity = 1) => new() { CustomerId = customerId, BranchId = branch.Id, Items = [new() { ItemId = item.Id, Quantity = quantity }] };
+    var anonymous = (await pricing.CalculateAsync(Quote(null))).Items.Single();
+    Check(anonymous.AppliedPriceListId == vip.Id && anonymous.UnitPrice == 60 && anonymous.OriginalPrice == 100 && anonymous.LineTotal == 60, "calculate-price picks the best list and ignores inactive and expired ones");
+    await db.Partners.Where(p => p.Id == customer.Id).ExecuteUpdateAsync(p => p.SetProperty(c => c.PriceListId, wholesale.Id));
+    var own = (await pricing.CalculateAsync(Quote(customer.Id, 3))).Items.Single();
+    Check(own.AppliedPriceListId == wholesale.Id && own.UnitPrice == 70 && own.LineTotal == 210, "calculate-price uses the customer's own price list");
+    await Reject(async () => await pricing.CalculateAsync(Quote(supplier.Id)), "error.sales.customer");
+    await Reject(async () => await pricing.CalculateAsync(Quote(null, 0)), "error.validation.number");
+
+    var edit = ListRequest("WHOLESALE", 65); edit.Items.Add(new() { ItemId = item.Id, UnitPrice = 55, MinQuantity = 10 });
+    var keptLine = wholesale.Items.Single().Id;
+    var edited = await lists.UpdateAsync(wholesale.Id, new UpdatePriceListRequest { Code = edit.Code, Name = "Wholesale 2", Currency = "VND", EffectiveFrom = from, IsActive = true, Items = edit.Items });
+    Check(edited!.Name == "Wholesale 2" && edited.Items.Count == 2 && edited.Items.Any(i => i.Id == keptLine && i.UnitPrice == 65), "updating a price list keeps unchanged lines and adds new tiers");
+    var shrunk = await lists.UpdateAsync(wholesale.Id, new UpdatePriceListRequest { Code = "WHOLESALE", Name = "Wholesale 2", Currency = "VND", EffectiveFrom = from, IsActive = true, Items = [new() { ItemId = item.Id, UnitPrice = 65 }] });
+    Check(shrunk!.Items.Count == 1, "updating a price list removes dropped tiers");
+    Check(await lists.UpdateAsync(999999, new UpdatePriceListRequest { Code = "X", Name = "X", Currency = "VND", EffectiveFrom = from }) == null, "updating a missing price list returns nothing");
+    await Reject(async () => await lists.DeleteAsync(wholesale.Id), "error.sd.pricelist_in_use");
+    await db.Partners.Where(p => p.Id == customer.Id).ExecuteUpdateAsync(p => p.SetProperty(c => c.PriceListId, (int?)null));
+    Check(await lists.DeleteAsync(wholesale.Id) && await lists.GetByIdAsync(wholesale.Id) == null && !await lists.DeleteAsync(wholesale.Id), "an unused price list can be deleted once");
     await using var denied = Db(new TestUser(false, [999999]));
     Check(!await denied.SalesInvoices.AnyAsync() && !await denied.StockBalances.AnyAsync(), "server filters inaccessible branches");
     db.ChangeTracker.Clear(); var immutable = await db.SalesInvoices.FirstAsync(); immutable.TotalAmount = 1;
@@ -266,6 +319,14 @@ try
             "super administrator reads the permission catalog and roles");
         Check((await http.GetAsync("/api/v1/sys/notifications/unread-count")).IsSuccessStatusCode, "admin reads unread notification count over HTTP");
         Check((await http.GetAsync("/api/v1/sys/notifications")).IsSuccessStatusCode, "admin reads notification list over HTTP");
+        // Step-22: price list endpoints, the fixed route "calculate-price" must not be taken for an id.
+        using var listPage = JsonDocument.Parse(await http.GetStringAsync("/api/v1/sales/price-lists"));
+        Check(listPage.RootElement.GetProperty("data").GetProperty("totalCount").GetInt32() >= 1, "admin reads the price list page over HTTP");
+        using var priced = await http.PostAsJsonAsync("/api/v1/sales/price-lists/calculate-price", new { branchId = allowedBranch.Id, items = new[] { new { itemId = 1, quantity = 1 } } });
+        Check(priced.StatusCode != HttpStatusCode.NotFound && priced.StatusCode != HttpStatusCode.MethodNotAllowed && priced.StatusCode != HttpStatusCode.Forbidden, "calculate-price is routed and allowed for the administrator");
+        http.DefaultRequestHeaders.Authorization = new("Bearer", viewerToken);
+        Check((await http.PostAsJsonAsync("/api/v1/sales/price-lists", new { code = "X", name = "X", currency = "VND", effectiveFrom = DateTime.UtcNow })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without sd:pricelist:create cannot create a price list");
+        http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
         Check((await http.GetAsync("/api/v1/sys/notifications/preferences")).IsSuccessStatusCode, "admin reads preferences over HTTP");
         using var broadcastResp = await http.PostAsJsonAsync("/api/v1/sys/notifications/broadcast", new { title = "Broadcast", body = "System announcement", category = "SYS", severity = "INFO", targetType = "ALL" });
         Check(broadcastResp.IsSuccessStatusCode, "admin can broadcast notification over HTTP");

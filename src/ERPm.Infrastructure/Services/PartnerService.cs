@@ -38,6 +38,7 @@ public class PartnerService : IPartnerService
                 DebtBalance = _user == null || _user.IsAdmin || _user.IsSystem ? p.DebtBalance :
                     _context.SalesInvoices.Where(i => i.CustomerId == p.Id && i.Status == VoucherStatus.Posted).Sum(i => i.RemainingDebt) -
                     _context.StockReceipts.Where(r => r.SupplierId == p.Id && r.Status == VoucherStatus.Posted).Sum(r => r.TotalAmount),
+                PriceListId = p.PriceListId,
                 IsActive = p.IsActive
             })
             .ToListAsync(cancellationToken);
@@ -47,6 +48,7 @@ public class PartnerService : IPartnerService
     {
         Require(!string.IsNullOrWhiteSpace(request.Name) && request.Name.Length <= 255 && request.Code.Length <= 50 && Enum.IsDefined(request.PartnerType), "error.validation.request");
         ValidateNumber(request.CreditLimit);
+        Require(request.PriceListId == null || await _context.PriceLists.AnyAsync(l => l.Id == request.PriceListId && l.IsActive, cancellationToken), "error.validation.reference");
         var partner = new Partner
         {
             Code = string.IsNullOrWhiteSpace(request.Code) ? $"PT{Uuid7Generator.NewUuid7():N}" : request.Code.Trim().ToUpperInvariant(),
@@ -58,6 +60,7 @@ public class PartnerService : IPartnerService
             TaxCode = request.TaxCode,
             CreditLimit = request.CreditLimit,
             DebtBalance = 0m,
+            PriceListId = request.PriceListId,
             IsActive = true,
             Notes = request.Notes
         };
@@ -77,6 +80,7 @@ public class PartnerService : IPartnerService
             TaxCode = partner.TaxCode,
             CreditLimit = partner.CreditLimit,
             DebtBalance = partner.DebtBalance,
+            PriceListId = partner.PriceListId,
             IsActive = partner.IsActive
         };
     }

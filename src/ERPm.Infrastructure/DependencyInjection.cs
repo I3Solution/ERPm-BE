@@ -46,6 +46,9 @@ public static class DependencyInjection
         // Register Generic Base CRUD Service for open generic types (Type-safe & Zero boilerplate for Solo Dev)
         services.AddScoped(typeof(IBaseCrudService<,,,,>), typeof(BaseCrudService<,,,,>));
         services.AddScoped(typeof(IBaseCrudService<,,,>), typeof(BaseCrudService<,,,>));
+        services.AddScoped<PriceListService>();
+        services.AddScoped<IBaseCrudService<ERPm.Domain.Entities.Sales.PriceList, ERPm.Application.DTOs.Sales.PriceListDetailDto, ERPm.Application.DTOs.Sales.CreatePriceListRequest, ERPm.Application.DTOs.Sales.UpdatePriceListRequest>>(p => p.GetRequiredService<PriceListService>());
+        services.AddScoped<IPricingService>(p => p.GetRequiredService<PriceListService>());
         services.AddScoped<SalesOrderService>();
         services.AddScoped<PurchaseOrderService>();
         services.AddScoped<IBaseCrudService<ERPm.Domain.Entities.Sales.SalesOrder, ERPm.Application.DTOs.Sales.SalesOrderDto, ERPm.Application.DTOs.Sales.CreateSalesOrderRequest, ERPm.Application.DTOs.Sales.UpdateSalesOrderRequest>>(p => p.GetRequiredService<SalesOrderService>());
