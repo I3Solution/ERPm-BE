@@ -308,6 +308,20 @@ try
     Check(second.Status == "PendingApproval", "orders already confirmed for a customer count against its credit limit");
     await db.SalesOrderItems.Where(i => i.SalesOrderId == warned.Id).ExecuteUpdateAsync(i => i.SetProperty(x => x.InvoicedQuantity, 1m));
     await Reject(async () => await orders.CancelAsync(warned.Id, "too late", default), "error.sd.cannot_cancel_invoiced_order");
+    // Tester findings: F1 pricing outside the data scope, F2 deleting a list used by an order, F3 order state errors.
+    var fixList = await lists.CreateAsync(ListRequest("FIXPL", 80));
+    await using (var outsider = Db(new TestUser(false, [999999])))
+    {
+        var scoped = await new PriceListService(outsider).CalculateAsync(new CalculatePriceRequest { BranchId = branch.Id, Items = [new() { ItemId = item.Id, Quantity = 1 }] });
+        Check(scoped.Items.Single().UnitPrice > 0, "a seller outside every branch scope can still calculate prices");
+    }
+    var listedQuote = QuoteRequest(); listedQuote.PriceListId = fixList.Id;
+    var listedOrder = await quotes.ConvertToOrderAsync((await quotes.CreateAsync(listedQuote)).Id);
+    Check((await db.SalesOrders.AsNoTracking().SingleAsync(o => o.Id == listedOrder.SalesOrderId)).PriceListId == fixList.Id, "an order converted from a quotation keeps its price list");
+    await Reject(async () => await lists.DeleteAsync(fixList.Id), "error.sd.pricelist_in_use");
+    await Reject(async () => await orders.ConfirmAsync(approved.Id, default), "error.sd.order_invalid_status_for_action");
+    await Reject(async () => await orders.UpdateAsync(approved.Id, new UpdateSalesOrderRequest { BranchId = branch.Id, Items = [new() { ItemId = rsv.Id, Quantity = 1, UnitPrice = 100 }] }), "error.sd.order_invalid_status_for_action");
+    await Reject(async () => await orders.DeleteAsync(approved.Id), "error.sd.order_invalid_status_for_action");
     await using var denied = Db(new TestUser(false, [999999]));
     Check(!await denied.SalesInvoices.AnyAsync() && !await denied.StockBalances.AnyAsync(), "server filters inaccessible branches");
     db.ChangeTracker.Clear(); var immutable = await db.SalesInvoices.FirstAsync(); immutable.TotalAmount = 1;

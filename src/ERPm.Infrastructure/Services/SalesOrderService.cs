@@ -48,14 +48,14 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
     }
     protected override async Task BeforeUpdateAsync(SalesOrder entity, UpdateSalesOrderRequest request, CancellationToken ct)
     {
-        Require(entity.Status == SalesOrderStatus.Draft && (request.Status == null || request.Status == SalesOrderStatus.Draft), "error.order.state", 409);
+        Require(entity.Status == SalesOrderStatus.Draft && (request.Status == null || request.Status == SalesOrderStatus.Draft), "error.sd.order_invalid_status_for_action", 409);
         Context.RemoveRange(entity.Items);
         await PrepareAsync(entity, request, ct);
     }
     protected override void MapUpdateToEntity(UpdateSalesOrderRequest request, SalesOrder entity) { }
     protected override Task BeforeDeleteAsync(SalesOrder entity, CancellationToken ct)
     {
-        Require(entity.Status == SalesOrderStatus.Draft, "error.order.state", 409);
+        Require(entity.Status == SalesOrderStatus.Draft, "error.sd.order_invalid_status_for_action", 409);
         return Task.CompletedTask;
     }
     // The saved entity has no navigation data yet, so return the freshly loaded order.
@@ -91,7 +91,7 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
             await posting.LockAsync($"order:Sales:{id}", ct);
             var entity = await FindEntityAsync(id, ct);
             Require(entity != null, "error.order.not_found", 404);
-            Require(entity!.Status == SalesOrderStatus.Draft, "error.order.state", 409);
+            Require(entity!.Status == SalesOrderStatus.Draft, "error.sd.order_invalid_status_for_action", 409);
 
             entity.CreditCheckStatus = await CheckCreditAsync(entity, ct);
             if (entity.CreditCheckStatus == CreditCheckStatus.PendingApproval)
