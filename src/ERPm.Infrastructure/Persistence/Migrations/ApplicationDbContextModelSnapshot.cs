@@ -2008,6 +2008,10 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(50)")
                         .HasColumnName("phone");
 
+                    b.Property<int?>("PriceListId")
+                        .HasColumnType("integer")
+                        .HasColumnName("price_list_id");
+
                     b.Property<string>("TaxCode")
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)")
@@ -2029,6 +2033,9 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_tbl_crm_partner_external_id");
 
                     NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id", "IsDeleted" });
+
+                    b.HasIndex("PriceListId")
+                        .HasDatabaseName("ix_tbl_crm_partner_price_list_id");
 
                     b.ToTable("tbl_CRM_Partner", (string)null);
                 });
@@ -2230,6 +2237,179 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_tbl_purchase_order_item_purchase_order_id");
 
                     b.ToTable("tbl_PURCHASE_OrderItem", (string)null);
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Sales.PriceList", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("BranchId")
+                        .HasColumnType("integer")
+                        .HasColumnName("branch_id");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("currency");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at_utc");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("deleted_by");
+
+                    b.Property<DateTime>("EffectiveFrom")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("effective_from");
+
+                    b.Property<DateTime?>("EffectiveTo")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("effective_to");
+
+                    b.Property<Guid>("ExternalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("external_id");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
+                    b.Property<DateTime?>("LastModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_modified_at_utc");
+
+                    b.Property<string>("LastModifiedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("last_modified_by");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("text")
+                        .HasColumnName("notes");
+
+                    b.Property<int?>("TenantId")
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_sd_price_list");
+
+                    b.HasIndex("BranchId")
+                        .HasDatabaseName("ix_tbl_sd_price_list_branch_id");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_sd_price_list_code")
+                        .HasFilter("is_deleted = false");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_sd_price_list_external_id");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id", "IsDeleted" });
+
+                    b.HasIndex("IsActive", "EffectiveFrom", "EffectiveTo")
+                        .HasDatabaseName("ix_tbl_sd_price_list_is_active_effective_from_effective_to");
+
+                    b.ToTable("tbl_SD_PriceList", (string)null);
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Sales.PriceListItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("DiscountPercent")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("discount_percent");
+
+                    b.Property<Guid>("ExternalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("external_id");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("integer")
+                        .HasColumnName("item_id");
+
+                    b.Property<decimal>("MinQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("min_quantity");
+
+                    b.Property<int>("PriceListId")
+                        .HasColumnType("integer")
+                        .HasColumnName("price_list_id");
+
+                    b.Property<decimal>("UnitPrice")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("unit_price");
+
+                    b.Property<int?>("UomId")
+                        .HasColumnType("integer")
+                        .HasColumnName("uom_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_sd_price_list_item");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_sd_price_list_item_external_id");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id" });
+
+                    b.HasIndex("ItemId")
+                        .HasDatabaseName("ix_tbl_sd_price_list_item_item_id");
+
+                    b.HasIndex("UomId")
+                        .HasDatabaseName("ix_tbl_sd_price_list_item_uom_id");
+
+                    b.HasIndex("PriceListId", "ItemId", "UomId", "MinQuantity")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_sd_price_list_item_price_list_id_item_id_uom_id_min_quant");
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("PriceListId", "ItemId", "UomId", "MinQuantity"), false);
+
+                    b.ToTable("tbl_SD_PriceListItem", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_tbl_SD_PriceListItem_Values", "unit_price >= 0 AND min_quantity >= 0 AND discount_percent BETWEEN 0 AND 100");
+                        });
                 });
 
             modelBuilder.Entity("ERPm.Domain.Entities.Sales.SalesInvoice", b =>
@@ -4160,6 +4340,15 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     b.Navigation("Language");
                 });
 
+            modelBuilder.Entity("ERPm.Domain.Entities.Partner.Partner", b =>
+                {
+                    b.HasOne("ERPm.Domain.Entities.Sales.PriceList", null)
+                        .WithMany()
+                        .HasForeignKey("PriceListId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_tbl_crm_partner_price_lists_price_list_id");
+                });
+
             modelBuilder.Entity("ERPm.Domain.Entities.Purchase.PurchaseOrder", b =>
                 {
                     b.HasOne("ERPm.Domain.Entities.System.Branch", "Branch")
@@ -4205,6 +4394,46 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     b.Navigation("Item");
 
                     b.Navigation("PurchaseOrder");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Sales.PriceList", b =>
+                {
+                    b.HasOne("ERPm.Domain.Entities.System.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_sd_price_list_tbl_sys_branch_branch_id");
+
+                    b.Navigation("Branch");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Sales.PriceListItem", b =>
+                {
+                    b.HasOne("ERPm.Domain.Entities.Catalog.Item", "Item")
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_sd_price_list_item_tbl_wms_item_item_id");
+
+                    b.HasOne("ERPm.Domain.Entities.Sales.PriceList", "PriceList")
+                        .WithMany("Items")
+                        .HasForeignKey("PriceListId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_sd_price_list_item_tbl_sd_price_list_price_list_id");
+
+                    b.HasOne("ERPm.Domain.Entities.Catalog.UnitOfMeasure", "Uom")
+                        .WithMany()
+                        .HasForeignKey("UomId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_sd_price_list_item_tbl_wms_unit_of_measure_uom_id");
+
+                    b.Navigation("Item");
+
+                    b.Navigation("PriceList");
+
+                    b.Navigation("Uom");
                 });
 
             modelBuilder.Entity("ERPm.Domain.Entities.Sales.SalesInvoice", b =>
@@ -4551,6 +4780,11 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                 });
 
             modelBuilder.Entity("ERPm.Domain.Entities.Purchase.PurchaseOrder", b =>
+                {
+                    b.Navigation("Items");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Sales.PriceList", b =>
                 {
                     b.Navigation("Items");
                 });

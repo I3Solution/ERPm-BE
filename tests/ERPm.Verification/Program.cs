@@ -142,6 +142,21 @@ try
     Check(await db.JournalEntries.CountAsync(j => j.ReversesJournalEntryId == cancelTarget.JournalEntryId) == 1, "cancellation creates one reversing journal");
     await Sales(db).CancelInvoiceAsync(cancelTarget.Id, "Verification reversal");
     Check(await db.JournalEntries.CountAsync(j => j.ReversesJournalEntryId == cancelTarget.JournalEntryId) == 1, "repeated cancellation is idempotent");
+    // Price lists: unique live code, one price per item/unit/tier (NULL unit included), value ranges, partner link, soft delete.
+    async Task<bool> Rejected(Func<Task> action) { try { await action(); return false; } catch (DbUpdateException) { db.ChangeTracker.Clear(); return true; } }
+    var priceList = new PriceList { Code = "PL-RETAIL", Name = "Retail", Items = [new() { ItemId = item.Id, UnitPrice = 90, MinQuantity = 0 }, new() { ItemId = item.Id, UnitPrice = 80, MinQuantity = 10, DiscountPercent = 5 }] };
+    db.PriceLists.Add(priceList); await db.SaveChangesAsync();
+    Check((await db.PriceLists.Include(p => p.Items).SingleAsync(p => p.Code == "PL-RETAIL")).Items.Count == 2 && priceList.ExternalId.Version == 7, "price list keeps its quantity tiers");
+    Check(await Rejected(async () => { db.PriceLists.Add(new PriceList { Code = "PL-RETAIL", Name = "Duplicate" }); await db.SaveChangesAsync(); }), "price list code is unique");
+    Check(await Rejected(async () => { db.PriceListItems.Add(new PriceListItem { PriceListId = priceList.Id, ItemId = item.Id, UnitPrice = 70, MinQuantity = 10 }); await db.SaveChangesAsync(); }), "same item, unit and tier cannot be priced twice");
+    Check(await Rejected(async () => { db.PriceListItems.Add(new PriceListItem { PriceListId = priceList.Id, ItemId = item.Id, UnitPrice = -1, MinQuantity = 20 }); await db.SaveChangesAsync(); }), "negative price is rejected");
+    Check(await Rejected(async () => { db.PriceListItems.Add(new PriceListItem { PriceListId = priceList.Id, ItemId = item.Id, UnitPrice = 1, MinQuantity = 20, DiscountPercent = 101 }); await db.SaveChangesAsync(); }), "discount above 100 percent is rejected");
+    var linked = await db.Partners.SingleAsync(p => p.Id == customer.Id); linked.PriceListId = priceList.Id; await db.SaveChangesAsync();
+    Check((await db.Partners.SingleAsync(p => p.Id == customer.Id)).PriceListId == priceList.Id, "customer keeps its default price list");
+    linked.PriceListId = null; (await db.PriceLists.SingleAsync(p => p.Id == priceList.Id)).IsDeleted = true; await db.SaveChangesAsync(); db.ChangeTracker.Clear();
+    Check(!await db.PriceLists.AnyAsync() && !await db.PriceListItems.AnyAsync(), "deleted price list and its lines are hidden");
+    db.PriceLists.Add(new PriceList { Code = "PL-RETAIL", Name = "Reused code" }); await db.SaveChangesAsync();
+    Check(await db.PriceLists.CountAsync() == 1, "deleted price list code can be reused");
     await using var denied = Db(new TestUser(false, [999999]));
     Check(!await denied.SalesInvoices.AnyAsync() && !await denied.StockBalances.AnyAsync(), "server filters inaccessible branches");
     db.ChangeTracker.Clear(); var immutable = await db.SalesInvoices.FirstAsync(); immutable.TotalAmount = 1;
