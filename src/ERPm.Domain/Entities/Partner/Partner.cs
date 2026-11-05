@@ -17,6 +17,8 @@ public class Partner : BaseAuditableEntity
     public decimal CreditLimit { get; set; } = 0m;         // Maximum allowed credit limit
     public decimal DebtBalance { get; set; } = 0m;         // Current debt balance (positive: receivable, negative: payable)
 
+    public int? PriceListId { get; set; }                  // Default selling price list of this customer
+
     public bool IsActive { get; set; } = true;
     public string? Notes { get; set; }
 }

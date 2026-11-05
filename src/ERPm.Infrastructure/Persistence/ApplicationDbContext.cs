@@ -57,6 +57,8 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<StockIssueItem> StockIssueItems => Set<StockIssueItem>();
     public DbSet<SalesOrder> SalesOrders => Set<SalesOrder>();
     public DbSet<SalesOrderItem> SalesOrderItems => Set<SalesOrderItem>();
+    public DbSet<PriceList> PriceLists => Set<PriceList>();
+    public DbSet<PriceListItem> PriceListItems => Set<PriceListItem>();
     public DbSet<SalesInvoice> SalesInvoices => Set<SalesInvoice>();
     public DbSet<SalesInvoiceItem> SalesInvoiceItems => Set<SalesInvoiceItem>();
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
@@ -474,6 +476,8 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.Property(e => e.CreditLimit).HasPrecision(18, 4);
             entity.Property(e => e.DebtBalance).HasPrecision(18, 4);
 
+            entity.HasOne<PriceList>().WithMany().HasForeignKey(e => e.PriceListId).OnDelete(DeleteBehavior.SetNull);
+
             entity.HasIndex(e => e.Code).IsUnique();
             entity.HasQueryFilter(e => !e.IsDeleted);
         });
@@ -688,6 +692,54 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        // 5.0 SALE - Price lists
+        modelBuilder.Entity<PriceList>(entity =>
+        {
+            entity.ToTable("tbl_SD_PriceList");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.Currency).HasMaxLength(3).IsRequired();
+
+            entity.HasOne(e => e.Branch)
+                .WithMany()
+                .HasForeignKey(e => e.BranchId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Code is unique among live price lists so a deleted code can be reused.
+            entity.HasIndex(e => e.Code).IsUnique().HasFilter("is_deleted = false");
+            entity.HasIndex(e => new { e.IsActive, e.EffectiveFrom, e.EffectiveTo });
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<PriceListItem>(entity =>
+        {
+            entity.ToTable("tbl_SD_PriceListItem");
+            ConfigureDualKeyEntity(entity);
+            entity.Property(e => e.UnitPrice).HasPrecision(18, 4);
+            entity.Property(e => e.MinQuantity).HasPrecision(18, 4);
+            entity.Property(e => e.DiscountPercent).HasPrecision(18, 4);
+
+            entity.HasOne(e => e.PriceList)
+                .WithMany(p => p.Items)
+                .HasForeignKey(e => e.PriceListId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Item)
+                .WithMany()
+                .HasForeignKey(e => e.ItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Uom)
+                .WithMany()
+                .HasForeignKey(e => e.UomId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // One price per item, unit and quantity tier within a list.
+            entity.HasIndex(e => new { e.PriceListId, e.ItemId, e.UomId, e.MinQuantity }).IsUnique().AreNullsDistinct(false);
+            entity.ToTable(t => t.HasCheckConstraint("CK_tbl_SD_PriceListItem_Values", "unit_price >= 0 AND min_quantity >= 0 AND discount_percent BETWEEN 0 AND 100"));
+        });
+
         // 5.1 SALE - Orders
         modelBuilder.Entity<SalesOrder>(entity =>
         {
@@ -883,6 +935,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<StockIssueItem>().HasQueryFilter(e => !e.StockIssue!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.StockIssue.BranchId)
             || (e.StockIssue.DepartmentId != null && AllowedDepartmentIds.Contains(e.StockIssue.DepartmentId.Value)) || (OwnRecordsUserId != null && e.StockIssue.CreatedBy == OwnRecordsUserId)));
         modelBuilder.Entity<JournalEntryLine>().HasQueryFilter(e => !e.JournalEntry!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.JournalEntry.BranchId)));
+        modelBuilder.Entity<PriceListItem>().HasQueryFilter(e => !e.PriceList!.IsDeleted);
         modelBuilder.Entity<SalesOrderItem>().HasQueryFilter(e => !e.SalesOrder!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.SalesOrder.BranchId)
             || (e.SalesOrder.DepartmentId != null && AllowedDepartmentIds.Contains(e.SalesOrder.DepartmentId.Value)) || (OwnRecordsUserId != null && e.SalesOrder.CreatedBy == OwnRecordsUserId)));
         modelBuilder.Entity<PurchaseOrderItem>().HasQueryFilter(e => !e.PurchaseOrder!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.PurchaseOrder.BranchId)
