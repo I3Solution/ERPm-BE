@@ -11,4 +11,10 @@ public class BaseFilterQuery
     public string? SortBy { get; set; }
     public bool IsAscending { get; set; } = true;
     public bool? IsActive { get; set; }
+
+    /// <summary>Document status; only services of documents with a status honour it.</summary>
+    public string? Status { get; set; }
+
+    /// <summary>Employee in charge; only services of documents with a salesperson honour it.</summary>
+    public int? SalespersonId { get; set; }
 }

@@ -59,6 +59,8 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<SalesOrderItem> SalesOrderItems => Set<SalesOrderItem>();
     public DbSet<PriceList> PriceLists => Set<PriceList>();
     public DbSet<PriceListItem> PriceListItems => Set<PriceListItem>();
+    public DbSet<SalesQuotation> SalesQuotations => Set<SalesQuotation>();
+    public DbSet<SalesQuotationItem> SalesQuotationItems => Set<SalesQuotationItem>();
     public DbSet<SalesInvoice> SalesInvoices => Set<SalesInvoice>();
     public DbSet<SalesInvoiceItem> SalesInvoiceItems => Set<SalesInvoiceItem>();
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
@@ -740,6 +742,58 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.ToTable(t => t.HasCheckConstraint("CK_tbl_SD_PriceListItem_Values", "unit_price >= 0 AND min_quantity >= 0 AND discount_percent BETWEEN 0 AND 100"));
         });
 
+        // 5.0b SALE - Quotations
+        modelBuilder.Entity<SalesQuotation>(entity =>
+        {
+            entity.ToTable("tbl_SD_SalesQuotation");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.QuotationNumber).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.CustomerName).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.CustomerPhone).HasMaxLength(50);
+            entity.Property(e => e.CustomerEmail).HasMaxLength(100);
+            entity.Property(e => e.Status).HasMaxLength(50).IsRequired();
+
+            entity.Property(e => e.SubTotal).HasPrecision(18, 4);
+            entity.Property(e => e.DiscountAmount).HasPrecision(18, 4);
+            entity.Property(e => e.TaxAmount).HasPrecision(18, 4);
+            entity.Property(e => e.TotalAmount).HasPrecision(18, 4);
+
+            entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Salesperson).WithMany().HasForeignKey(e => e.SalespersonId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Department>().WithMany().HasForeignKey(e => e.DepartmentId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<PriceList>().WithMany().HasForeignKey(e => e.PriceListId).OnDelete(DeleteBehavior.SetNull);
+            // A quotation converts into at most one order.
+            entity.HasOne(e => e.ConvertedSalesOrder).WithMany().HasForeignKey(e => e.ConvertedSalesOrderId).OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => e.QuotationNumber).IsUnique();
+            entity.HasIndex(e => e.ConvertedSalesOrderId).IsUnique().HasFilter("converted_sales_order_id IS NOT NULL");
+            entity.HasIndex(e => new { e.Status, e.ValidUntil });
+            entity.HasIndex(e => e.CustomerId);
+            entity.HasIndex(e => e.SalespersonId);
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<SalesQuotationItem>(entity =>
+        {
+            entity.ToTable("tbl_SD_SalesQuotationItem");
+            ConfigureDualKeyEntity(entity);
+            entity.Property(e => e.ItemCode).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.ItemName).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.UnitName).HasMaxLength(50);
+            entity.Property(e => e.Notes).HasMaxLength(500);
+
+            entity.Property(e => e.Quantity).HasPrecision(18, 4);
+            entity.Property(e => e.UnitPrice).HasPrecision(18, 4);
+            entity.Property(e => e.DiscountAmount).HasPrecision(18, 4);
+            entity.Property(e => e.LineTotal).HasPrecision(18, 4);
+
+            entity.HasOne(e => e.SalesQuotation).WithMany(q => q.Items).HasForeignKey(e => e.SalesQuotationId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Item).WithMany().HasForeignKey(e => e.ItemId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => e.SalesQuotationId);
+            entity.ToTable(t => t.HasCheckConstraint("CK_tbl_SD_SalesQuotationItem_Values", "quantity > 0 AND unit_price >= 0 AND discount_amount >= 0 AND line_total >= 0"));
+        });
+
         // 5.1 SALE - Orders
         modelBuilder.Entity<SalesOrder>(entity =>
         {
@@ -936,6 +990,10 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             || (e.StockIssue.DepartmentId != null && AllowedDepartmentIds.Contains(e.StockIssue.DepartmentId.Value)) || (OwnRecordsUserId != null && e.StockIssue.CreatedBy == OwnRecordsUserId)));
         modelBuilder.Entity<JournalEntryLine>().HasQueryFilter(e => !e.JournalEntry!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.JournalEntry.BranchId)));
         modelBuilder.Entity<PriceListItem>().HasQueryFilter(e => !e.PriceList!.IsDeleted);
+        modelBuilder.Entity<SalesQuotation>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)
+            || (e.DepartmentId != null && AllowedDepartmentIds.Contains(e.DepartmentId.Value)) || (OwnRecordsUserId != null && e.CreatedBy == OwnRecordsUserId)));
+        modelBuilder.Entity<SalesQuotationItem>().HasQueryFilter(e => !e.SalesQuotation!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.SalesQuotation.BranchId)
+            || (e.SalesQuotation.DepartmentId != null && AllowedDepartmentIds.Contains(e.SalesQuotation.DepartmentId.Value)) || (OwnRecordsUserId != null && e.SalesQuotation.CreatedBy == OwnRecordsUserId)));
         modelBuilder.Entity<SalesOrderItem>().HasQueryFilter(e => !e.SalesOrder!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.SalesOrder.BranchId)
             || (e.SalesOrder.DepartmentId != null && AllowedDepartmentIds.Contains(e.SalesOrder.DepartmentId.Value)) || (OwnRecordsUserId != null && e.SalesOrder.CreatedBy == OwnRecordsUserId)));
         modelBuilder.Entity<PurchaseOrderItem>().HasQueryFilter(e => !e.PurchaseOrder!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.PurchaseOrder.BranchId)
