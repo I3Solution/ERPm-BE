@@ -32,6 +32,7 @@ public class CreateStockReceiptRequest
     public Guid RequestId { get; set; }
     public bool IsOpeningBalance { get; set; }
     public int? BranchId { get; set; }
+    public int? DepartmentId { get; set; }
     public int WarehouseId { get; set; }
     public int? SupplierId { get; set; }
     public string? Notes { get; set; }

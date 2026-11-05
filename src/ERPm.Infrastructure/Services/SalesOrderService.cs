@@ -91,7 +91,7 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
             var item = items[line.ItemId];
             return new SalesOrderItem { ItemId = item.Id, ItemCode = item.Code, ItemName = item.Name, UnitName = item.BaseUom?.Name, Quantity = line.Quantity, UnitPrice = line.UnitPrice, DiscountAmount = discount, LineTotal = amount };
         }).ToList();
-        entity.BranchId = request.BranchId; entity.CustomerId = partner?.Id; entity.CustomerName = partner?.Name ?? request.CustomerName.Trim();
+        entity.BranchId = request.BranchId; entity.DepartmentId = request.DepartmentId; entity.CustomerId = partner?.Id; entity.CustomerName = partner?.Name ?? request.CustomerName.Trim();
         entity.SubTotal = entity.Items.Sum(i => i.LineTotal);
         Require(request.DiscountAmount <= entity.SubTotal, "error.sales.discount");
         entity.DiscountAmount = request.DiscountAmount;

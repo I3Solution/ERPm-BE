@@ -19,6 +19,7 @@ public class SalesOrderDto
     public string OrderNumber { get; set; } = string.Empty;
     public DateTime OrderDate { get; set; }
     public int BranchId { get; set; }
+    public int? DepartmentId { get; set; }
     public int? CustomerId { get; set; }
     public string CustomerName { get; set; } = string.Empty;
 
@@ -50,6 +51,7 @@ public class CreateSalesOrderRequest
     public string? OrderNumber { get; set; }
     public DateTime? OrderDate { get; set; }
     public int BranchId { get; set; }
+    public int? DepartmentId { get; set; }
     public int? CustomerId { get; set; }
     public string CustomerName { get; set; } = "Khách lẻ";
 
