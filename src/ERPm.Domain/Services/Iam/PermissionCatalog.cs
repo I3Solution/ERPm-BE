@@ -15,6 +15,7 @@ public static class PermissionCatalog
     public const string Delete = "delete";
     public const string Confirm = "confirm";
     public const string Cancel = "cancel";
+    public const string ApproveCredit = "approve_credit";
     public const string Broadcast = "broadcast";
 
     private static readonly (string Resource, string[] Verbs)[] Resources =
@@ -36,7 +37,7 @@ public static class PermissionCatalog
         ("wms:receipt", [Create]),
         ("sd:pricelist", [View, Create, Edit, Delete]),
         ("sd:quotation", [View, Create, Edit, Delete]),
-        ("sd:order", [View, Create, Edit, Delete, Confirm]),
+        ("sd:order", [View, Create, Edit, Delete, Confirm, ApproveCredit, Cancel]),
         ("sd:invoice", [View, Create, Cancel]),
         ("pur:order", [View, Create, Edit, Delete, Confirm]),
         ("crm:partner", [View, Create]),

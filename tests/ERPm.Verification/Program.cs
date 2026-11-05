@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ERPm.Application.Common;
+using ERPm.Domain.Entities.Inventory;
 using ERPm.Application.Common.Crud;
 using ERPm.Domain.Services.Iam;
 using ERPm.Domain.Services.Sales;
@@ -262,6 +263,51 @@ try
     var scratch = await quotes.CreateAsync(QuoteRequest());
     Check(await quotes.DeleteAsync(scratch.Id) && await quotes.GetByIdAsync(scratch.Id) == null, "a draft quotation can be deleted");
     Check(PermissionCatalog.Contains("sd:quotation:view") && PermissionCatalog.Contains("sd:quotation:delete"), "quotation permissions are in the catalog");
+    // Orders: credit check, stock reservation, credit approval and cancellation.
+    var orders = new SalesOrderService(db, new PostingTransaction(db));
+    Check(convertedOrder.QuotationId == quote.Id && convertedOrder.CustomerId == customer.Id, "a converted order remembers its quotation");
+    var rsv = new Item { Code = "RSV", Name = "Reserved goods", BaseUomId = uom.Id, SalePrice = 100, CostPrice = 1 };
+    var rich = new Partner { Code = "RICH", Name = "Rich", CreditLimit = 1000000, PartnerType = PartnerType.Customer };
+    var poor = new Partner { Code = "POOR", Name = "Poor", CreditLimit = 0, PartnerType = PartnerType.Customer };
+    var edge = new Partner { Code = "EDGE", Name = "Edge", CreditLimit = 1000, PartnerType = PartnerType.Customer };
+    db.Items.Add(rsv); db.Partners.AddRange(rich, poor, edge); await db.SaveChangesAsync();
+    db.StockBalances.Add(new StockBalance { WarehouseId = warehouse.Id, ItemId = rsv.Id, QuantityOnHand = 10, AverageCostPrice = 1, InventoryValue = 10 }); await db.SaveChangesAsync();
+    async Task<decimal> Reserved() => (await db.StockBalances.AsNoTracking().SingleAsync(b => b.ItemId == rsv.Id)).QuantityReserved;
+    async Task<SalesOrderDto> DraftOrder(int customerId, decimal quantity, decimal price = 100) => await orders.CreateAsync(new CreateSalesOrderRequest
+    { BranchId = branch.Id, CustomerId = customerId, DeliveryAddress = "1 Main Street", Items = [new() { ItemId = rsv.Id, Quantity = quantity, UnitPrice = price }] });
+
+    var draftOrder = await DraftOrder(rich.Id, 4);
+    Check(draftOrder.BranchName == branch.Name && draftOrder.CreditCheckStatus == "Passed" && draftOrder.ReservationStatus == "None" && draftOrder.DeliveryAddress == "1 Main Street" && draftOrder.Items.Single().InvoicedQuantity == 0, "a new order returns its branch, delivery address and empty credit and reservation state");
+    var first = await orders.ConfirmAsync(draftOrder.Id, default);
+    Check(first.Status == "Confirmed" && first.CreditCheckStatus == "Passed" && first.ReservationStatus == "Reserved" && await Reserved() == 4, "confirming an order within credit reserves its stock");
+    var big = await DraftOrder(rich.Id, 7);
+    await Reject(async () => await orders.ConfirmAsync(big.Id, default), "error.sd.insufficient_available_stock");
+    Check((await orders.GetByIdAsync(big.Id))!.Status == "Draft" && await Reserved() == 4 && !await db.StockReservations.AnyAsync(r => r.SalesOrderId == big.Id), "a stock shortage leaves the order Draft and reserves nothing");
+    var pos = new CreateSalesInvoiceRequest { RequestId = Guid.NewGuid(), WarehouseId = warehouse.Id, CustomerId = rich.Id, PaidAmount = 800, Items = [new() { ItemId = rsv.Id, Quantity = 8, UnitPrice = 100 }] };
+    await Reject(async () => await Sales(db).CreateInvoiceAsync(pos), "error.stock.insufficient");
+
+    var cancelled = await orders.CancelAsync(first.Id, "customer changed mind", default);
+    Check(cancelled.Status == "Cancelled" && cancelled.ReservationStatus == "Released" && await Reserved() == 0 && !await db.StockReservations.AnyAsync(r => r.SalesOrderId == first.Id && r.Status == "Active"), "cancelling an order releases its reserved stock");
+    await Reject(async () => await orders.CancelAsync(first.Id, "again", default), "error.sd.order_invalid_status_for_action");
+    await Reject(async () => await orders.CancelAsync(big.Id, " ", default), "error.validation.request");
+    var cancelledDraft = await orders.CancelAsync(big.Id, "not needed", default);
+    Check(cancelledDraft.Status == "Cancelled" && cancelledDraft.ReservationStatus == "None", "a Draft order can be cancelled without any stock to release");
+
+    var held = await orders.ConfirmAsync((await DraftOrder(poor.Id, 2)).Id, default);
+    Check(held.Status == "PendingApproval" && held.CreditCheckStatus == "PendingApproval" && held.ReservationStatus == "None" && await Reserved() == 0, "an order over the credit limit waits for approval and holds no stock");
+    Check((await orders.GetPagedAsync(new BaseFilterQuery { Status = "PendingApproval" })).Items.Any(o => o.Id == held.Id), "the order page filters by status");
+    await Reject(async () => await orders.ApproveCreditAsync(held.Id, "", default), "error.validation.request");
+    var approved = await orders.ApproveCreditAsync(held.Id, "Paid in advance", default);
+    Check(approved.Status == "Confirmed" && approved.CreditCheckStatus == "Overridden" && approved.ReservationStatus == "Reserved" && await Reserved() == 2, "approving credit confirms the order and reserves its stock");
+    await Reject(async () => await orders.ApproveCreditAsync(held.Id, "again", default), "error.sd.order_invalid_status_for_action");
+    await Reject(async () => await orders.ApproveCreditAsync(999999, "x", default), "error.order.not_found");
+
+    var warned = await orders.ConfirmAsync((await DraftOrder(edge.Id, 2, 450)).Id, default);
+    Check(warned.Status == "Confirmed" && warned.CreditCheckStatus == "Warning" && await Reserved() == 4, "an order close to the credit limit is confirmed with a warning");
+    var second = await orders.ConfirmAsync((await DraftOrder(edge.Id, 1, 200)).Id, default);
+    Check(second.Status == "PendingApproval", "orders already confirmed for a customer count against its credit limit");
+    await db.SalesOrderItems.Where(i => i.SalesOrderId == warned.Id).ExecuteUpdateAsync(i => i.SetProperty(x => x.InvoicedQuantity, 1m));
+    await Reject(async () => await orders.CancelAsync(warned.Id, "too late", default), "error.sd.cannot_cancel_invoiced_order");
     await using var denied = Db(new TestUser(false, [999999]));
     Check(!await denied.SalesInvoices.AnyAsync() && !await denied.StockBalances.AnyAsync(), "server filters inaccessible branches");
     db.ChangeTracker.Clear(); var immutable = await db.SalesInvoices.FirstAsync(); immutable.TotalAmount = 1;
@@ -378,8 +424,11 @@ try
         Check(priced.StatusCode != HttpStatusCode.NotFound && priced.StatusCode != HttpStatusCode.MethodNotAllowed && priced.StatusCode != HttpStatusCode.Forbidden, "calculate-price is routed and allowed for the administrator");
         Check((await http.GetAsync("/api/v1/sales/quotations")).IsSuccessStatusCode, "admin reads the quotation page over HTTP");
         Check((await http.PostAsync("/api/v1/sales/quotations/999999/convert-to-order", null)).StatusCode == HttpStatusCode.NotFound, "converting a missing quotation answers not found");
+        Check((await http.PostAsJsonAsync("/api/v1/sales/orders/999999/cancel", new { reason = "x" })).StatusCode == HttpStatusCode.NotFound, "cancelling a missing order answers not found");
+        Check((await http.PostAsJsonAsync("/api/v1/sales/orders/999999/approve-credit", new { reason = "x" })).StatusCode == HttpStatusCode.NotFound, "approving credit of a missing order answers not found");
         http.DefaultRequestHeaders.Authorization = new("Bearer", viewerToken);
         Check((await http.PostAsync("/api/v1/sales/quotations/1/send", null)).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without sd:quotation:edit cannot send a quotation");
+        Check((await http.PostAsJsonAsync("/api/v1/sales/orders/1/approve-credit", new { reason = "x" })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden && (await http.PostAsJsonAsync("/api/v1/sales/orders/1/cancel", new { reason = "x" })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without the permission cannot approve credit or cancel an order");
         http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
         http.DefaultRequestHeaders.Authorization = new("Bearer", viewerToken);
         Check((await http.PostAsJsonAsync("/api/v1/sales/price-lists", new { code = "X", name = "X", currency = "VND", effectiveFrom = DateTime.UtcNow })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without sd:pricelist:create cannot create a price list");

@@ -64,7 +64,7 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
             Require(items.Count == itemIds.Length && items.Values.All(i => i.ItemType != ItemType.Combo), "error.inventory.item");
             var balances = await context.StockBalances.Where(b => b.WarehouseId == warehouse!.Id && itemIds.Contains(b.ItemId)).ToDictionaryAsync(b => b.ItemId, cancellationToken);
             foreach (var group in request.Items.GroupBy(i => i.ItemId).Where(g => items[g.Key].ItemType == ItemType.Goods))
-                Require(balances.TryGetValue(group.Key, out var balance) && balance.QuantityOnHand >= group.Sum(i => i.Quantity), "error.stock.insufficient", 409);
+                Require(balances.TryGetValue(group.Key, out var balance) && balance.QuantityOnHand - balance.QuantityReserved >= group.Sum(i => i.Quantity), "error.stock.insufficient", 409);
 
             var invoice = new SalesInvoice
             {

@@ -57,6 +57,7 @@ public static class DependencyInjection
         services.AddScoped<IBaseCrudService<ERPm.Domain.Entities.Sales.SalesOrder, ERPm.Application.DTOs.Sales.SalesOrderDto, ERPm.Application.DTOs.Sales.CreateSalesOrderRequest, ERPm.Application.DTOs.Sales.UpdateSalesOrderRequest>>(p => p.GetRequiredService<SalesOrderService>());
         services.AddScoped<IBaseCrudService<ERPm.Domain.Entities.Purchase.PurchaseOrder, ERPm.Application.DTOs.Purchase.PurchaseOrderDto, ERPm.Application.DTOs.Purchase.CreatePurchaseOrderRequest, ERPm.Application.DTOs.Purchase.UpdatePurchaseOrderRequest>>(p => p.GetRequiredService<PurchaseOrderService>());
         services.AddScoped<IOrderWorkflow<ERPm.Application.DTOs.Sales.SalesOrderDto>>(p => p.GetRequiredService<SalesOrderService>());
+        services.AddScoped<IOrderApproval<ERPm.Application.DTOs.Sales.SalesOrderDto>>(p => p.GetRequiredService<SalesOrderService>());
         services.AddScoped<IOrderWorkflow<ERPm.Application.DTOs.Purchase.PurchaseOrderDto>>(p => p.GetRequiredService<PurchaseOrderService>());
 
         // Register All Domain & Feature Services

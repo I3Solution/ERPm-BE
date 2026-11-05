@@ -68,6 +68,78 @@ public static class NotificationTemplateSeeder
             },
             new()
             {
+                Code = "SD_ORDER_CREDIT_PENDING",
+                Name = "Đơn hàng chờ duyệt công nợ",
+                Category = NotificationCategory.SD,
+                DefaultSeverity = NotificationSeverity.WARNING,
+                SupportedChannels = [NotificationChannel.InApp, NotificationChannel.PushMobile],
+                TitleTemplate = "Đơn hàng {order_code} chờ duyệt công nợ",
+                BodyTemplate = "Khách hàng {customer_name} vượt hạn mức công nợ với đơn {order_code} trị giá {total_amount} đ. Cần người có quyền duyệt công nợ xem xét.",
+                ActionUrlPattern = "/sales/orders",
+                Translations = new Dictionary<string, NotificationTemplateTranslation>
+                {
+                    ["vi"] = new()
+                    {
+                        Title = "Đơn hàng {order_code} chờ duyệt công nợ",
+                        Body = "Khách hàng {customer_name} vượt hạn mức công nợ với đơn {order_code} trị giá {total_amount} đ. Cần người có quyền duyệt công nợ xem xét."
+                    },
+                    ["en"] = new()
+                    {
+                        Title = "Order {order_code} awaits credit approval",
+                        Body = "Customer {customer_name} exceeds the credit limit with order {order_code} worth {total_amount}. A credit approver must review it."
+                    }
+                }
+            },
+            new()
+            {
+                Code = "SD_ORDER_CREDIT_APPROVED",
+                Name = "Đơn hàng đã được duyệt công nợ",
+                Category = NotificationCategory.SD,
+                DefaultSeverity = NotificationSeverity.INFO,
+                SupportedChannels = [NotificationChannel.InApp, NotificationChannel.PushMobile],
+                TitleTemplate = "Đơn hàng {order_code} đã được duyệt công nợ",
+                BodyTemplate = "Đơn {order_code} của khách hàng {customer_name} đã được duyệt vượt hạn mức. Lý do: {reason}.",
+                ActionUrlPattern = "/sales/orders",
+                Translations = new Dictionary<string, NotificationTemplateTranslation>
+                {
+                    ["vi"] = new()
+                    {
+                        Title = "Đơn hàng {order_code} đã được duyệt công nợ",
+                        Body = "Đơn {order_code} của khách hàng {customer_name} đã được duyệt vượt hạn mức. Lý do: {reason}."
+                    },
+                    ["en"] = new()
+                    {
+                        Title = "Order {order_code} credit approved",
+                        Body = "Order {order_code} of customer {customer_name} was approved beyond the credit limit. Reason: {reason}."
+                    }
+                }
+            },
+            new()
+            {
+                Code = "SD_ORDER_CANCELLED",
+                Name = "Đơn hàng bị hủy",
+                Category = NotificationCategory.SD,
+                DefaultSeverity = NotificationSeverity.WARNING,
+                SupportedChannels = [NotificationChannel.InApp, NotificationChannel.PushMobile],
+                TitleTemplate = "Đơn hàng {order_code} đã bị hủy",
+                BodyTemplate = "Đơn {order_code} của khách hàng {customer_name} đã bị hủy và tồn kho giữ chỗ được nhả. Lý do: {reason}.",
+                ActionUrlPattern = "/sales/orders",
+                Translations = new Dictionary<string, NotificationTemplateTranslation>
+                {
+                    ["vi"] = new()
+                    {
+                        Title = "Đơn hàng {order_code} đã bị hủy",
+                        Body = "Đơn {order_code} của khách hàng {customer_name} đã bị hủy và tồn kho giữ chỗ được nhả. Lý do: {reason}."
+                    },
+                    ["en"] = new()
+                    {
+                        Title = "Order {order_code} cancelled",
+                        Body = "Order {order_code} of customer {customer_name} was cancelled and its reserved stock released. Reason: {reason}."
+                    }
+                }
+            },
+            new()
+            {
                 Code = "SD_INVOICE_CANCELLED",
                 Name = "Cảnh báo hủy hóa đơn",
                 Category = NotificationCategory.SD,
