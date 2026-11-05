@@ -140,6 +140,30 @@ public static class NotificationTemplateSeeder
             },
             new()
             {
+                Code = "SD_RETURN_POSTED",
+                Name = "Phiếu trả hàng bán đã ghi sổ",
+                Category = NotificationCategory.SD,
+                DefaultSeverity = NotificationSeverity.INFO,
+                SupportedChannels = [NotificationChannel.InApp, NotificationChannel.PushMobile],
+                TitleTemplate = "Trả hàng bán: {return_code}",
+                BodyTemplate = "Khách hàng {customer_name} đã trả hàng theo phiếu {return_code}, số tiền hoàn {total_refund} đ. Hàng đã nhập lại kho.",
+                ActionUrlPattern = "/sales/returns",
+                Translations = new Dictionary<string, NotificationTemplateTranslation>
+                {
+                    ["vi"] = new()
+                    {
+                        Title = "Trả hàng bán: {return_code}",
+                        Body = "Khách hàng {customer_name} đã trả hàng theo phiếu {return_code}, số tiền hoàn {total_refund} đ. Hàng đã nhập lại kho."
+                    },
+                    ["en"] = new()
+                    {
+                        Title = "Sales return: {return_code}",
+                        Body = "Customer {customer_name} returned goods on {return_code}; refund {total_refund}. The goods are back in stock."
+                    }
+                }
+            },
+            new()
+            {
                 Code = "SD_INVOICE_CANCELLED",
                 Name = "Cảnh báo hủy hóa đơn",
                 Category = NotificationCategory.SD,

@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using ERPm.Application.Common;
 using ERPm.Domain.Entities.Accounting;
+using ERPm.Domain.Entities.Sales;
 using ERPm.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -26,6 +27,18 @@ public sealed class PostingTransaction(ApplicationDbContext context)
 
     public Task LockSharedAsync(string key, CancellationToken ct) =>
         context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock_shared(hashtextextended({key}, 0))", ct);
+
+    /// <summary>
+    /// Receivables of a customer: unpaid posted invoices minus posted sales returns settled against the debt.
+    /// </summary>
+    public async Task<decimal> ReceivablesAsync(int customerId, CancellationToken ct)
+    {
+        var invoiced = await context.SalesInvoices.IgnoreQueryFilters()
+            .Where(i => !i.IsDeleted && i.Status == VoucherStatus.Posted && i.CustomerId == customerId).SumAsync(i => i.RemainingDebt, ct);
+        var credited = await context.SalesReturns.IgnoreQueryFilters()
+            .Where(r => !r.IsDeleted && r.Status == VoucherStatus.Posted && r.CustomerId == customerId && r.RefundMethod == RefundMethod.ReduceDebt).SumAsync(r => r.TotalRefundAmount, ct);
+        return invoiced - credited;
+    }
 
     /// <summary>Next value of the shared document number sequence.</summary>
     public Task<long> NextValueAsync(CancellationToken ct) =>
