@@ -167,8 +167,7 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
         if (!order.CustomerId.HasValue) return CreditCheckStatus.Passed;
         await posting.LockAsync($"partner:{order.CustomerId}", ct);
         var limit = await Context.Partners.Where(p => p.Id == order.CustomerId).Select(p => p.CreditLimit).SingleAsync(ct);
-        var receivables = await Context.SalesInvoices.IgnoreQueryFilters()
-            .Where(i => !i.IsDeleted && i.Status == VoucherStatus.Posted && i.CustomerId == order.CustomerId).SumAsync(i => i.RemainingDebt, ct);
+        var receivables = await posting.ReceivablesAsync(order.CustomerId.Value, ct);
         var committed = await Context.SalesOrders.IgnoreQueryFilters()
             .Where(o => !o.IsDeleted && o.CustomerId == order.CustomerId && o.Id != order.Id && CommittedStatuses.Contains(o.Status)).SumAsync(o => o.TotalAmount, ct);
         var exposure = receivables + committed + order.TotalAmount;

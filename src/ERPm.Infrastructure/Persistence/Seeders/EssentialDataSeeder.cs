@@ -21,7 +21,7 @@ public static class EssentialDataSeeder
         foreach (var (code, name, type) in new[] {
             ("111", "Cash", AccountType.Asset), ("112", "Bank", AccountType.Asset), ("131", "Receivables", AccountType.Asset),
             ("156", "Inventory", AccountType.Asset), ("331", "Payables", AccountType.Liability), ("411", "Opening capital", AccountType.Equity),
-            ("511", "Revenue", AccountType.Revenue), ("632", "Cost of sales", AccountType.Expense) })
+            ("511", "Revenue", AccountType.Revenue), ("521", "Sales returns and deductions", AccountType.Revenue), ("632", "Cost of sales", AccountType.Expense) })
             if (!await context.Accounts.AnyAsync(a => a.Code == code)) context.Accounts.Add(new Account { Code = code, Name = name, AccountType = type, Translations = new() { ["en"] = name, ["vi"] = name } });
         if (!await context.UnitsOfMeasure.AnyAsync()) context.UnitsOfMeasure.Add(new UnitOfMeasure { Code = "PCS", Name = "Cái", Translations = new() { ["vi"] = "Cái", ["en"] = "Piece" } });
         await context.SaveChangesAsync();
