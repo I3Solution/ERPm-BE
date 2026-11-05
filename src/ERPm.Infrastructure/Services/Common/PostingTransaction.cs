@@ -27,11 +27,11 @@ public sealed class PostingTransaction(ApplicationDbContext context)
     public Task LockSharedAsync(string key, CancellationToken ct) =>
         context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock_shared(hashtextextended({key}, 0))", ct);
 
-    public async Task<string> NumberAsync(string prefix, CancellationToken ct)
-    {
-        var number = await context.Database.SqlQueryRaw<long>("SELECT nextval('erpm_document_number') AS \"Value\"").SingleAsync(ct);
-        return $"{prefix}{number:D10}";
-    }
+    /// <summary>Next value of the shared document number sequence.</summary>
+    public Task<long> NextValueAsync(CancellationToken ct) =>
+        context.Database.SqlQueryRaw<long>("SELECT nextval('erpm_document_number') AS \"Value\"").SingleAsync(ct);
+
+    public async Task<string> NumberAsync(string prefix, CancellationToken ct) => $"{prefix}{await NextValueAsync(ct):D10}";
 
     public static string Hash<T>(T request) => Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(request)));
     public static decimal Round(decimal value) => decimal.Round(value, 4, MidpointRounding.AwayFromZero);

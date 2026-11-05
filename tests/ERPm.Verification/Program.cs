@@ -210,6 +210,58 @@ try
     await Reject(async () => await lists.DeleteAsync(wholesale.Id), "error.sd.pricelist_in_use");
     await db.Partners.Where(p => p.Id == customer.Id).ExecuteUpdateAsync(p => p.SetProperty(c => c.PriceListId, (int?)null));
     Check(await lists.DeleteAsync(wholesale.Id) && await lists.GetByIdAsync(wholesale.Id) == null && !await lists.DeleteAsync(wholesale.Id), "an unused price list can be deleted once");
+    // Quotations: lifecycle, validity, conversion into a Draft order.
+    var quotes = new SalesQuotationService(db, new PostingTransaction(db));
+    var quoteDate = DateTime.UtcNow;
+    CreateSalesQuotationRequest QuoteRequest(decimal quantity = 2, decimal discount = 20, DateTime? date = null, DateTime? until = null) => new()
+    {
+        QuotationDate = date ?? quoteDate, ValidUntil = until ?? quoteDate.AddDays(7), CustomerId = customer.Id, BranchId = branch.Id, TermsAndConditions = "Net 30",
+        Items = [new() { ItemId = item.Id, Quantity = quantity, UnitPrice = 100, DiscountAmount = discount, Notes = "line" }]
+    };
+    var quote = await quotes.CreateAsync(QuoteRequest());
+    Check(System.Text.RegularExpressions.Regex.IsMatch(quote.QuotationNumber, @"^BG-\d{6}-\d{4,}$") && quote.Status == "Draft" && quote.SubTotal == 200 && quote.DiscountAmount == 20 && quote.TotalAmount == 180
+        && quote.CustomerName == "Customer" && quote.Items.Single().ItemCode == "ITEM" && quote.Items.Single().LineTotal == 180, "quotation is numbered, priced and snapshots customer and lines");
+    await Reject(async () => await quotes.CreateAsync(new CreateSalesQuotationRequest { QuotationDate = quoteDate, ValidUntil = quoteDate, CustomerId = customer.Id, BranchId = branch.Id }), "error.validation.request");
+    var toSupplier = QuoteRequest(); toSupplier.CustomerId = supplier.Id;
+    await Reject(async () => await quotes.CreateAsync(toSupplier), "error.sales.customer");
+    await Reject(async () => await quotes.CreateAsync(QuoteRequest(discount: 500)), "error.sales.discount");
+    await Reject(async () => await quotes.CreateAsync(QuoteRequest(until: quoteDate.AddDays(-1))), "error.validation.request");
+    var found = await quotes.GetPagedAsync(new BaseFilterQuery { Keyword = quote.QuotationNumber, Status = "Draft" });
+    Check(found.TotalCount == 1 && found.Items.Single().Items.Count == 0 && found.Items.Single().BranchName == branch.Name, "quotation page filters by number and status and returns headers only");
+
+    Check((await quotes.SendAsync(quote.Id)).Status == "Sent", "a draft quotation can be sent");
+    await Reject(async () => await quotes.SendAsync(quote.Id), "error.sd.quotation_invalid_status");
+    var revised = await quotes.UpdateAsync(quote.Id, new UpdateSalesQuotationRequest { QuotationDate = quoteDate, ValidUntil = quoteDate.AddDays(7), CustomerId = customer.Id, BranchId = branch.Id, Items = [new() { ItemId = item.Id, Quantity = 3, UnitPrice = 100 }] });
+    Check(revised!.TotalAmount == 300 && revised.Items.Count == 1 && revised.Status == "Sent", "a sent quotation can be revised and its lines are replaced");
+    Check((await quotes.AcceptAsync(quote.Id)).Status == "Accepted", "a sent quotation can be accepted");
+    await Reject(async () => await quotes.UpdateAsync(quote.Id, new UpdateSalesQuotationRequest { QuotationDate = quoteDate, ValidUntil = quoteDate.AddDays(7), CustomerId = customer.Id, BranchId = branch.Id, Items = [new() { ItemId = item.Id, Quantity = 1, UnitPrice = 1 }] }), "error.sd.quotation_invalid_status");
+    await Reject(async () => await quotes.DeleteAsync(quote.Id), "error.sd.quotation_invalid_status");
+
+    var converted = await quotes.ConvertToOrderAsync(quote.Id);
+    var convertedOrder = await db.SalesOrders.Include(o => o.Items).SingleAsync(o => o.Id == converted.SalesOrderId);
+    Check(convertedOrder.Status == "Draft" && convertedOrder.TotalAmount == 300 && convertedOrder.Items.Single().Quantity == 3 && convertedOrder.CustomerId == customer.Id && convertedOrder.OrderNumber == converted.OrderNumber && convertedOrder.Notes == quote.QuotationNumber,
+        "conversion creates a Draft order with the quotation lines");
+    var after = await quotes.GetByIdAsync(quote.Id);
+    Check(after!.Status == "Converted" && after.ConvertedSalesOrderId == converted.SalesOrderId, "the converted quotation points at its order");
+    await Reject(async () => await quotes.ConvertToOrderAsync(quote.Id), "error.sd.quotation_already_converted");
+    await Reject(async () => await quotes.RejectAsync(quote.Id), "error.sd.quotation_invalid_status");
+
+    var stale = await quotes.CreateAsync(QuoteRequest(date: quoteDate.AddDays(-10), until: quoteDate.AddDays(-5)));
+    Check(stale.Status == "Expired" && (await quotes.GetPagedAsync(new BaseFilterQuery { Status = "Expired" })).Items.Any(q => q.Id == stale.Id) && !(await quotes.GetPagedAsync(new BaseFilterQuery { Status = "Draft" })).Items.Any(q => q.Id == stale.Id),
+        "a quotation past its validity date reads as Expired");
+    await Reject(async () => await quotes.SendAsync(stale.Id), "error.sd.quotation_expired");
+    await Reject(async () => await quotes.ConvertToOrderAsync(stale.Id), "error.sd.quotation_expired");
+    var extended = await quotes.UpdateAsync(stale.Id, new UpdateSalesQuotationRequest { QuotationDate = quoteDate, ValidUntil = quoteDate.AddDays(3), CustomerId = customer.Id, BranchId = branch.Id, Items = [new() { ItemId = item.Id, Quantity = 1, UnitPrice = 100 }] });
+    Check(extended!.Status == "Draft", "an expired draft revives when its validity date is extended");
+
+    var refused = await quotes.CreateAsync(QuoteRequest());
+    await quotes.SendAsync(refused.Id);
+    Check((await quotes.RejectAsync(refused.Id)).Status == "Rejected", "a sent quotation can be rejected");
+    await Reject(async () => await quotes.ConvertToOrderAsync(refused.Id), "error.sd.quotation_invalid_status");
+    await Reject(async () => await quotes.AcceptAsync(refused.Id), "error.sd.quotation_invalid_status");
+    var scratch = await quotes.CreateAsync(QuoteRequest());
+    Check(await quotes.DeleteAsync(scratch.Id) && await quotes.GetByIdAsync(scratch.Id) == null, "a draft quotation can be deleted");
+    Check(PermissionCatalog.Contains("sd:quotation:view") && PermissionCatalog.Contains("sd:quotation:delete"), "quotation permissions are in the catalog");
     await using var denied = Db(new TestUser(false, [999999]));
     Check(!await denied.SalesInvoices.AnyAsync() && !await denied.StockBalances.AnyAsync(), "server filters inaccessible branches");
     db.ChangeTracker.Clear(); var immutable = await db.SalesInvoices.FirstAsync(); immutable.TotalAmount = 1;
@@ -324,6 +376,11 @@ try
         Check(listPage.RootElement.GetProperty("data").GetProperty("totalCount").GetInt32() >= 1, "admin reads the price list page over HTTP");
         using var priced = await http.PostAsJsonAsync("/api/v1/sales/price-lists/calculate-price", new { branchId = allowedBranch.Id, items = new[] { new { itemId = 1, quantity = 1 } } });
         Check(priced.StatusCode != HttpStatusCode.NotFound && priced.StatusCode != HttpStatusCode.MethodNotAllowed && priced.StatusCode != HttpStatusCode.Forbidden, "calculate-price is routed and allowed for the administrator");
+        Check((await http.GetAsync("/api/v1/sales/quotations")).IsSuccessStatusCode, "admin reads the quotation page over HTTP");
+        Check((await http.PostAsync("/api/v1/sales/quotations/999999/convert-to-order", null)).StatusCode == HttpStatusCode.NotFound, "converting a missing quotation answers not found");
+        http.DefaultRequestHeaders.Authorization = new("Bearer", viewerToken);
+        Check((await http.PostAsync("/api/v1/sales/quotations/1/send", null)).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without sd:quotation:edit cannot send a quotation");
+        http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
         http.DefaultRequestHeaders.Authorization = new("Bearer", viewerToken);
         Check((await http.PostAsJsonAsync("/api/v1/sales/price-lists", new { code = "X", name = "X", currency = "VND", effectiveFrom = DateTime.UtcNow })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without sd:pricelist:create cannot create a price list");
         http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
