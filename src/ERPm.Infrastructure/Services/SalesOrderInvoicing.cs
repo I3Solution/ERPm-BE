@@ -16,7 +16,7 @@ public partial class SalesInvoiceService
     {
         Require(request.WarehouseId > 0 && Enum.IsDefined((PaymentMethod)request.PaymentMethod), "error.validation.payment_method");
         ValidateNumber(request.TenderedAmount);
-        ERPm.Domain.Events.NotificationEvent? publish = null;
+        DocumentNotice? publish = null;
 
         var invoice = await posting.RunAsync(async () =>
         {
@@ -44,15 +44,16 @@ public partial class SalesInvoiceService
             foreach (var line in order.Items) line.InvoicedQuantity = line.Quantity;
             order.Status = SalesOrderStatus.Completed;
 
-            publish = new ERPm.Domain.Events.NotificationEvent(
-                "SD_ORDER_INVOICED", ERPm.Domain.Enums.NotificationCategory.SD, ERPm.Domain.Enums.NotificationSeverity.INFO,
-                ERPm.Domain.Enums.NotificationTargetType.BranchTree, branchId: order.BranchId,
-                parameters: new Dictionary<string, object> { ["order_code"] = order.OrderNumber, ["invoice_code"] = posted.InvoiceNumber, ["total_amount"] = posted.TotalAmount },
-                actionUrl: "/sales/invoices");
+            publish = new DocumentNotice(
+                "SD_ORDER_INVOICED", ERPm.Domain.Enums.NotificationCategory.SD, ERPm.Domain.Enums.NotificationSeverity.INFO, "sd:order:view",
+                order.BranchId, order.DepartmentId, order.CreatedBy,
+                new Dictionary<string, object> { ["order_code"] = order.OrderNumber, ["invoice_code"] = posted.InvoiceNumber, ["total_amount"] = posted.TotalAmount },
+                "/sales/invoices");
             return posted;
         }, cancellationToken);
 
-        if (notificationEngine != null && publish != null) _ = notificationEngine.PublishAsync(publish);
+        // Sent after the commit, to accounts that may view the order, never to the person who invoiced it.
+        await PermissionRecipients.PublishAsync(context, iam, notificationEngine, user, publish, cancellationToken);
         return invoice;
     }
 }

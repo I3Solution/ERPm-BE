@@ -18,7 +18,8 @@ namespace ERPm.Infrastructure.Services;
 /// (Dr 521) and cost of sales (Dr 156 / Cr 632), and refunds the customer in cash, by bank or against receivables.
 /// Posted returns cannot be edited or deleted.
 /// </summary>
-public sealed class SalesReturnService(ApplicationDbContext context, PostingTransaction posting, ERPm.Application.Common.Notifications.INotificationEngine? notificationEngine = null)
+public sealed class SalesReturnService(ApplicationDbContext context, PostingTransaction posting, ERPm.Application.Common.Notifications.INotificationEngine? notificationEngine = null,
+    ERPm.Application.Features.System.IIamService? iam = null, ERPm.Application.Common.Interfaces.ICurrentUser? currentUser = null)
     : BaseCrudService<SalesReturn, SalesReturnDetailDto, CreateSalesReturnRequest, CreateSalesReturnRequest>(context)
 {
     protected override IQueryable<SalesReturn> PrepareQuery(IQueryable<SalesReturn> query) => query.Include(r => r.Invoice);
@@ -67,7 +68,7 @@ public sealed class SalesReturnService(ApplicationDbContext context, PostingTran
         }
         var method = (RefundMethod)request.RefundMethod;
 
-        ERPm.Domain.Events.NotificationEvent? publish = null;
+        DocumentNotice? publish = null;
         var id = await posting.RunAsync(async () =>
         {
             var warehouse = await Context.Warehouses.SingleOrDefaultAsync(w => w.Id == request.WarehouseId && w.IsActive && w.Branch!.IsActive, ct);
@@ -167,15 +168,16 @@ public sealed class SalesReturnService(ApplicationDbContext context, PostingTran
             Context.SalesReturns.Add(salesReturn);
             await Context.SaveChangesAsync(ct);
 
-            publish = new ERPm.Domain.Events.NotificationEvent(
-                "SD_RETURN_POSTED", ERPm.Domain.Enums.NotificationCategory.SD, ERPm.Domain.Enums.NotificationSeverity.INFO,
-                ERPm.Domain.Enums.NotificationTargetType.BranchTree, branchId: salesReturn.BranchId,
-                parameters: new Dictionary<string, object> { ["return_code"] = number, ["customer_name"] = salesReturn.CustomerName, ["total_refund"] = refund },
-                actionUrl: "/sales/returns");
+            publish = new DocumentNotice(
+                "SD_RETURN_POSTED", ERPm.Domain.Enums.NotificationCategory.SD, ERPm.Domain.Enums.NotificationSeverity.INFO, "sd:return:view",
+                salesReturn.BranchId, salesReturn.DepartmentId, salesReturn.CreatedBy,
+                new Dictionary<string, object> { ["return_code"] = number, ["customer_name"] = salesReturn.CustomerName, ["total_refund"] = refund },
+                "/sales/returns");
             return salesReturn.Id;
         }, ct);
 
-        if (notificationEngine != null && publish != null) _ = notificationEngine.PublishAsync(publish);
+        // Sent after the commit, to accounts that may view returns in a scope reaching this one, never the person who posted it.
+        await PermissionRecipients.PublishAsync(Context, iam, notificationEngine, currentUser, publish, ct);
         Context.ChangeTracker.Clear();
         return (await GetByIdAsync(id, ct))!;
     }
