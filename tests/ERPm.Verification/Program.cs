@@ -416,6 +416,54 @@ try
     await Reject(async () => await addresses.CreateAsync(addressee.Id, Address("One too many")), "error.crm.delivery_address_limit");
     await addresses.DeleteAsync(addressee.Id, (await addresses.GetAsync(addressee.Id)).Last().Id);
     Check((await addresses.CreateAsync(addressee.Id, Address("Fits again"))).PartnerId == addressee.Id, "deleting an address frees a slot under the limit");
+    // Order VAT per line, delivery time and the copied delivery address.
+    SalesOrderItemDto Line(SalesOrderDto order, int itemId) => order.Items.Single(i => i.ItemId == itemId);
+    CreateSalesOrderRequest VatOrder(int customerId, decimal vatA, decimal vatB, decimal headerDiscount = 20, decimal headerTax = 0) => new()
+    {
+        BranchId = branch.Id, CustomerId = customerId, DiscountAmount = headerDiscount, TaxAmount = headerTax,
+        Items = [new() { ItemId = rsv.Id, Quantity = 3, UnitPrice = 100, DiscountAmount = 30, VatRate = vatA }, new() { ItemId = creditItem.Id, Quantity = 1, UnitPrice = 33.3333m, VatRate = vatB }]
+    };
+    var vatOrder = await orders.CreateAsync(VatOrder(rich.Id, 8, 10));
+    var vatLineA = decimal.Round(270m * 8m / 100m, 4, MidpointRounding.AwayFromZero);
+    var vatLineB = decimal.Round(33.3333m * 10m / 100m, 4, MidpointRounding.AwayFromZero);
+    Check(Line(vatOrder, rsv.Id).LineTotal == 270 && Line(vatOrder, rsv.Id).TaxAmount == vatLineA && Line(vatOrder, creditItem.Id).TaxAmount == vatLineB && Line(vatOrder, rsv.Id).VatRate == 8,
+        "each order line carries its VAT rate and the tax worked out on the amount after the line discount");
+    Check(vatOrder.SubTotal == 303.3333m && vatOrder.TaxAmount == vatLineA + vatLineB && vatOrder.TotalAmount == vatOrder.SubTotal - 20 + vatOrder.TaxAmount, "the order total is subtotal minus discount plus the VAT of all lines, with no rounding drift");
+    var echoed = await orders.CreateAsync(VatOrder(rich.Id, 8, 10, headerTax: vatLineA + vatLineB));
+    Check(echoed.TaxAmount == vatOrder.TaxAmount, "a client may send back the derived header VAT");
+    await Reject(async () => await orders.CreateAsync(VatOrder(rich.Id, 8, 10, headerTax: 1)), "error.validation.request");
+    await Reject(async () => await orders.CreateAsync(VatOrder(rich.Id, 101, 0)), "error.sd.order_vat_rate_invalid");
+    await Reject(async () => await orders.CreateAsync(VatOrder(rich.Id, -1, 0)), "error.sd.order_vat_rate_invalid");
+    await Reject(async () => await orders.CreateAsync(VatOrder(rich.Id, 8.555m, 0)), "error.sd.order_vat_rate_invalid");
+    var noVat = await orders.CreateAsync(VatOrder(rich.Id, 0, 0));
+    Check(noVat.TaxAmount == 0 && noVat.TotalAmount == noVat.SubTotal - 20, "lines without VAT leave the order tax at zero");
+    var revatted = await orders.UpdateAsync(noVat.Id, new UpdateSalesOrderRequest { BranchId = branch.Id, CustomerId = rich.Id, DiscountAmount = 20, Items = VatOrder(rich.Id, 5, 0).Items });
+    Check(revatted!.TaxAmount == decimal.Round(270m * 5m / 100m, 4, MidpointRounding.AwayFromZero) && revatted.TotalAmount == revatted.SubTotal - 20 + revatted.TaxAmount, "editing an order recomputes its tax and total");
+
+    var deliveryAt = new DateTime(2026, 11, 10, 8, 30, 0, DateTimeKind.Utc);
+    var timed = await orders.CreateAsync(new CreateSalesOrderRequest { BranchId = branch.Id, CustomerId = rich.Id, ExpectedDeliveryDate = deliveryAt, Items = [new() { ItemId = rsv.Id, Quantity = 1, UnitPrice = 100 }] });
+    await using (var reread = Db(user))
+    {
+        var storedDelivery = (await reread.SalesOrders.AsNoTracking().SingleAsync(o => o.Id == timed.Id)).ExpectedDeliveryDate;
+        Check(storedDelivery == deliveryAt && storedDelivery.Value.Kind == DateTimeKind.Utc && timed.ExpectedDeliveryDate == deliveryAt, "the expected delivery keeps hours and minutes in UTC");
+    }
+    await Reject(async () => await orders.CreateAsync(new CreateSalesOrderRequest { BranchId = branch.Id, CustomerId = rich.Id, ExpectedDeliveryDate = new DateTime(2026, 11, 10, 8, 30, 0, DateTimeKind.Unspecified), Items = [new() { ItemId = rsv.Id, Quantity = 1, UnitPrice = 100 }] }), "error.validation.request");
+
+    var pickable = (await addresses.GetAsync(addressee.Id)).First();
+    CreateSalesOrderRequest ToAddress(int? addressId, int customerId) => new() { BranchId = branch.Id, CustomerId = customerId, DeliveryAddressId = addressId, Items = [new() { ItemId = rsv.Id, Quantity = 1, UnitPrice = 100 }] };
+    var shipped = await orders.CreateAsync(ToAddress(pickable.Id, addressee.Id));
+    var expectedText = string.Join(", ", new[] { pickable.Address, pickable.Ward, pickable.District, pickable.City }.Where(x => !string.IsNullOrWhiteSpace(x)));
+    Check(shipped.DeliveryAddressId == pickable.Id && shipped.DeliveryRecipientName == pickable.RecipientName && shipped.DeliveryPhone == pickable.Phone && shipped.DeliveryAddressText == expectedText && shipped.DeliveryAddress == expectedText,
+        "an order keeps a copy of the chosen delivery address");
+    await addresses.UpdateAsync(addressee.Id, pickable.Id, Address("Renamed after the order"));
+    await addresses.DeleteAsync(addressee.Id, pickable.Id);
+    var shippedAgain = (await orders.GetByIdAsync(shipped.Id))!;
+    Check(shippedAgain.DeliveryRecipientName == shipped.DeliveryRecipientName && shippedAgain.DeliveryAddressText == expectedText, "changing or deleting the source address leaves the order's copy unchanged");
+    var ownerless = (await addresses.GetAsync(addressee.Id)).First();
+    await Reject(async () => await orders.CreateAsync(ToAddress(ownerless.Id, rich.Id)), "error.sd.order_delivery_address_invalid");
+    await Reject(async () => await orders.CreateAsync(ToAddress(pickable.Id, addressee.Id)), "error.sd.order_delivery_address_invalid");
+    var cleared = await orders.UpdateAsync(shipped.Id, new UpdateSalesOrderRequest { BranchId = branch.Id, CustomerId = addressee.Id, DeliveryAddress = "Typed by hand", Items = [new() { ItemId = rsv.Id, Quantity = 1, UnitPrice = 100 }] });
+    Check(cleared!.DeliveryAddressId == null && cleared.DeliveryRecipientName == null && cleared.DeliveryAddressText == null && cleared.DeliveryAddress == "Typed by hand", "dropping the address choice clears the copy");
     await db.SalesOrderItems.Where(i => i.SalesOrderId == warned.Id).ExecuteUpdateAsync(i => i.SetProperty(x => x.InvoicedQuantity, 1m));
     await Reject(async () => await orders.CancelAsync(warned.Id, "too late", default), "error.sd.cannot_cancel_invoiced_order");
     // Tester findings: F1 pricing outside the data scope, F2 deleting a list used by an order, F3 order state errors.
@@ -546,7 +594,7 @@ try
     async Task<StockBalance> InvStock() => await db.StockBalances.AsNoTracking().SingleAsync(b => b.ItemId == inv.Id);
     var seller3 = new SalesInvoiceService(db, new BranchService(db), new PostingTransaction(db), new TestUser(false, [branch.Id]));
     async Task<SalesOrderDto> InvOrder(int? customerId, decimal quantity, decimal price, decimal lineDiscount = 0, decimal discount = 0, decimal tax = 0) => await orders.CreateAsync(new CreateSalesOrderRequest
-    { BranchId = branch.Id, CustomerId = customerId, DiscountAmount = discount, TaxAmount = tax, Items = [new() { ItemId = inv.Id, Quantity = quantity, UnitPrice = price, DiscountAmount = lineDiscount }] });
+    { BranchId = branch.Id, CustomerId = customerId, DiscountAmount = discount, Items = [new() { ItemId = inv.Id, Quantity = quantity, UnitPrice = price, DiscountAmount = lineDiscount, VatRate = tax }] });
     CreateInvoiceFromOrderRequest FromOrder(PaymentMethod method = PaymentMethod.Cash, decimal tendered = 0) => new() { WarehouseId = warehouse.Id, PaymentMethod = (int)method, TenderedAmount = tendered };
 
     var pos150 = new CreateSalesInvoiceRequest { RequestId = Guid.NewGuid(), WarehouseId = warehouse.Id, PaidAmount = 150, Items = [new() { ItemId = inv.Id, Quantity = 1, UnitPrice = 150 }] };
@@ -679,7 +727,7 @@ try
         using var branchDeleteDenied = await http.DeleteAsync($"/api/v1/branches/{allowedBranch.Id}");
         Check(branchEditDenied.StatusCode == HttpStatusCode.Forbidden && branchDeleteDenied.StatusCode == HttpStatusCode.Forbidden, "viewer cannot edit or delete branches");
         http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
-        using var order = await http.PostAsJsonAsync("/api/v1/sales/orders", new { branchId = branch.Id, customerId = customer.Id, discountAmount = 10, taxAmount = 5, items = new[] { new { itemId = item.Id, quantity = 2, unitPrice = 100 } } });
+        using var order = await http.PostAsJsonAsync("/api/v1/sales/orders", new { branchId = branch.Id, customerId = customer.Id, discountAmount = 10, items = new[] { new { itemId = item.Id, quantity = 2, unitPrice = 100, vatRate = 2.5 } } });
         if (!order.IsSuccessStatusCode) throw new Exception("Order failed: " + await order.Content.ReadAsStringAsync());
         using var orderPayload = JsonDocument.Parse(await order.Content.ReadAsStringAsync());
         var orderData = orderPayload.RootElement.GetProperty("data"); var orderId = orderData.GetProperty("id").GetInt32();

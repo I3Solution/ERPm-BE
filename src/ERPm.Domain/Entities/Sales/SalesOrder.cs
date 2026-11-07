@@ -57,6 +57,11 @@ public class SalesOrder : BaseAuditableEntity
 
     public DateTime? ExpectedDeliveryDate { get; set; }
     public string? DeliveryAddress { get; set; }
+    public int? DeliveryAddressId { get; set; }            // Address chosen from the customer's list, if any
+    // Copy of the chosen address taken when the order is saved: later edits or deletion of the source never change the order.
+    public string? DeliveryRecipientName { get; set; }
+    public string? DeliveryPhone { get; set; }
+    public string? DeliveryAddressText { get; set; }
     public int? QuotationId { get; set; }                  // Quotation this order was converted from
     public int? SalespersonId { get; set; }                // Employee in charge
     public int? PriceListId { get; set; }
@@ -80,7 +85,9 @@ public class SalesOrderItem : BaseEntity
     public decimal Quantity { get; set; } = 0m;
     public decimal UnitPrice { get; set; } = 0m;
     public decimal DiscountAmount { get; set; } = 0m;
-    public decimal LineTotal { get; set; } = 0m;
+    public decimal LineTotal { get; set; } = 0m;           // Quantity x price minus the line discount, before VAT
+    public decimal VatRate { get; set; } = 0m;             // VAT percentage of this line, 0 to 100
+    public decimal TaxAmount { get; set; } = 0m;           // VAT of this line, decimal(18, 4)
     public decimal InvoicedQuantity { get; set; } = 0m;    // Quantity already invoiced, decimal(18, 4)
 
     // Navigation

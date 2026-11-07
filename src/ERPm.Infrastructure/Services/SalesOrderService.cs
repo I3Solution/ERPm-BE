@@ -33,12 +33,13 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
         CustomerId = o.CustomerId, CustomerName = o.CustomerName,
         SubTotal = o.SubTotal, DiscountAmount = o.DiscountAmount, TaxAmount = o.TaxAmount, TotalAmount = o.TotalAmount, PaidAmount = o.PaidAmount,
         Status = o.Status, CreditCheckStatus = o.CreditCheckStatus, ReservationStatus = o.ReservationStatus, Notes = o.Notes,
-        ExpectedDeliveryDate = o.ExpectedDeliveryDate, DeliveryAddress = o.DeliveryAddress, QuotationId = o.QuotationId, QuotationNumber = o.Quotation?.QuotationNumber,
+        ExpectedDeliveryDate = o.ExpectedDeliveryDate, DeliveryAddress = o.DeliveryAddress, DeliveryAddressId = o.DeliveryAddressId,
+        DeliveryRecipientName = o.DeliveryRecipientName, DeliveryPhone = o.DeliveryPhone, DeliveryAddressText = o.DeliveryAddressText, QuotationId = o.QuotationId, QuotationNumber = o.Quotation?.QuotationNumber,
         SalespersonId = o.SalespersonId, SalespersonName = o.Salesperson?.FullName, PriceListId = o.PriceListId,
         Items = o.Items.OrderBy(i => i.Id).Select(i => new SalesOrderItemDto
         {
             Id = i.Id, ItemId = i.ItemId, ItemCode = i.ItemCode, ItemName = i.ItemName, UnitName = i.UnitName, Quantity = i.Quantity,
-            UnitPrice = i.UnitPrice, DiscountAmount = i.DiscountAmount, LineTotal = i.LineTotal, InvoicedQuantity = i.InvoicedQuantity
+            UnitPrice = i.UnitPrice, DiscountAmount = i.DiscountAmount, LineTotal = i.LineTotal, VatRate = i.VatRate, TaxAmount = i.TaxAmount, InvoicedQuantity = i.InvoicedQuantity
         }).ToList()
     };
     // The branch name is looked up apart: see BranchNames.
@@ -220,12 +221,30 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
         if (notificationEngine != null && notification != null) _ = notificationEngine.PublishAsync(notification);
     }
 
+    /// <summary>
+    /// Takes a copy of the chosen address of the customer. Without a choice the copy is cleared, so an order never shows
+    /// recipient data that no longer matches what was picked.
+    /// </summary>
+    private async Task ApplyDeliveryAddressAsync(SalesOrder entity, int? addressId, Partner? partner, CancellationToken ct)
+    {
+        entity.DeliveryAddressId = null; entity.DeliveryRecipientName = null; entity.DeliveryPhone = null; entity.DeliveryAddressText = null;
+        if (!addressId.HasValue) return;
+        var address = partner == null ? null : await Context.PartnerDeliveryAddresses.AsNoTracking().SingleOrDefaultAsync(a => a.Id == addressId && a.PartnerId == partner.Id, ct);
+        Require(address != null, "error.sd.order_delivery_address_invalid");
+        entity.DeliveryAddressId = address!.Id;
+        entity.DeliveryRecipientName = address.RecipientName;
+        entity.DeliveryPhone = address.Phone;
+        entity.DeliveryAddressText = string.Join(", ", new[] { address.Address, address.Ward, address.District, address.City }.Where(p => !string.IsNullOrWhiteSpace(p)));
+        entity.DeliveryAddress = entity.DeliveryAddressText;
+    }
+
     private async Task PrepareAsync(SalesOrder entity, CreateSalesOrderRequest request, CancellationToken ct)
     {
         // A seller limited to their own records has no branch in their data scope, so the branch is checked outside it.
         Require(request.Items is { Count: > 0 and <= 200 } && await Context.Branches.IgnoreQueryFilters().AnyAsync(b => !b.IsDeleted && b.Id == request.BranchId && b.IsActive, ct), "error.validation.request");
         Require(request.PaidAmount == 0, "error.validation.request");
         ValidateNumber(request.DiscountAmount); ValidateNumber(request.TaxAmount);
+        Require(request.Items.All(l => l.VatRate >= 0 && l.VatRate <= 100 && decimal.Round(l.VatRate, 2) == l.VatRate), "error.sd.order_vat_rate_invalid");
         Require(request.SalespersonId == null || await Context.Employees.AnyAsync(e => e.Id == request.SalespersonId && e.IsActive, ct), "error.validation.reference");
         Require(request.QuotationId == null || await Context.SalesQuotations.AnyAsync(q => q.Id == request.QuotationId, ct), "error.validation.reference");
         Require(request.ExpectedDeliveryDate == null || request.ExpectedDeliveryDate.Value.Kind == DateTimeKind.Utc, "error.validation.request");
@@ -242,15 +261,21 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
             var amount = Round(line.Quantity * line.UnitPrice) - discount;
             Require(amount >= 0, "error.sales.discount");
             var item = items[line.ItemId];
-            return new SalesOrderItem { ItemId = item.Id, ItemCode = item.Code, ItemName = item.Name, UnitName = item.BaseUom?.Name, Quantity = line.Quantity, UnitPrice = line.UnitPrice, DiscountAmount = discount, LineTotal = amount };
+            // VAT is worked out per line on the amount after the line discount and rounded to 4 decimals.
+            return new SalesOrderItem { ItemId = item.Id, ItemCode = item.Code, ItemName = item.Name, UnitName = item.BaseUom?.Name, Quantity = line.Quantity, UnitPrice = line.UnitPrice, DiscountAmount = discount, LineTotal = amount,
+                VatRate = line.VatRate, TaxAmount = Round(amount * line.VatRate / 100m) };
         }).ToList();
         entity.BranchId = request.BranchId; entity.DepartmentId = request.DepartmentId; entity.CustomerId = partner?.Id; entity.CustomerName = partner?.Name ?? request.CustomerName.Trim();
         entity.ExpectedDeliveryDate = request.ExpectedDeliveryDate; entity.QuotationId = request.QuotationId; entity.SalespersonId = request.SalespersonId;
         entity.DeliveryAddress = string.IsNullOrWhiteSpace(request.DeliveryAddress) ? partner?.Address : request.DeliveryAddress.Trim();
+        await ApplyDeliveryAddressAsync(entity, request.DeliveryAddressId, partner, ct);
         entity.SubTotal = entity.Items.Sum(i => i.LineTotal);
         Require(request.DiscountAmount <= entity.SubTotal, "error.sales.discount");
         entity.DiscountAmount = request.DiscountAmount;
-        entity.TaxAmount = request.TaxAmount; entity.TotalAmount = entity.SubTotal - request.DiscountAmount + request.TaxAmount;
+        // The header VAT is the sum of the line VAT; a client may echo it but cannot set a different figure.
+        var lineTax = entity.Items.Sum(i => i.TaxAmount);
+        Require(request.TaxAmount == 0 || request.TaxAmount == lineTax, "error.validation.request");
+        entity.TaxAmount = lineTax; entity.TotalAmount = entity.SubTotal - request.DiscountAmount + lineTax;
         ValidateNumber(entity.TotalAmount, true); entity.Notes = request.Notes;
         if (request.OrderDate.HasValue) { Require(request.OrderDate.Value.Kind == DateTimeKind.Utc, "error.validation.request"); entity.OrderDate = request.OrderDate.Value; }
     }

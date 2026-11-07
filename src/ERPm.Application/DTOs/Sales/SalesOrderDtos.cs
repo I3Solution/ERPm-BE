@@ -11,6 +11,8 @@ public class SalesOrderItemDto
     public decimal UnitPrice { get; set; }
     public decimal DiscountAmount { get; set; }
     public decimal LineTotal { get; set; }
+    public decimal VatRate { get; set; }
+    public decimal TaxAmount { get; set; }
     public decimal InvoicedQuantity { get; set; }
 }
 
@@ -39,6 +41,10 @@ public class SalesOrderDto
     public string? BranchName { get; set; }
     public DateTime? ExpectedDeliveryDate { get; set; }
     public string? DeliveryAddress { get; set; }
+    public int? DeliveryAddressId { get; set; }
+    public string? DeliveryRecipientName { get; set; }
+    public string? DeliveryPhone { get; set; }
+    public string? DeliveryAddressText { get; set; }
     public int? QuotationId { get; set; }
     public string? QuotationNumber { get; set; }
     public int? SalespersonId { get; set; }
@@ -57,6 +63,8 @@ public class CreateSalesOrderItemRequest
     public decimal Quantity { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal DiscountAmount { get; set; } = 0m;
+    /// <summary>VAT percentage of the line (0 to 100). Entered on the line until items carry their own rate.</summary>
+    public decimal VatRate { get; set; } = 0m;
     public decimal LineTotal => (Quantity * UnitPrice) - DiscountAmount;
 }
 
@@ -70,12 +78,16 @@ public class CreateSalesOrderRequest
     public string CustomerName { get; set; } = "Khách lẻ";
 
     public decimal DiscountAmount { get; set; } = 0m;
+    /// <summary>Derived from the line VAT. Send 0 or the sum of the lines; any other value is rejected.</summary>
     public decimal TaxAmount { get; set; } = 0m;
     public decimal PaidAmount { get; set; } = 0m;
     public string? Notes { get; set; }
 
+    /// <summary>Delivery date and time as ISO 8601 in UTC (for example 2026-11-10T08:30:00Z).</summary>
     public DateTime? ExpectedDeliveryDate { get; set; }
     public string? DeliveryAddress { get; set; }
+    /// <summary>An address of the customer's list; the order keeps a copy of it.</summary>
+    public int? DeliveryAddressId { get; set; }
     public int? QuotationId { get; set; }
     public int? SalespersonId { get; set; }
 
