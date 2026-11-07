@@ -92,6 +92,8 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             c => JsonSerializer.Deserialize<Dictionary<string, object>>(JsonSerializer.Serialize(c, (JsonSerializerOptions?)null), (JsonSerializerOptions?)null)!);
 
         modelBuilder.HasSequence<long>("erpm_document_number");
+        // Version of every permission change, shared by all API instances: they cache principals per version.
+        modelBuilder.HasSequence<long>("erpm_permission_version");
         modelBuilder.Entity<AppUser>(entity =>
         {
             entity.ToTable("tbl_SYS_User");
