@@ -178,6 +178,9 @@ public sealed class RoleService(ApplicationDbContext context, IIamService iam, E
         context.UserRoles.RemoveRange(links);
         context.UserRoles.AddRange(grants.Select(g => new UserRole { UserId = userId, RoleId = g.RoleId, ScopeOverride = g.ScopeOverride }));
         user.InlinePolicy = request.InlinePolicy is { Statements.Count: > 0 } ? request.InlinePolicy : null;
+        await context.SaveChangesAsync(cancellationToken);
+        iam.Invalidate();
+        // Announced only once the change is saved: a failed save must not tell the user their role changed.
         if (notificationEngine != null)
         {
             var roleNames = string.Join(", ", roles.Values.Select(r => r.Name));
@@ -194,8 +197,6 @@ public sealed class RoleService(ApplicationDbContext context, IIamService iam, E
                 actionUrl: "/auth/me"
             ));
         }
-        await context.SaveChangesAsync(cancellationToken);
-        iam.Invalidate();
         return await GetUserAccessAsync(userId, cancellationToken);
     }
 
