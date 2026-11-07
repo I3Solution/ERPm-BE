@@ -93,8 +93,24 @@ try
     SalesInvoiceService Sales(ApplicationDbContext c) => new(c, new BranchService(c), new PostingTransaction(c));
     CreateStockReceiptRequest Receipt(decimal quantity, decimal price) => new() { RequestId = Guid.NewGuid(), WarehouseId = warehouse.Id, SupplierId = supplier.Id, Items = [new() { ItemId = item.Id, Quantity = quantity, UnitPrice = price }] };
     CreateSalesInvoiceRequest Sale(decimal quantity = 1, decimal paid = 100) => new() { RequestId = Guid.NewGuid(), WarehouseId = warehouse.Id, CustomerId = customer.Id, PaidAmount = paid, Items = [new() { ItemId = item.Id, Quantity = quantity, UnitPrice = 100 }] };
+    // Delivery addresses: many per partner, a single live default, the flag defaults to limited credit.
+    Check(!customer.IsUnlimitedCredit, "a new partner has a limited credit by default");
+    db.PartnerDeliveryAddresses.AddRange(
+        new PartnerDeliveryAddress { PartnerId = customer.Id, RecipientName = "Warehouse A", Address = "1 Main St", IsDefault = true },
+        new PartnerDeliveryAddress { PartnerId = customer.Id, RecipientName = "Warehouse B", Address = "2 Side St" });
+    await db.SaveChangesAsync();
+    Check(await db.PartnerDeliveryAddresses.CountAsync(a => a.PartnerId == customer.Id) == 2, "a partner can keep several delivery addresses");
+    var secondDefault = false;
+    try
+    {
+        await using var other = Db(user);
+        other.PartnerDeliveryAddresses.Add(new PartnerDeliveryAddress { PartnerId = customer.Id, RecipientName = "Warehouse C", Address = "3 Other St", IsDefault = true });
+        await other.SaveChangesAsync();
+    }
+    catch (DbUpdateException) { secondDefault = true; }
+    Check(secondDefault, "a partner cannot have two live default delivery addresses");
     var dashboard = new DashboardService(db, new BranchService(db));
-    var empty = await dashboard.GetMetricsAsync();
+    var empty =await dashboard.GetMetricsAsync();
     Check(empty.TodaySales == 0 && empty.TodayInvoiceCount == 0 && empty.TotalInventoryValue == 0, "empty dashboard returns zero");
     await Receipts(db).CreateAsync(Receipt(10, 10), default);
     await Receipts(db).CreateAsync(Receipt(10, 30), default);
