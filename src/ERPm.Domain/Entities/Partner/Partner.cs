@@ -16,6 +16,7 @@ public class Partner : BaseAuditableEntity
     // Receivables/Payables (Required decimal(18, 4))
     public decimal CreditLimit { get; set; } = 0m;         // Maximum allowed credit limit
     public decimal DebtBalance { get; set; } = 0m;         // Current debt balance (positive: receivable, negative: payable)
+    public bool IsUnlimitedCredit { get; set; }            // When true the credit limit is not enforced for this partner
 
     public int? PriceListId { get; set; }                  // Default selling price list of this customer
 
