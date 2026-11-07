@@ -17,9 +17,14 @@ namespace ERPm.Infrastructure.Services.Iam;
 /// </summary>
 public sealed class IamService(ApplicationDbContext context, IMemoryCache cache, ICurrentUser? currentUser = null) : IIamService
 {
-    private static long _version;
+    /// <summary>
+    /// Bumps the permission version held in the database, so every API instance drops the principals it cached and
+    /// rebuilds them from the new roles on its next request, without a restart.
+    /// </summary>
+    public void Invalidate() => context.Database.SqlQueryRaw<long>("SELECT nextval('erpm_permission_version') AS \"Value\"").ToList();
 
-    public void Invalidate() => Interlocked.Increment(ref _version);
+    private Task<long> CurrentVersionAsync(CancellationToken cancellationToken) => context.Database
+        .SqlQueryRaw<long>("SELECT COALESCE(pg_sequence_last_value('erpm_permission_version'::regclass), 0) AS \"Value\"").SingleAsync(cancellationToken);
 
     public async Task<IamPrincipal?> GetCurrentPrincipalAsync(CancellationToken cancellationToken = default)
     {
@@ -41,7 +46,7 @@ public sealed class IamService(ApplicationDbContext context, IMemoryCache cache,
             .Select(u => new { u.Id, u.Role, u.IsSuperAdmin, u.SecurityStamp, u.BranchIds, u.InlinePolicy })
             .SingleOrDefaultAsync(cancellationToken)
             ?? throw new BusinessException("error.auth.expired", 401);
-        var key = $"iam:{user.Id}:{user.SecurityStamp}:{Interlocked.Read(ref _version)}:{DateOnly.FromDateTime(DateTime.UtcNow)}";
+        var key = $"iam:{user.Id}:{user.SecurityStamp}:{await CurrentVersionAsync(cancellationToken)}:{DateOnly.FromDateTime(DateTime.UtcNow)}";
         if (cache.TryGetValue(key, out IamPrincipal? cached)) return cached!;
 
         var position = await CurrentPositionAsync(user.Id, cancellationToken);

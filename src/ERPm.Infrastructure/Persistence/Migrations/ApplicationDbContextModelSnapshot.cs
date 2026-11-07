@@ -24,6 +24,8 @@ namespace ERPm.Infrastructure.Persistence.Migrations
 
             modelBuilder.HasSequence("erpm_document_number");
 
+            modelBuilder.HasSequence("erpm_permission_version");
+
             modelBuilder.Entity("ERPm.Domain.Entities.Accounting.Account", b =>
                 {
                     b.Property<int>("Id")

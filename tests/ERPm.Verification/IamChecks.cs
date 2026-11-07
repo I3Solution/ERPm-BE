@@ -143,6 +143,22 @@ static class IamChecks
         t.Check((await reader.IamRoles.AsNoTracking().SingleAsync(r => r.Id == concurrentRole.Id)).Name == "First edit", "stale role edit is refused and the first save is kept");
         await roles.SetUserAccessAsync(account.Id, new UserAccessPolicyDto());
 
+        // Two API instances with their own memory caches share the permission version in the database.
+        await using (var dbA = t.Db(null))
+        await using (var dbB = t.Db(null))
+        {
+            using var cacheA = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
+            using var cacheB = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
+            var instanceA = new IamService(dbA, cacheA);
+            var instanceB = new IamService(dbB, cacheB);
+            var cachedByA = await instanceA.GetPrincipalAsync(account.Id);
+            await new RoleService(dbB, instanceB).SetUserAccessAsync(account.Id, new UserAccessPolicyDto { InlinePolicy = SystemRoles.Policy(SystemRoles.Deny("NoOrdersOnB", ["sd:order:*"])) });
+            var seenByA = await instanceA.GetPrincipalAsync(account.Id);
+            t.Check(cachedByA.Can("sd:order:view") && !seenByA.Can("sd:order:view"), "a role change made on one instance applies at once on another instance with its own cache");
+            await new RoleService(dbB, instanceB).SetUserAccessAsync(account.Id, new UserAccessPolicyDto());
+            t.Check((await instanceA.GetPrincipalAsync(account.Id)).Can("sd:order:view"), "the next change is also seen by the other instance");
+        }
+
         // Atomic save: a statement of the batch fails (the user row is locked by another transaction) and nothing stays half written.
         await using (var holder = t.Db(null))
         {
