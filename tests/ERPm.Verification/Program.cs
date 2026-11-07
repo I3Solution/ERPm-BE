@@ -641,7 +641,7 @@ try
     var quoteOtherBranch = new AppUser { UserName = "QN_OTHER", DisplayName = "Viewer of another branch", Role = "Viewer" };
     var quoteNoRight = new AppUser { UserName = "QN_NORIGHT", DisplayName = "No quotation right", Role = "Viewer" };
     db.AppUsers.AddRange(quoteActor, quoteViewer, quoteBoss, quoteOwner, quoteStranger, quoteOtherBranch, quoteNoRight); await db.SaveChangesAsync();
-    IamPrincipal QuotePrincipal(string action, IamDataScope scope, string userKey = "nobody") => new([SystemRoles.Allow("Quote", [action], scope)], new OrgContext { CompanyId = 1, UserKey = userKey }, false);
+    IamPrincipal QuotePrincipal(string action, IamDataScope scope, string userKey = "nobody") => new([SystemRoles.Allow("Quote", [action], scope)], new OrgContext { CompanyId = 1, UserKey = userKey, Branches = new OrgTree([(branch.Id, (int?)null), (999999, (int?)null)]) }, false);
     var inBranch = new IamDataScope { Mode = DataScopeModes.CustomBranches, CustomBranchIds = [branch.Id] };
     var quoteIam = new IamStub(new()
     {
