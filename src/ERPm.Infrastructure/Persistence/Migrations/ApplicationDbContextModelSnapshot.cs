@@ -2541,6 +2541,10 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("request_id");
 
+                    b.Property<int?>("SalesOrderId")
+                        .HasColumnType("integer")
+                        .HasColumnName("sales_order_id");
+
                     b.Property<int>("Status")
                         .HasColumnType("integer")
                         .HasColumnName("status");
@@ -2608,6 +2612,11 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     b.HasIndex("RequestId")
                         .IsUnique()
                         .HasDatabaseName("ix_tbl_sale_invoice_request_id");
+
+                    b.HasIndex("SalesOrderId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_sale_invoice_sales_order_id")
+                        .HasFilter("sales_order_id IS NOT NULL");
 
                     b.HasIndex("StockIssueId")
                         .HasDatabaseName("ix_tbl_sale_invoice_stock_issue_id");
@@ -5109,6 +5118,12 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasForeignKey("JournalEntryId")
                         .OnDelete(DeleteBehavior.SetNull)
                         .HasConstraintName("fk_tbl_sale_invoice_journal_entries_journal_entry_id");
+
+                    b.HasOne("ERPm.Domain.Entities.Sales.SalesOrder", null)
+                        .WithMany()
+                        .HasForeignKey("SalesOrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_sale_invoice_sales_orders_sales_order_id");
 
                     b.HasOne("ERPm.Domain.Entities.Inventory.StockIssue", "StockIssue")
                         .WithMany()

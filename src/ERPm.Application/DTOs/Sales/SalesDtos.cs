@@ -28,6 +28,8 @@ public class SalesInvoiceItemRequest
 public class SalesInvoiceDto
 {
     public int Id { get; set; }
+    /// <summary>Order the invoice was raised from, if any.</summary>
+    public int? SalesOrderId { get; set; }
     public string InvoiceNumber { get; set; } = string.Empty;
     public DateTime InvoiceDate { get; set; }
     public int BranchId { get; set; }

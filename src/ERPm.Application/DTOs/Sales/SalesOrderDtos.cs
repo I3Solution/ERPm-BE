@@ -96,3 +96,12 @@ public class CancelOrderRequest
 {
     public string Reason { get; set; } = string.Empty;
 }
+
+public class CreateInvoiceFromOrderRequest
+{
+    public int WarehouseId { get; set; }
+    /// <summary>1 = Cash, 2 = BankTransfer, 3 = Debt.</summary>
+    public int PaymentMethod { get; set; }
+    public decimal TenderedAmount { get; set; }
+    public string? Notes { get; set; }
+}

@@ -3,6 +3,7 @@ using ERPm.API.Controllers.Base;
 using ERPm.Application.Common;
 using ERPm.Application.Common.Crud;
 using ERPm.Application.DTOs.Sales;
+using ERPm.Application.Features.Sales;
 using ERPm.Domain.Entities.Sales;
 using Microsoft.AspNetCore.Mvc;
 
@@ -18,9 +19,10 @@ public class SalesOrdersController : BaseCrudController<SalesOrder, SalesOrderDt
 {
     private readonly IOrderWorkflow<SalesOrderDto> _workflow;
     private readonly IOrderApproval<SalesOrderDto> _approval;
-    public SalesOrdersController(IBaseCrudService<SalesOrder, SalesOrderDto, CreateSalesOrderRequest, UpdateSalesOrderRequest> service, IOrderWorkflow<SalesOrderDto> workflow, IOrderApproval<SalesOrderDto> approval)
+    private readonly ISalesInvoiceService _invoicing;
+    public SalesOrdersController(IBaseCrudService<SalesOrder, SalesOrderDto, CreateSalesOrderRequest, UpdateSalesOrderRequest> service, IOrderWorkflow<SalesOrderDto> workflow, IOrderApproval<SalesOrderDto> approval, ISalesInvoiceService invoicing)
         : base(service)
-    { _workflow = workflow; _approval = approval; }
+    { _workflow = workflow; _approval = approval; _invoicing = invoicing; }
 
     /// <summary>
     /// Custom domain action: Confirms a sales order by its internal integer ID.
@@ -49,5 +51,14 @@ public class SalesOrdersController : BaseCrudController<SalesOrder, SalesOrderDt
     public async Task<ActionResult<ApiResponse<SalesOrderDto>>> Cancel(int id, [FromBody] CancelOrderRequest request, CancellationToken cancellationToken)
     {
         return Ok(ApiResponse<SalesOrderDto>.Ok(await _approval.CancelAsync(id, request.Reason, cancellationToken), "common.saved"));
+    }
+    /// <summary>
+    /// Invoices a confirmed order: releases its held stock, issues the goods and posts the invoice at the order prices.
+    /// </summary>
+    [RequirePermission("sd:invoice:create")]
+    [HttpPost("{id:int}/create-invoice")]
+    public async Task<ActionResult<ApiResponse<SalesInvoiceDto>>> CreateInvoice(int id, [FromBody] CreateInvoiceFromOrderRequest request, CancellationToken cancellationToken)
+    {
+        return Ok(ApiResponse<SalesInvoiceDto>.Ok(await _invoicing.CreateInvoiceFromOrderAsync(id, request, cancellationToken), "common.saved"));
     }
 }

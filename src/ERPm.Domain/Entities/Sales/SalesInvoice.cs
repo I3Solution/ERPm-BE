@@ -17,6 +17,7 @@ public enum PaymentMethod
 public class SalesInvoice : BaseAuditableEntity
 {
     public Guid? RequestId { get; set; }
+    public int? SalesOrderId { get; set; }                 // Order this invoice was raised from, if any
     public string? RequestHash { get; set; }
     public decimal TenderedAmount { get; set; }
     public decimal ChangeAmount { get; set; }
