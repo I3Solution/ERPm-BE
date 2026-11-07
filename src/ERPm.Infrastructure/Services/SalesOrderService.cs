@@ -1,3 +1,4 @@
+using ERPm.Application.Common;
 using ERPm.Application.Common.Crud;
 using ERPm.Application.DTOs.Sales;
 using ERPm.Domain.Entities.Catalog;
@@ -17,8 +18,8 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
     private const decimal CreditWarningRatio = 0.8m;
     private static readonly string[] CommittedStatuses = [SalesOrderStatus.Confirmed, SalesOrderStatus.Processing];
 
-    protected override IQueryable<SalesOrder> PrepareQuery(IQueryable<SalesOrder> query) => query.Include(o => o.Items).Include(o => o.Branch).Include(o => o.Salesperson).Include(o => o.Quotation);
-    protected override Task<SalesOrder?> FindEntityAsync(int id, CancellationToken ct) => Context.Set<SalesOrder>().Include(o => o.Items).Include(o => o.Branch).Include(o => o.Salesperson).Include(o => o.Quotation).SingleOrDefaultAsync(o => o.Id == id, ct);
+    protected override IQueryable<SalesOrder> PrepareQuery(IQueryable<SalesOrder> query) => query.Include(o => o.Items).Include(o => o.Salesperson).Include(o => o.Quotation);
+    protected override Task<SalesOrder?> FindEntityAsync(int id, CancellationToken ct) => Context.Set<SalesOrder>().Include(o => o.Items).Include(o => o.Salesperson).Include(o => o.Quotation).SingleOrDefaultAsync(o => o.Id == id, ct);
     protected override IQueryable<SalesOrder> ApplyFilters(IQueryable<SalesOrder> query, BaseFilterQuery filter)
     {
         query = base.ApplyFilters(query, filter);
@@ -27,7 +28,7 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
     }
     protected override SalesOrderDto MapToDto(SalesOrder o) => new()
     {
-        Id = o.Id, OrderNumber = o.OrderNumber, OrderDate = o.OrderDate, BranchId = o.BranchId, BranchName = o.Branch?.Name, DepartmentId = o.DepartmentId,
+        Id = o.Id, OrderNumber = o.OrderNumber, OrderDate = o.OrderDate, BranchId = o.BranchId, DepartmentId = o.DepartmentId,
         CustomerId = o.CustomerId, CustomerName = o.CustomerName,
         SubTotal = o.SubTotal, DiscountAmount = o.DiscountAmount, TaxAmount = o.TaxAmount, TotalAmount = o.TotalAmount, PaidAmount = o.PaidAmount,
         Status = o.Status, CreditCheckStatus = o.CreditCheckStatus, ReservationStatus = o.ReservationStatus, Notes = o.Notes,
@@ -39,6 +40,24 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
             UnitPrice = i.UnitPrice, DiscountAmount = i.DiscountAmount, LineTotal = i.LineTotal, InvoicedQuantity = i.InvoicedQuantity
         }).ToList()
     };
+    // The branch name is looked up apart: see BranchNames.
+    public override async Task<PagedResult<SalesOrderDto>> GetPagedAsync(BaseFilterQuery query, CancellationToken ct = default)
+    {
+        var page = await base.GetPagedAsync(query, ct);
+        await NameBranchesAsync(page.Items, ct);
+        return page;
+    }
+    public override async Task<SalesOrderDto?> GetByIdAsync(int id, CancellationToken ct = default)
+    {
+        var dto = await base.GetByIdAsync(id, ct);
+        return dto == null ? null : await NamedAsync(dto, ct);
+    }
+    private async Task<SalesOrderDto> NamedAsync(SalesOrderDto dto, CancellationToken ct) { await NameBranchesAsync([dto], ct); return dto; }
+    private async Task NameBranchesAsync(IEnumerable<SalesOrderDto> dtos, CancellationToken ct)
+    {
+        var names = await BranchNames.ForAsync(Context, dtos.Select(d => d.BranchId), ct);
+        foreach (var dto in dtos) dto.BranchName = names.GetValueOrDefault(dto.BranchId);
+    }
     protected override SalesOrder MapToEntity(CreateSalesOrderRequest request) => new();
     protected override async Task BeforeCreateAsync(SalesOrder entity, CreateSalesOrderRequest request, CancellationToken ct)
     {
@@ -106,7 +125,7 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
                 publish = OrderEvent("SD_ORDER_NEW", ERPm.Domain.Enums.NotificationSeverity.INFO, entity, null);
             }
             await Context.SaveChangesAsync(ct);
-            return MapToDto(entity);
+            return await NamedAsync(MapToDto(entity), ct);
         }, ct);
         Publish(publish);
         return dto;
@@ -129,7 +148,7 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
             entity.Status = SalesOrderStatus.Confirmed;
             publish = OrderEvent("SD_ORDER_CREDIT_APPROVED", ERPm.Domain.Enums.NotificationSeverity.INFO, entity, reason.Trim());
             await Context.SaveChangesAsync(ct);
-            return MapToDto(entity);
+            return await NamedAsync(MapToDto(entity), ct);
         }, ct);
         Publish(publish);
         return dto;
@@ -152,7 +171,7 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
             entity.CancelReason = reason.Trim();
             publish = OrderEvent("SD_ORDER_CANCELLED", ERPm.Domain.Enums.NotificationSeverity.WARNING, entity, reason.Trim());
             await Context.SaveChangesAsync(ct);
-            return MapToDto(entity);
+            return await NamedAsync(MapToDto(entity), ct);
         }, ct);
         Publish(publish);
         return dto;
@@ -254,7 +273,8 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
 
     private async Task PrepareAsync(SalesOrder entity, CreateSalesOrderRequest request, CancellationToken ct)
     {
-        Require(request.Items is { Count: > 0 and <= 200 } && await Context.Branches.AnyAsync(b => b.Id == request.BranchId && b.IsActive, ct), "error.validation.request");
+        // A seller limited to their own records has no branch in their data scope, so the branch is checked outside it.
+        Require(request.Items is { Count: > 0 and <= 200 } && await Context.Branches.IgnoreQueryFilters().AnyAsync(b => !b.IsDeleted && b.Id == request.BranchId && b.IsActive, ct), "error.validation.request");
         Require(request.PaidAmount == 0, "error.validation.request");
         ValidateNumber(request.DiscountAmount); ValidateNumber(request.TaxAmount);
         Require(request.SalespersonId == null || await Context.Employees.AnyAsync(e => e.Id == request.SalespersonId && e.IsActive, ct), "error.validation.reference");

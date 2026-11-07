@@ -418,6 +418,17 @@ try
         Check(none.TotalRevenue == 0 && none.TotalOrders == 0 && noFunnel.OrderCount == 0 && noFunnel.QuotationCount == 0 && noFunnel.InvoiceCount == 0 && (await hidden.GetSalespersonKpiAsync(allTime)).Count == 0, "analytics only count records inside the caller's data scope");
     }
     Check(PermissionCatalog.Contains("sd:report:view"), "the report permission is in the catalog");
+    // F5: a SELF-scope seller can raise their own quotation and order although no branch is in their scope.
+    await using (var selfDb = Db(new SelfUser()))
+    {
+        var selfQuote = await new SalesQuotationService(selfDb, new PostingTransaction(selfDb)).CreateAsync(QuoteRequest());
+        var selfOrder = await new SalesOrderService(selfDb, new PostingTransaction(selfDb)).CreateAsync(new CreateSalesOrderRequest { BranchId = branch.Id, CustomerId = rich.Id, Items = [new() { ItemId = rsv.Id, Quantity = 1, UnitPrice = 100 }] });
+        Check(selfQuote.Id > 0 && selfOrder.Id > 0 && selfOrder.BranchName == branch.Name && selfQuote.BranchName == branch.Name, "a seller limited to their own records can create a quotation and an order");
+        Check(await db.SalesOrders.AsNoTracking().AnyAsync(o => o.Id == selfOrder.Id && o.CreatedBy == "seller"), "the seller's order is stored with its author");
+        var mine = await new SalesOrderService(selfDb, new PostingTransaction(selfDb)).GetPagedAsync(new BaseFilterQuery());
+        var myQuotes = await new SalesQuotationService(selfDb, new PostingTransaction(selfDb)).GetPagedAsync(new BaseFilterQuery());
+        Check(mine.TotalCount == 1 && mine.Items.Single().Id == selfOrder.Id && myQuotes.TotalCount == 1 && myQuotes.Items.Single().Id == selfQuote.Id, "a seller limited to their own records lists exactly their own orders and quotations");
+    }
     await using var denied = Db(new TestUser(false, [999999]));
     Check(!await denied.SalesInvoices.AnyAsync() && !await denied.StockBalances.AnyAsync(), "server filters inaccessible branches");
     db.ChangeTracker.Clear(); var immutable = await db.SalesInvoices.FirstAsync(); immutable.TotalAmount = 1;
@@ -622,6 +633,15 @@ try
 }
 catch { Console.Error.WriteLine($"Verification failed; isolated database retained: {testName}"); throw; }
 
+/// <summary>A seller who only sees the records they created (SELF scope): no branch, own records on.</summary>
+sealed class SelfUser : ICurrentUser
+{
+    public string? UserId => "seller";
+    public bool IsSystem => false;
+    public bool IsAdmin => false;
+    public int[] BranchIds => [];
+    public bool IncludeOwnRecords => true;
+}
 sealed class TestUser(bool admin = true, int[]? branches = null) : ICurrentUser
 {
     public string? UserId => "verification";
