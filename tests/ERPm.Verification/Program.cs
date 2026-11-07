@@ -672,6 +672,44 @@ try
     await talking.RejectAsync(turnedDown.Id);
     Check(Told("SD_QUOTATION_REJECTED").SequenceEqual(Expected()) && recorder.Events.OfType<ERPm.Domain.Events.NotificationEvent>().First(e => e.TemplateCode == "SD_QUOTATION_REJECTED").Severity == "WARNING", "a rejected quotation raises a warning for the same people");
     Check(!Told("SD_QUOTATION_ACCEPTED").Contains(quoteActor.Id) && !Told("SD_QUOTATION_REJECTED").Contains(quoteNoRight.Id), "the actor is left out of the recipients of their own change");
+
+    // Order and return notices reach the same kind of people: viewers whose scope reaches the document, never the actor.
+    IamPrincipal DocPrincipal(IamDataScope scope, string userKey, params string[] actions) => new([SystemRoles.Allow("Doc", actions, scope)], new OrgContext { CompanyId = 1, UserKey = userKey, Branches = new OrgTree([(branch.Id, (int?)null), (999999, (int?)null)]) }, false);
+    string[] docRights = ["sd:order:view", "sd:return:view"];
+    var docIam = new IamStub(new()
+    {
+        [quoteActor.Id] = DocPrincipal(inBranch, "nobody", docRights),
+        [quoteViewer.Id] = DocPrincipal(inBranch, "nobody", docRights),
+        [quoteBoss.Id] = DocPrincipal(new IamDataScope { Mode = DataScopeModes.Group }, "nobody", docRights),
+        [quoteOwner.Id] = DocPrincipal(new IamDataScope { Mode = DataScopeModes.Self }, "verification", docRights),
+        [quoteStranger.Id] = DocPrincipal(new IamDataScope { Mode = DataScopeModes.Self }, "someone-else", docRights),
+        [quoteOtherBranch.Id] = DocPrincipal(new IamDataScope { Mode = DataScopeModes.CustomBranches, CustomBranchIds = [999999] }, "nobody", docRights),
+        [quoteNoRight.Id] = DocPrincipal(inBranch, "nobody", "sd:quotation:view"),
+    });
+    var docEngine = new RecordingEngine();
+    int?[] DocTold(string template) => docEngine.Events.OfType<ERPm.Domain.Events.NotificationEvent>().Where(e => e.TemplateCode == template).Select(e => e.TargetId).OrderBy(id => id).ToArray();
+    var docOrders = new SalesOrderService(db, new PostingTransaction(db), docEngine, docIam, new ActorUser(quoteActor.Id));
+    var noticeOrder = await docOrders.CreateAsync(new CreateSalesOrderRequest { BranchId = branch.Id, CustomerId = rich.Id, Items = [new() { ItemId = creditItem.Id, Quantity = 1, UnitPrice = 100 }] });
+    Check(docEngine.Events.Count == 0, "saving a draft order notifies nobody");
+    await docOrders.ConfirmAsync(noticeOrder.Id, default);
+    Check(DocTold("SD_ORDER_NEW").SequenceEqual(Expected()) && docEngine.Events.OfType<ERPm.Domain.Events.NotificationEvent>().All(e => e.TargetType == "USER" && e.BranchId == branch.Id),
+        "a confirmed order notifies viewers in a scope reaching it (branch, unrestricted, the seller who owns it), not the actor, other branches or people without the right");
+    await docOrders.CancelAsync(noticeOrder.Id, "notice test", default);
+    Check(DocTold("SD_ORDER_CANCELLED").SequenceEqual(Expected()), "a cancelled order tells the same people");
+    var heldNotice = await docOrders.ConfirmAsync((await docOrders.CreateAsync(new CreateSalesOrderRequest { BranchId = branch.Id, CustomerId = poor.Id, Items = [new() { ItemId = creditItem.Id, Quantity = 1, UnitPrice = 100 }] })).Id, default);
+    Check(heldNotice.Status == "PendingApproval" && DocTold("SD_ORDER_CREDIT_PENDING").SequenceEqual(Expected()), "an order waiting for credit approval tells the same people");
+    await docOrders.ApproveCreditAsync(heldNotice.Id, "notice test", default);
+    Check(DocTold("SD_ORDER_CREDIT_APPROVED").SequenceEqual(Expected()), "an approved credit tells the same people");
+    var docReturns = new SalesReturnService(db, new PostingTransaction(db), docEngine, docIam, new ActorUser(quoteActor.Id));
+    await docReturns.CreateAsync(ReturnOf(1, RefundMethod.Cash, price: 10));
+    Check(DocTold("SD_RETURN_POSTED").SequenceEqual(Expected()), "a posted return notifies viewers of returns in a scope reaching it, not the actor");
+    (await db.Accounts.SingleAsync(a => a.Code == "511")).IsActive = true; await db.SaveChangesAsync();   // earlier checks switched revenue off
+    var invoicer = new SalesInvoiceService(db, new BranchService(db), new PostingTransaction(db), new TestUser(false, [branch.Id]), docEngine, docIam);
+    var toInvoice = await docOrders.ConfirmAsync((await docOrders.CreateAsync(new CreateSalesOrderRequest { BranchId = branch.Id, CustomerId = rich.Id, Items = [new() { ItemId = creditItem.Id, Quantity = 1, UnitPrice = 100 }] })).Id, default);
+    await invoicer.CreateInvoiceFromOrderAsync(toInvoice.Id, FromOrder(PaymentMethod.Cash, 100));
+    (await db.Accounts.SingleAsync(a => a.Code == "511")).IsActive = false; await db.SaveChangesAsync();   // restore the state the next checks expect
+    Check(DocTold("SD_ORDER_INVOICED").SequenceEqual(Expected()), "an order turned into an invoice tells viewers of the order, not the person who invoiced it");
+    Check(docEngine.Events.OfType<ERPm.Domain.Events.NotificationEvent>().All(e => e.TargetId != quoteActor.Id && e.TargetId != quoteNoRight.Id && e.TargetId != quoteOtherBranch.Id && e.TargetId != quoteStranger.Id), "nobody outside the right scope or the actor received any order or return notice");
     await using var denied = Db(new TestUser(false, [999999]));
     Check(!await denied.SalesInvoices.AnyAsync() && !await denied.StockBalances.AnyAsync(), "server filters inaccessible branches");
     db.ChangeTracker.Clear(); var immutable = await db.SalesInvoices.FirstAsync(); immutable.TotalAmount = 1;

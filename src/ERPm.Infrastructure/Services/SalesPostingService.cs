@@ -15,7 +15,8 @@ using static ERPm.Infrastructure.Services.Common.PostingTransaction;
 
 namespace ERPm.Infrastructure.Services;
 
-public partial class SalesInvoiceService(ApplicationDbContext context, IBranchService branches, PostingTransaction posting, ICurrentUser? user = null, ERPm.Application.Common.Notifications.INotificationEngine? notificationEngine = null) : ISalesInvoiceService
+public partial class SalesInvoiceService(ApplicationDbContext context, IBranchService branches, PostingTransaction posting, ICurrentUser? user = null, ERPm.Application.Common.Notifications.INotificationEngine? notificationEngine = null,
+    ERPm.Application.Features.System.IIamService? iam = null) : ISalesInvoiceService
 {
     public async Task<List<SalesInvoiceDto>> GetInvoicesAsync(int? branchId = null, CancellationToken cancellationToken = default)
     {

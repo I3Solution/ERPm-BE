@@ -12,7 +12,8 @@ using ERPm.Infrastructure.Services.Common;
 using Microsoft.EntityFrameworkCore;
 using static ERPm.Infrastructure.Services.Common.PostingTransaction;
 namespace ERPm.Infrastructure.Services;
-public sealed class SalesOrderService(ApplicationDbContext context, PostingTransaction posting, ERPm.Application.Common.Notifications.INotificationEngine? notificationEngine = null)
+public sealed class SalesOrderService(ApplicationDbContext context, PostingTransaction posting, ERPm.Application.Common.Notifications.INotificationEngine? notificationEngine = null,
+    ERPm.Application.Features.System.IIamService? iam = null, ERPm.Application.Common.Interfaces.ICurrentUser? currentUser = null)
     : BaseCrudService<SalesOrder, SalesOrderDto, CreateSalesOrderRequest, UpdateSalesOrderRequest>(context), IOrderWorkflow<SalesOrderDto>, IOrderApproval<SalesOrderDto>
 {
     private OrderStockReservations Reservations => new(Context, posting);
@@ -106,7 +107,7 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
     /// </summary>
     public async Task<SalesOrderDto> ConfirmAsync(int id, CancellationToken ct)
     {
-        ERPm.Domain.Events.NotificationEvent? publish = null;
+        DocumentNotice? publish = null;
         var dto = await posting.RunAsync(async () =>
         {
             await posting.LockAsync($"order:Sales:{id}", ct);
@@ -129,14 +130,14 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
             await Context.SaveChangesAsync(ct);
             return await NamedAsync(MapToDto(entity), ct);
         }, ct);
-        Publish(publish);
+        await PublishAsync(publish, ct);
         return dto;
     }
 
     public async Task<SalesOrderDto> ApproveCreditAsync(int id, string reason, CancellationToken ct)
     {
         Require(!string.IsNullOrWhiteSpace(reason) && reason.Trim().Length <= 500, "error.validation.request");
-        ERPm.Domain.Events.NotificationEvent? publish = null;
+        DocumentNotice? publish = null;
         var dto = await posting.RunAsync(async () =>
         {
             await posting.LockAsync($"order:Sales:{id}", ct);
@@ -152,14 +153,14 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
             await Context.SaveChangesAsync(ct);
             return await NamedAsync(MapToDto(entity), ct);
         }, ct);
-        Publish(publish);
+        await PublishAsync(publish, ct);
         return dto;
     }
 
     public async Task<SalesOrderDto> CancelAsync(int id, string reason, CancellationToken ct)
     {
         Require(!string.IsNullOrWhiteSpace(reason) && reason.Trim().Length <= 500, "error.validation.request");
-        ERPm.Domain.Events.NotificationEvent? publish = null;
+        DocumentNotice? publish = null;
         var dto = await posting.RunAsync(async () =>
         {
             await posting.LockAsync($"order:Sales:{id}", ct);
@@ -175,7 +176,7 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
             await Context.SaveChangesAsync(ct);
             return await NamedAsync(MapToDto(entity), ct);
         }, ct);
-        Publish(publish);
+        await PublishAsync(publish, ct);
         return dto;
     }
 
@@ -200,26 +201,19 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
         };
     }
 
-    private static ERPm.Domain.Events.NotificationEvent OrderEvent(string template, string severity, SalesOrder order, string? reason) => new(
-        template,
-        ERPm.Domain.Enums.NotificationCategory.SD,
-        severity,
-        ERPm.Domain.Enums.NotificationTargetType.BranchTree,
-        branchId: order.BranchId,
-        parameters: new Dictionary<string, object>
+    private static DocumentNotice OrderEvent(string template, string severity, SalesOrder order, string? reason) => new(
+        template, ERPm.Domain.Enums.NotificationCategory.SD, severity, "sd:order:view", order.BranchId, order.DepartmentId, order.CreatedBy,
+        new Dictionary<string, object>
         {
             ["order_code"] = order.OrderNumber,
             ["customer_name"] = order.CustomerName,
             ["total_amount"] = order.TotalAmount,
             ["reason"] = reason ?? string.Empty
-        },
-        actionUrl: "/sales/pos");
+        }, "/sales/pos");
 
-    // Sent after the transaction committed so a rolled back change never notifies anybody.
-    private void Publish(ERPm.Domain.Events.NotificationEvent? notification)
-    {
-        if (notificationEngine != null && notification != null) _ = notificationEngine.PublishAsync(notification);
-    }
+    // Sent after the transaction committed; only accounts that may view orders in a scope reaching this one are told,
+    // never the person who made the change.
+    private Task PublishAsync(DocumentNotice? notice, CancellationToken ct) => PermissionRecipients.PublishAsync(Context, iam, notificationEngine, currentUser, notice, ct);
 
     /// <summary>
     /// Takes a copy of the chosen address of the customer. Without a choice the copy is cleared, so an order never shows
