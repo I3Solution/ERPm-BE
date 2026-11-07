@@ -11,7 +11,8 @@ using static ERPm.Infrastructure.Services.Common.PostingTransaction;
 namespace ERPm.Infrastructure.Services;
 
 /// <summary>Sales quotation CRUD, status changes and the one-click conversion into a Draft sales order.</summary>
-public sealed class SalesQuotationService(ApplicationDbContext context, PostingTransaction posting, ERPm.Application.Common.Notifications.INotificationEngine? notificationEngine = null)
+public sealed class SalesQuotationService(ApplicationDbContext context, PostingTransaction posting, ERPm.Application.Common.Notifications.INotificationEngine? notificationEngine = null,
+    ERPm.Application.Features.System.IIamService? iam = null, ERPm.Application.Common.Interfaces.ICurrentUser? currentUser = null)
     : BaseCrudService<SalesQuotation, SalesQuotationDetailDto, CreateSalesQuotationRequest, UpdateSalesQuotationRequest>(context), IQuotationWorkflow
 {
     private const int MaxLines = 200;
@@ -155,7 +156,7 @@ public sealed class SalesQuotationService(ApplicationDbContext context, PostingT
 
     public async Task<ConvertQuotationResponse> ConvertToOrderAsync(int id, CancellationToken ct = default)
     {
-        ERPm.Domain.Events.NotificationEvent? publish = null;
+        QuotationNotice? publish = null;
         var result = await posting.RunAsync(async () =>
     {
         await posting.LockAsync($"quotation:{id}", ct);
@@ -205,13 +206,13 @@ public sealed class SalesQuotationService(ApplicationDbContext context, PostingT
         publish = QuotationEvent("SD_QUOTATION_CONVERTED", ERPm.Domain.Enums.NotificationSeverity.INFO, quotation, order.OrderNumber);
         return new ConvertQuotationResponse { QuotationId = quotation.Id, SalesOrderId = order.Id, OrderNumber = order.OrderNumber };
     }, ct);
-        Publish(publish);
+        await PublishAsync(publish, ct);
         return result;
     }
 
     private async Task<SalesQuotationDetailDto> ChangeStatusAsync(int id, string[] from, string to, CancellationToken ct)
     {
-        ERPm.Domain.Events.NotificationEvent? publish = null;
+        QuotationNotice? publish = null;
         var dto = await posting.RunAsync(async () =>
     {
         await posting.LockAsync($"quotation:{id}", ct);
@@ -226,29 +227,38 @@ public sealed class SalesQuotationService(ApplicationDbContext context, PostingT
         if (to == QuotationStatus.Rejected) publish = QuotationEvent("SD_QUOTATION_REJECTED", ERPm.Domain.Enums.NotificationSeverity.WARNING, quotation, null);
         return await NamedAsync(MapToDto(quotation), ct);
     }, ct);
-        Publish(publish);
+        await PublishAsync(publish, ct);
         return dto;
     }
 
-    private static ERPm.Domain.Events.NotificationEvent QuotationEvent(string template, string severity, SalesQuotation quotation, string? orderCode) => new(
-        template,
-        ERPm.Domain.Enums.NotificationCategory.SD,
-        severity,
-        ERPm.Domain.Enums.NotificationTargetType.BranchTree,
-        branchId: quotation.BranchId,
-        parameters: new Dictionary<string, object>
+    /// <summary>What to announce, captured inside the transaction; the people to tell are looked up after it commits.</summary>
+    private sealed record QuotationNotice(string Template, string Severity, int BranchId, int? DepartmentId, string? CreatedBy, Dictionary<string, object> Parameters);
+
+    private static QuotationNotice QuotationEvent(string template, string severity, SalesQuotation quotation, string? orderCode) => new(
+        template, severity, quotation.BranchId, quotation.DepartmentId, quotation.CreatedBy,
+        new Dictionary<string, object>
         {
             ["quotation_code"] = quotation.QuotationNumber,
             ["customer_name"] = quotation.CustomerName,
             ["total_amount"] = quotation.TotalAmount,
             ["order_code"] = orderCode ?? string.Empty
-        },
-        actionUrl: "/sales/quotations");
+        });
 
-    // Sent after the transaction committed so a rolled back change never notifies anybody.
-    private void Publish(ERPm.Domain.Events.NotificationEvent? notification)
+    // Sent after the transaction committed so a rolled back change never notifies anybody. Only accounts that may view
+    // quotations within a scope that reaches this one are told, and never the person who made the change.
+    private async Task PublishAsync(QuotationNotice? notice, CancellationToken ct)
     {
-        if (notificationEngine != null && notification != null) _ = notificationEngine.PublishAsync(notification);
+        if (notificationEngine == null || notice == null) return;
+        var recipients = new List<int>();
+        if (iam != null)
+        {
+            int.TryParse(currentUser?.UserId, out var actorId);
+            recipients = await new PermissionRecipients(Context, iam).ForDocumentAsync("sd:quotation:view", notice.BranchId, notice.DepartmentId, notice.CreatedBy, actorId == 0 ? null : actorId, ct);
+        }
+        foreach (var userId in recipients)
+            _ = notificationEngine.PublishAsync(new ERPm.Domain.Events.NotificationEvent(
+                notice.Template, ERPm.Domain.Enums.NotificationCategory.SD, notice.Severity, ERPm.Domain.Enums.NotificationTargetType.User,
+                targetId: userId, branchId: notice.BranchId, parameters: notice.Parameters, actionUrl: "/sales/quotations"));
     }
 
     private static string EffectiveStatus(SalesQuotation q) =>

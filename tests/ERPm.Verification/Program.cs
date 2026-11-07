@@ -632,21 +632,46 @@ try
     Check((await InvStock()).QuantityReserved == heldBefore && (await orders.GetByIdAsync(retail.Id))!.Status == "Confirmed", "a refused invoice leaves the order Confirmed with its stock still held");
     (await db.Accounts.SingleAsync(a => a.Code == "511")).IsActive = false; await db.SaveChangesAsync();   // restore the state the next checks expect
     // Quotation notifications follow the customer's answer and the conversion, and only for changes that were saved.
+    // Who hears about it: accounts that may view quotations within a scope reaching this one, never the person acting.
+    var quoteActor = new AppUser { UserName = "QN_ACTOR", DisplayName = "Actor", Role = "Viewer" };
+    var quoteViewer = new AppUser { UserName = "QN_VIEWER", DisplayName = "Viewer in branch", Role = "Viewer" };
+    var quoteBoss = new AppUser { UserName = "QN_BOSS", DisplayName = "Unrestricted viewer", Role = "Viewer" };
+    var quoteOwner = new AppUser { UserName = "QN_OWNER", DisplayName = "Seller of the quotation", Role = "Viewer" };
+    var quoteStranger = new AppUser { UserName = "QN_STRANGER", DisplayName = "Seller of another record", Role = "Viewer" };
+    var quoteOtherBranch = new AppUser { UserName = "QN_OTHER", DisplayName = "Viewer of another branch", Role = "Viewer" };
+    var quoteNoRight = new AppUser { UserName = "QN_NORIGHT", DisplayName = "No quotation right", Role = "Viewer" };
+    db.AppUsers.AddRange(quoteActor, quoteViewer, quoteBoss, quoteOwner, quoteStranger, quoteOtherBranch, quoteNoRight); await db.SaveChangesAsync();
+    IamPrincipal QuotePrincipal(string action, IamDataScope scope, string userKey = "nobody") => new([SystemRoles.Allow("Quote", [action], scope)], new OrgContext { CompanyId = 1, UserKey = userKey }, false);
+    var inBranch = new IamDataScope { Mode = DataScopeModes.CustomBranches, CustomBranchIds = [branch.Id] };
+    var quoteIam = new IamStub(new()
+    {
+        [quoteActor.Id] = QuotePrincipal("sd:quotation:view", inBranch),
+        [quoteViewer.Id] = QuotePrincipal("sd:quotation:view", inBranch),
+        [quoteBoss.Id] = QuotePrincipal("sd:quotation:view", new IamDataScope { Mode = DataScopeModes.Group }),
+        [quoteOwner.Id] = QuotePrincipal("sd:quotation:view", new IamDataScope { Mode = DataScopeModes.Self }, userKey: "verification"),
+        [quoteStranger.Id] = QuotePrincipal("sd:quotation:view", new IamDataScope { Mode = DataScopeModes.Self }, userKey: "someone-else"),
+        [quoteOtherBranch.Id] = QuotePrincipal("sd:quotation:view", new IamDataScope { Mode = DataScopeModes.CustomBranches, CustomBranchIds = [999999] }),
+        [quoteNoRight.Id] = QuotePrincipal("sd:order:view", inBranch),
+    });
     var recorder = new RecordingEngine();
-    var talking = new SalesQuotationService(db, new PostingTransaction(db), recorder);
+    var talking = new SalesQuotationService(db, new PostingTransaction(db), recorder, quoteIam, new ActorUser(quoteActor.Id));
+    int?[] Told(string template) => recorder.Events.OfType<ERPm.Domain.Events.NotificationEvent>().Where(e => e.TemplateCode == template).Select(e => e.TargetId).OrderBy(id => id).ToArray();
+    int?[] Expected() => new int?[] { quoteViewer.Id, quoteBoss.Id, quoteOwner.Id }.OrderBy(id => id).ToArray();
     var announced = await talking.CreateAsync(QuoteRequest());
     await talking.SendAsync(announced.Id);
     Check(recorder.Events.Count == 0, "sending a quotation notifies nobody");
     await talking.AcceptAsync(announced.Id);
-    Check(recorder.Events.Count == 1 && recorder.Events[0].TemplateCode == "SD_QUOTATION_ACCEPTED" && recorder.Events[0].BranchId == branch.Id && recorder.Events[0].Parameters["quotation_code"].ToString() == announced.QuotationNumber,
-        "an accepted quotation notifies its branch");
+    var acceptedEvents = recorder.Events.OfType<ERPm.Domain.Events.NotificationEvent>().ToList();
+    Check(Told("SD_QUOTATION_ACCEPTED").SequenceEqual(Expected()) && acceptedEvents.All(e => e.TargetType == "USER" && e.BranchId == branch.Id && e.Parameters["quotation_code"].ToString() == announced.QuotationNumber),
+        "an accepted quotation notifies only accounts that may view it in a scope reaching it, not the actor, other branches or people without the right");
     var conversion = await talking.ConvertToOrderAsync(announced.Id);
-    Check(recorder.Events.Count == 2 && recorder.Events[1].TemplateCode == "SD_QUOTATION_CONVERTED" && recorder.Events[1].Parameters["order_code"].ToString() == conversion.OrderNumber, "a converted quotation notifies with the new order number");
+    Check(Told("SD_QUOTATION_CONVERTED").SequenceEqual(Expected()) && recorder.Events.OfType<ERPm.Domain.Events.NotificationEvent>().First(e => e.TemplateCode == "SD_QUOTATION_CONVERTED").Parameters["order_code"].ToString() == conversion.OrderNumber, "a converted quotation tells the same people with the new order number");
     await Reject(async () => await talking.ConvertToOrderAsync(announced.Id), "error.sd.quotation_already_converted");
     var turnedDown = await talking.CreateAsync(QuoteRequest());
     await talking.SendAsync(turnedDown.Id);
     await talking.RejectAsync(turnedDown.Id);
-    Check(recorder.Events.Count == 3 && recorder.Events[2].TemplateCode == "SD_QUOTATION_REJECTED" && recorder.Events[2].Severity == "WARNING", "a rejected quotation raises a warning");
+    Check(Told("SD_QUOTATION_REJECTED").SequenceEqual(Expected()) && recorder.Events.OfType<ERPm.Domain.Events.NotificationEvent>().First(e => e.TemplateCode == "SD_QUOTATION_REJECTED").Severity == "WARNING", "a rejected quotation raises a warning for the same people");
+    Check(!Told("SD_QUOTATION_ACCEPTED").Contains(quoteActor.Id) && !Told("SD_QUOTATION_REJECTED").Contains(quoteNoRight.Id), "the actor is left out of the recipients of their own change");
     await using var denied = Db(new TestUser(false, [999999]));
     Check(!await denied.SalesInvoices.AnyAsync() && !await denied.StockBalances.AnyAsync(), "server filters inaccessible branches");
     db.ChangeTracker.Clear(); var immutable = await db.SalesInvoices.FirstAsync(); immutable.TotalAmount = 1;
