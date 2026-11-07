@@ -84,8 +84,11 @@ public class PartnerService : IPartnerService
         return ToDto(partner);
     }
 
-    public async Task<PartnerDto> SetUnlimitedCreditAsync(int partnerId, bool isUnlimitedCredit, CancellationToken cancellationToken = default)
+    public async Task<PartnerDto> SetUnlimitedCreditAsync(int partnerId, bool? requested, CancellationToken cancellationToken = default)
     {
+        // Checked before anything is read or saved, so a malformed request changes nothing and notifies nobody.
+        Require(requested.HasValue, "error.crm.unlimited_credit_value_required");
+        var isUnlimitedCredit = requested!.Value;
         var partner = await _context.Partners.SingleOrDefaultAsync(p => p.Id == partnerId, cancellationToken);
         Require(partner != null, "error.crm.partner_not_found", 404);
         // Sending the value the partner already has changes nothing, so it needs no right and raises no notice.

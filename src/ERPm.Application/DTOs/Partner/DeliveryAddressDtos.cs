@@ -27,5 +27,6 @@ public class SaveDeliveryAddressRequest
 
 public class SetUnlimitedCreditRequest
 {
-    public bool IsUnlimitedCredit { get; set; }
+    /// <summary>Required: a body without it (or with a misspelled name) is rejected instead of being read as false.</summary>
+    public bool? IsUnlimitedCredit { get; set; }
 }
