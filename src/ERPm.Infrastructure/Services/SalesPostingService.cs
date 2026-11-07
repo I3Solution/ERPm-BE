@@ -7,6 +7,7 @@ using ERPm.Domain.Entities.Catalog;
 using ERPm.Domain.Entities.Inventory;
 using ERPm.Domain.Entities.Partner;
 using ERPm.Domain.Entities.Sales;
+using ERPm.Domain.Services.Sales;
 using ERPm.Infrastructure.Persistence;
 using ERPm.Infrastructure.Services.Common;
 using Microsoft.EntityFrameworkCore;
@@ -152,7 +153,7 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
             {
                 Require(customer != null, "error.sales.customer_required");
                 var receivables = await posting.ReceivablesAsync(customer!.Id, cancellationToken);
-                Require(customer!.CreditLimit >= receivables + invoice.RemainingDebt, "error.sales.credit_limit", 409);
+                Require(CreditLimitPolicy.Evaluate(customer!.IsUnlimitedCredit, customer.CreditLimit, receivables + invoice.RemainingDebt) != CreditLevel.Exceeded, "error.sales.credit_limit", 409);
                 customer.DebtBalance += invoice.RemainingDebt;
             }
             issue.TotalCostAmount = issue.Items.Sum(i => i.TotalCost);

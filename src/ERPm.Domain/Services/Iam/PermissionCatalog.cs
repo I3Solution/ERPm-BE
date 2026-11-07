@@ -17,6 +17,7 @@ public static class PermissionCatalog
     public const string Cancel = "cancel";
     public const string ApproveCredit = "approve_credit";
     public const string Broadcast = "broadcast";
+    public const string UnlimitedCredit = "unlimited-credit";
 
     private static readonly (string Resource, string[] Verbs)[] Resources =
     [
@@ -42,7 +43,7 @@ public static class PermissionCatalog
         ("sd:return", [View, Create]),
         ("sd:report", [View]),
         ("pur:order", [View, Create, Edit, Delete, Confirm]),
-        ("crm:partner", [View, Create]),
+        ("crm:partner", [View, Create, UnlimitedCredit]),
         ("dashboard:metrics", [View]),
     ];
 

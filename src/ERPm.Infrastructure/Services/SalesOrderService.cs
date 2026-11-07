@@ -6,6 +6,7 @@ using ERPm.Domain.Entities.Sales;
 using ERPm.Domain.Entities.Accounting;
 using ERPm.Domain.Entities.Inventory;
 using ERPm.Domain.Entities.Partner;
+using ERPm.Domain.Services.Sales;
 using ERPm.Infrastructure.Persistence;
 using ERPm.Infrastructure.Services.Common;
 using Microsoft.EntityFrameworkCore;
@@ -16,7 +17,6 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
 {
     private OrderStockReservations Reservations => new(Context, posting);
     // An order whose total reaches this share of the credit limit is flagged with a warning.
-    private const decimal CreditWarningRatio = 0.8m;
     private static readonly string[] CommittedStatuses = [SalesOrderStatus.Confirmed, SalesOrderStatus.Processing];
 
     protected override IQueryable<SalesOrder> PrepareQuery(IQueryable<SalesOrder> query) => query.Include(o => o.Items).Include(o => o.Salesperson).Include(o => o.Quotation);
@@ -186,13 +186,17 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
     {
         if (!order.CustomerId.HasValue) return CreditCheckStatus.Passed;
         await posting.LockAsync($"partner:{order.CustomerId}", ct);
-        var limit = await Context.Partners.Where(p => p.Id == order.CustomerId).Select(p => p.CreditLimit).SingleAsync(ct);
+        var credit = await Context.Partners.Where(p => p.Id == order.CustomerId).Select(p => new { p.CreditLimit, p.IsUnlimitedCredit }).SingleAsync(ct);
         var receivables = await posting.ReceivablesAsync(order.CustomerId.Value, ct);
         var committed = await Context.SalesOrders.IgnoreQueryFilters()
             .Where(o => !o.IsDeleted && o.CustomerId == order.CustomerId && o.Id != order.Id && CommittedStatuses.Contains(o.Status)).SumAsync(o => o.TotalAmount, ct);
         var exposure = receivables + committed + order.TotalAmount;
-        if (exposure > limit) return CreditCheckStatus.PendingApproval;
-        return exposure >= limit * CreditWarningRatio ? CreditCheckStatus.Warning : CreditCheckStatus.Passed;
+        return CreditLimitPolicy.Evaluate(credit.IsUnlimitedCredit, credit.CreditLimit, exposure) switch
+        {
+            CreditLevel.Exceeded => CreditCheckStatus.PendingApproval,
+            CreditLevel.Warning => CreditCheckStatus.Warning,
+            _ => CreditCheckStatus.Passed
+        };
     }
 
     private static ERPm.Domain.Events.NotificationEvent OrderEvent(string template, string severity, SalesOrder order, string? reason) => new(

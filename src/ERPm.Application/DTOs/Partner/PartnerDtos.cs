@@ -15,6 +15,7 @@ public class PartnerDto
     public decimal CreditLimit { get; set; }
     public decimal DebtBalance { get; set; }
     public int? PriceListId { get; set; }
+    public bool IsUnlimitedCredit { get; set; }
     public bool IsActive { get; set; }
 }
 
@@ -29,5 +30,6 @@ public class CreatePartnerRequest
     public string? TaxCode { get; set; }
     public decimal CreditLimit { get; set; } = 0m;
     public int? PriceListId { get; set; }
+    public bool IsUnlimitedCredit { get; set; }
     public string? Notes { get; set; }
 }
