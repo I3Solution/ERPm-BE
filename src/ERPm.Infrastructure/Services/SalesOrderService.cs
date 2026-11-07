@@ -14,6 +14,7 @@ namespace ERPm.Infrastructure.Services;
 public sealed class SalesOrderService(ApplicationDbContext context, PostingTransaction posting, ERPm.Application.Common.Notifications.INotificationEngine? notificationEngine = null)
     : BaseCrudService<SalesOrder, SalesOrderDto, CreateSalesOrderRequest, UpdateSalesOrderRequest>(context), IOrderWorkflow<SalesOrderDto>, IOrderApproval<SalesOrderDto>
 {
+    private OrderStockReservations Reservations => new(Context, posting);
     // An order whose total reaches this share of the credit limit is flagged with a warning.
     private const decimal CreditWarningRatio = 0.8m;
     private static readonly string[] CommittedStatuses = [SalesOrderStatus.Confirmed, SalesOrderStatus.Processing];
@@ -120,7 +121,7 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
             }
             else
             {
-                await ReserveAsync(entity, ct);
+                await Reservations.ReserveAsync(entity, ct);
                 entity.Status = SalesOrderStatus.Confirmed;
                 publish = OrderEvent("SD_ORDER_NEW", ERPm.Domain.Enums.NotificationSeverity.INFO, entity, null);
             }
@@ -142,7 +143,7 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
             Require(entity != null, "error.order.not_found", 404);
             Require(entity!.Status == SalesOrderStatus.PendingApproval, "error.sd.order_invalid_status_for_action", 409);
 
-            await ReserveAsync(entity, ct);
+            await Reservations.ReserveAsync(entity, ct);
             entity.CreditCheckStatus = CreditCheckStatus.Overridden;
             entity.CreditApprovalReason = reason.Trim();
             entity.Status = SalesOrderStatus.Confirmed;
@@ -166,7 +167,7 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
             Require(entity!.Items.All(i => i.InvoicedQuantity == 0), "error.sd.cannot_cancel_invoiced_order", 409);
             Require(entity.Status is SalesOrderStatus.Draft or SalesOrderStatus.PendingApproval or SalesOrderStatus.Confirmed, "error.sd.order_invalid_status_for_action", 409);
 
-            await ReleaseAsync(entity, ct);
+            await Reservations.ReleaseAsync(entity, ct);
             entity.Status = SalesOrderStatus.Cancelled;
             entity.CancelReason = reason.Trim();
             publish = OrderEvent("SD_ORDER_CANCELLED", ERPm.Domain.Enums.NotificationSeverity.WARNING, entity, reason.Trim());
@@ -192,62 +193,6 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
         var exposure = receivables + committed + order.TotalAmount;
         if (exposure > limit) return CreditCheckStatus.PendingApproval;
         return exposure >= limit * CreditWarningRatio ? CreditCheckStatus.Warning : CreditCheckStatus.Passed;
-    }
-
-    /// <summary>
-    /// Holds the goods of every line in the warehouses of the order's branch (largest available first).
-    /// All lines are reserved or none: a shortage rejects the whole request.
-    /// </summary>
-    private async Task ReserveAsync(SalesOrder order, CancellationToken ct)
-    {
-        var itemIds = order.Items.Select(i => i.ItemId).Distinct().Order().ToArray();
-        var goods = await Context.Items.Where(i => itemIds.Contains(i.Id) && i.ItemType == ItemType.Goods).Select(i => i.Id).ToListAsync(ct);
-        var lines = order.Items.Where(i => goods.Contains(i.ItemId)).ToList();
-        if (lines.Count == 0) { order.ReservationStatus = OrderReservationStatus.None; return; }
-
-        var warehouseIds = await Context.Warehouses.IgnoreQueryFilters().Where(w => !w.IsDeleted && w.IsActive && w.BranchId == order.BranchId).Select(w => w.Id).OrderBy(w => w).ToListAsync(ct);
-        var goodsIds = goods.Order().ToArray();
-        foreach (var warehouseId in warehouseIds)
-            foreach (var itemId in goodsIds) await posting.LockAsync($"stock:{warehouseId}:{itemId}", ct);
-
-        var balances = await Context.StockBalances.IgnoreQueryFilters()
-            .Where(b => !b.IsDeleted && warehouseIds.Contains(b.WarehouseId) && goodsIds.Contains(b.ItemId)).ToListAsync(ct);
-        foreach (var line in lines)
-        {
-            var need = line.Quantity;
-            foreach (var balance in balances.Where(b => b.ItemId == line.ItemId).OrderByDescending(b => b.QuantityOnHand - b.QuantityReserved).ThenBy(b => b.WarehouseId))
-            {
-                var take = Math.Min(need, balance.QuantityOnHand - balance.QuantityReserved);
-                if (take <= 0) continue;
-                balance.QuantityReserved += take;
-                Context.StockReservations.Add(new StockReservation { SalesOrderId = order.Id, SalesOrderItemId = line.Id, WarehouseId = balance.WarehouseId, ItemId = line.ItemId, Quantity = take });
-                need -= take;
-                if (need == 0) break;
-            }
-            Require(need == 0, "error.sd.insufficient_available_stock", 409);
-        }
-        order.ReservationStatus = OrderReservationStatus.Reserved;
-    }
-
-    /// <summary>Gives the order's active reservations back to the available stock.</summary>
-    private async Task ReleaseAsync(SalesOrder order, CancellationToken ct)
-    {
-        var active = await Context.StockReservations.Where(r => r.SalesOrderId == order.Id && r.Status == ReservationRecordStatus.Active).ToListAsync(ct);
-        if (active.Count == 0) return;
-        foreach (var key in active.Select(r => (r.WarehouseId, r.ItemId)).Distinct().Order())
-            await posting.LockAsync($"stock:{key.WarehouseId}:{key.ItemId}", ct);
-
-        var warehouseIds = active.Select(r => r.WarehouseId).Distinct().ToArray();
-        var itemIds = active.Select(r => r.ItemId).Distinct().ToArray();
-        var balances = await Context.StockBalances.IgnoreQueryFilters().Where(b => warehouseIds.Contains(b.WarehouseId) && itemIds.Contains(b.ItemId)).ToListAsync(ct);
-        foreach (var reservation in active)
-        {
-            var balance = balances.Single(b => b.WarehouseId == reservation.WarehouseId && b.ItemId == reservation.ItemId);
-            balance.QuantityReserved = Math.Max(0m, balance.QuantityReserved - reservation.Quantity);
-            reservation.Status = ReservationRecordStatus.Released;
-            reservation.ReleasedAtUtc = DateTime.UtcNow;
-        }
-        order.ReservationStatus = OrderReservationStatus.Released;
     }
 
     private static ERPm.Domain.Events.NotificationEvent OrderEvent(string template, string severity, SalesOrder order, string? reason) => new(

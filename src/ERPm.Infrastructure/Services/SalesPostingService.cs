@@ -50,7 +50,11 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
             ValidateNumber(line.DiscountPercent);
         }
         var hash = Hash(request);
-        return posting.RunAsync(async () =>
+        return posting.RunAsync(() => PostInvoiceAsync(request, hash, null, cancellationToken), cancellationToken);
+    }
+
+    /// <summary>Posts an invoice inside the caller's transaction. <paramref name="salesOrderId"/> marks an invoice raised from an order, whose agreed prices are kept.</summary>
+    private async Task<SalesInvoiceDto> PostInvoiceAsync(CreateSalesInvoiceRequest request, string hash, int? salesOrderId, CancellationToken cancellationToken)
         {
             await posting.LockAsync($"sale-request:{request.RequestId}", cancellationToken);
             var existing = await context.SalesInvoices.IgnoreQueryFilters().FirstOrDefaultAsync(i => i.RequestId == request.RequestId, cancellationToken);
@@ -78,7 +82,7 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
                 RequestId = request.RequestId, RequestHash = hash,
                 InvoiceNumber = await posting.NumberAsync("HD", cancellationToken), BranchId = warehouse!.BranchId, DepartmentId = request.DepartmentId,
                 WarehouseId = warehouse.Id, CustomerId = request.CustomerId, PaymentMethod = request.PaymentMethod,
-                CustomerName = request.CustomerName.Trim(), DiscountAmount = request.DiscountAmount, Notes = request.Notes, Status = VoucherStatus.Posted
+                CustomerName = request.CustomerName.Trim(), DiscountAmount = request.DiscountAmount, Notes = request.Notes, Status = VoucherStatus.Posted, SalesOrderId = salesOrderId
             };
             var issue = new StockIssue
             {
@@ -88,7 +92,8 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
             foreach (var line in request.Items)
             {
                 var item = items[line.ItemId];
-                Require(user == null || user.IsSystem || user.IsAdmin || line.UnitPrice == item.SalePrice, "error.sales.price_override", 403);
+                // An order carries the price agreed with the customer (price list, quotation), which may differ from the catalogue price.
+                Require(salesOrderId != null || user == null || user.IsSystem || user.IsAdmin || line.UnitPrice == item.SalePrice, "error.sales.price_override", 403);
                 var cost = item.ItemType == ItemType.Goods ? balances[item.Id].AverageCostPrice : 0m;
                 var costAmount = item.ItemType == ItemType.Goods ?
                     (balances[item.Id].QuantityOnHand == line.Quantity ? balances[item.Id].InventoryValue : Math.Min(balances[item.Id].InventoryValue, Round(line.Quantity * cost))) : 0m;
@@ -177,7 +182,6 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
             context.SalesInvoices.Add(invoice);
             await context.SaveChangesAsync(cancellationToken);
             return Map(await LoadAsync(invoice.Id, cancellationToken));
-        }, cancellationToken);
     }
 
     private Task<SalesInvoice> LoadAsync(int id, CancellationToken ct) => context.SalesInvoices
@@ -185,7 +189,7 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
 
     private static SalesInvoiceDto Map(SalesInvoice i) => new()
     {
-        Id = i.Id, InvoiceNumber = i.InvoiceNumber, InvoiceDate = i.InvoiceDate, BranchId = i.BranchId, DepartmentId = i.DepartmentId,
+        Id = i.Id, SalesOrderId = i.SalesOrderId, InvoiceNumber = i.InvoiceNumber, InvoiceDate = i.InvoiceDate, BranchId = i.BranchId, DepartmentId = i.DepartmentId,
         BranchCode = i.Branch?.Code, BranchName = i.Branch?.Name, CustomerName = i.CustomerName,
         PaymentMethodName = i.PaymentMethod switch { PaymentMethod.Cash => "sales.cash", PaymentMethod.BankTransfer => "sales.bank_transfer", _ => "sales.credit" },
         Status = i.Status.ToString(), SubTotal = i.SubTotal, DiscountAmount = i.DiscountAmount,

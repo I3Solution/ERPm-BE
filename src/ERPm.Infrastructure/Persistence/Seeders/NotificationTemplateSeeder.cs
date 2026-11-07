@@ -164,6 +164,30 @@ public static class NotificationTemplateSeeder
             },
             new()
             {
+                Code = "SD_ORDER_INVOICED",
+                Name = "Đơn hàng đã xuất hóa đơn",
+                Category = NotificationCategory.SD,
+                DefaultSeverity = NotificationSeverity.INFO,
+                SupportedChannels = [NotificationChannel.InApp, NotificationChannel.PushMobile],
+                TitleTemplate = "Đơn hàng {order_code} đã xuất hóa đơn",
+                BodyTemplate = "Đơn {order_code} đã xuất hóa đơn {invoice_code}, tổng tiền {total_amount} đ.",
+                ActionUrlPattern = "/sales/invoices",
+                Translations = new Dictionary<string, NotificationTemplateTranslation>
+                {
+                    ["vi"] = new()
+                    {
+                        Title = "Đơn hàng {order_code} đã xuất hóa đơn",
+                        Body = "Đơn {order_code} đã xuất hóa đơn {invoice_code}, tổng tiền {total_amount} đ."
+                    },
+                    ["en"] = new()
+                    {
+                        Title = "Order {order_code} invoiced",
+                        Body = "Order {order_code} was invoiced as {invoice_code}, total {total_amount}."
+                    }
+                }
+            },
+            new()
+            {
                 Code = "SD_INVOICE_CANCELLED",
                 Name = "Cảnh báo hủy hóa đơn",
                 Category = NotificationCategory.SD,

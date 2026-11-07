@@ -429,6 +429,47 @@ try
         var myQuotes = await new SalesQuotationService(selfDb, new PostingTransaction(selfDb)).GetPagedAsync(new BaseFilterQuery());
         Check(mine.TotalCount == 1 && mine.Items.Single().Id == selfOrder.Id && myQuotes.TotalCount == 1 && myQuotes.Items.Single().Id == selfQuote.Id, "a seller limited to their own records lists exactly their own orders and quotations");
     }
+    // create-invoice: an order is invoiced once at its agreed prices, its held stock is consumed.
+    (await db.Accounts.SingleAsync(a => a.Code == "511")).IsActive = true; await db.SaveChangesAsync();   // earlier checks switched revenue off
+    var inv = new Item { Code = "INV", Name = "Invoiced goods", BaseUomId = uom.Id, SalePrice = 100, CostPrice = 1 };
+    db.Items.Add(inv); await db.SaveChangesAsync();
+    db.StockBalances.Add(new StockBalance { WarehouseId = warehouse.Id, ItemId = inv.Id, QuantityOnHand = 10, AverageCostPrice = 5, InventoryValue = 50 }); await db.SaveChangesAsync();
+    async Task<StockBalance> InvStock() => await db.StockBalances.AsNoTracking().SingleAsync(b => b.ItemId == inv.Id);
+    var seller3 = new SalesInvoiceService(db, new BranchService(db), new PostingTransaction(db), new TestUser(false, [branch.Id]));
+    async Task<SalesOrderDto> InvOrder(int? customerId, decimal quantity, decimal price, decimal lineDiscount = 0, decimal discount = 0, decimal tax = 0) => await orders.CreateAsync(new CreateSalesOrderRequest
+    { BranchId = branch.Id, CustomerId = customerId, DiscountAmount = discount, TaxAmount = tax, Items = [new() { ItemId = inv.Id, Quantity = quantity, UnitPrice = price, DiscountAmount = lineDiscount }] });
+    CreateInvoiceFromOrderRequest FromOrder(PaymentMethod method = PaymentMethod.Cash, decimal tendered = 0) => new() { WarehouseId = warehouse.Id, PaymentMethod = (int)method, TenderedAmount = tendered };
+
+    var pos150 = new CreateSalesInvoiceRequest { RequestId = Guid.NewGuid(), WarehouseId = warehouse.Id, PaidAmount = 150, Items = [new() { ItemId = inv.Id, Quantity = 1, UnitPrice = 150 }] };
+    await Reject(async () => await seller3.CreateInvoiceAsync(pos150), "error.sales.price_override");
+
+    var agreed = await orders.ConfirmAsync((await InvOrder(rich.Id, 3, 150, lineDiscount: 30, discount: 20)).Id, default);
+    Check(agreed.TotalAmount == 400 && agreed.ReservationStatus == "Reserved" && (await InvStock()).QuantityReserved == 3, "an order priced above the catalogue is confirmed and its stock held");
+    await Reject(async () => await seller3.CreateInvoiceFromOrderAsync(999999, FromOrder()), "error.order.not_found");
+    var raised = await seller3.CreateInvoiceFromOrderAsync(agreed.Id, FromOrder(PaymentMethod.Cash, 400));
+    Check(raised.SalesOrderId == agreed.Id && raised.TotalAmount == 400 && raised.PaidAmount == 400 && raised.RemainingDebt == 0 && raised.Items.Single().UnitPrice == 150 && raised.Items.Single().Quantity == 3,
+        "an invoice from an order keeps the agreed price, discounts and total");
+    var consumed = await InvStock();
+    Check(consumed.QuantityOnHand == 7 && consumed.QuantityReserved == 0 && consumed.InventoryValue == 35, "the invoice issues the stock the order held");
+    var invoicedOrder = await orders.GetByIdAsync(agreed.Id);
+    Check(invoicedOrder!.Status == "Completed" && invoicedOrder.Items.Single().InvoicedQuantity == 3 && invoicedOrder.ReservationStatus == "Released"
+        && !await db.StockReservations.AsNoTracking().AnyAsync(r => r.SalesOrderId == agreed.Id && r.Status == "Active"), "the invoiced order is Completed with its reservation released");
+    Check((await Sales(db).GetInvoiceAsync(raised.Id))!.SalesOrderId == agreed.Id, "the invoice remembers its order");
+    await Reject(async () => await seller3.CreateInvoiceFromOrderAsync(agreed.Id, FromOrder(PaymentMethod.Cash, 400)), "error.sd.order_invalid_status_for_action");
+    await Reject(async () => await Sales(db).CancelInvoiceAsync(raised.Id, "oops"), "error.sd.invoice_from_order_locked");
+    await Reject(async () => await orders.CancelAsync(agreed.Id, "late", default), "error.sd.cannot_cancel_invoiced_order");
+    Check(await db.JournalEntryLines.AsNoTracking().Where(l => l.JournalEntryId == db.SalesInvoices.Where(i => i.Id == raised.Id).Select(i => i.JournalEntryId).FirstOrDefault()).SumAsync(l => l.DebitAmount)
+        == await db.JournalEntryLines.AsNoTracking().Where(l => l.JournalEntryId == db.SalesInvoices.Where(i => i.Id == raised.Id).Select(i => i.JournalEntryId).FirstOrDefault()).SumAsync(l => l.CreditAmount), "the order invoice journal balances");
+
+    var draftOnly = await InvOrder(rich.Id, 1, 100);
+    await Reject(async () => await seller3.CreateInvoiceFromOrderAsync(draftOnly.Id, FromOrder()), "error.sd.order_invalid_status_for_action");
+    var taxed = await orders.ConfirmAsync((await InvOrder(rich.Id, 1, 100, tax: 10)).Id, default);
+    await Reject(async () => await seller3.CreateInvoiceFromOrderAsync(taxed.Id, FromOrder()), "error.sd.order_tax_not_supported");
+    var retail = await orders.ConfirmAsync((await InvOrder(null, 2, 100)).Id, default);
+    var heldBefore = (await InvStock()).QuantityReserved;
+    await Reject(async () => await seller3.CreateInvoiceFromOrderAsync(retail.Id, FromOrder(PaymentMethod.Debt)), "error.sales.customer_required");
+    Check((await InvStock()).QuantityReserved == heldBefore && (await orders.GetByIdAsync(retail.Id))!.Status == "Confirmed", "a refused invoice leaves the order Confirmed with its stock still held");
+    (await db.Accounts.SingleAsync(a => a.Code == "511")).IsActive = false; await db.SaveChangesAsync();   // restore the state the next checks expect
     await using var denied = Db(new TestUser(false, [999999]));
     Check(!await denied.SalesInvoices.AnyAsync() && !await denied.StockBalances.AnyAsync(), "server filters inaccessible branches");
     db.ChangeTracker.Clear(); var immutable = await db.SalesInvoices.FirstAsync(); immutable.TotalAmount = 1;
@@ -550,6 +591,7 @@ try
         Check((await http.GetAsync("/api/v1/sales/returns")).IsSuccessStatusCode, "admin reads the sales return page over HTTP");
         Check((await http.GetAsync("/api/v1/sales/returns/999999")).StatusCode == HttpStatusCode.NotFound, "reading a missing return answers not found");
         Check((await http.GetAsync("/api/v1/sales/analytics/summary")).IsSuccessStatusCode && (await http.GetAsync("/api/v1/sales/analytics/salesperson-kpi")).IsSuccessStatusCode && (await http.GetAsync("/api/v1/sales/analytics/funnel")).IsSuccessStatusCode, "admin reads the three sales analytics endpoints over HTTP");
+        Check((await http.PostAsJsonAsync("/api/v1/sales/orders/999999/create-invoice", new { warehouseId = 1, paymentMethod = 1, tenderedAmount = 0 })).StatusCode == HttpStatusCode.NotFound, "invoicing a missing order answers not found");
         Check((await http.GetAsync("/api/v1/sales/analytics/summary?from=2026-02-01T00:00:00Z&to=2026-01-01T00:00:00Z")).StatusCode == HttpStatusCode.BadRequest, "an inverted analytics period answers bad request");
         Check((await http.GetAsync("/api/v1/sales/invoices/999999")).StatusCode == HttpStatusCode.NotFound, "reading a missing invoice answers not found");
         http.DefaultRequestHeaders.Authorization = new("Bearer", viewerToken);
