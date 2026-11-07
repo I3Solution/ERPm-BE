@@ -225,8 +225,15 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
     /// Takes a copy of the chosen address of the customer. Without a choice the copy is cleared, so an order never shows
     /// recipient data that no longer matches what was picked.
     /// </summary>
-    private async Task ApplyDeliveryAddressAsync(SalesOrder entity, int? addressId, Partner? partner, CancellationToken ct)
+    private async Task ApplyDeliveryAddressAsync(SalesOrder entity, int? addressId, Partner? partner, int? storedAddressId, int? storedCustomerId, CancellationToken ct)
     {
+        // Saving an order again with the address it already holds keeps its copy as it is, even when the source address
+        // was changed or deleted since; only a different choice, or a different customer, is checked against the list.
+        if (addressId.HasValue && addressId == storedAddressId && partner?.Id == storedCustomerId && entity.DeliveryAddressText != null)
+        {
+            entity.DeliveryAddress = entity.DeliveryAddressText;
+            return;
+        }
         entity.DeliveryAddressId = null; entity.DeliveryRecipientName = null; entity.DeliveryPhone = null; entity.DeliveryAddressText = null;
         if (!addressId.HasValue) return;
         var address = partner == null ? null : await Context.PartnerDeliveryAddresses.AsNoTracking().SingleOrDefaultAsync(a => a.Id == addressId && a.PartnerId == partner.Id, ct);
@@ -240,6 +247,7 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
 
     private async Task PrepareAsync(SalesOrder entity, CreateSalesOrderRequest request, CancellationToken ct)
     {
+        var storedAddressId = entity.DeliveryAddressId; var storedCustomerId = entity.CustomerId;
         // A seller limited to their own records has no branch in their data scope, so the branch is checked outside it.
         Require(request.Items is { Count: > 0 and <= 200 } && await Context.Branches.IgnoreQueryFilters().AnyAsync(b => !b.IsDeleted && b.Id == request.BranchId && b.IsActive, ct), "error.validation.request");
         Require(request.PaidAmount == 0, "error.validation.request");
@@ -268,7 +276,7 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
         entity.BranchId = request.BranchId; entity.DepartmentId = request.DepartmentId; entity.CustomerId = partner?.Id; entity.CustomerName = partner?.Name ?? request.CustomerName.Trim();
         entity.ExpectedDeliveryDate = request.ExpectedDeliveryDate; entity.QuotationId = request.QuotationId; entity.SalespersonId = request.SalespersonId;
         entity.DeliveryAddress = string.IsNullOrWhiteSpace(request.DeliveryAddress) ? partner?.Address : request.DeliveryAddress.Trim();
-        await ApplyDeliveryAddressAsync(entity, request.DeliveryAddressId, partner, ct);
+        await ApplyDeliveryAddressAsync(entity, request.DeliveryAddressId, partner, storedAddressId, storedCustomerId, ct);
         entity.SubTotal = entity.Items.Sum(i => i.LineTotal);
         Require(request.DiscountAmount <= entity.SubTotal, "error.sales.discount");
         entity.DiscountAmount = request.DiscountAmount;

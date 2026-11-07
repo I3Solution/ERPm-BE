@@ -462,6 +462,10 @@ try
     var ownerless = (await addresses.GetAsync(addressee.Id)).First();
     await Reject(async () => await orders.CreateAsync(ToAddress(ownerless.Id, rich.Id)), "error.sd.order_delivery_address_invalid");
     await Reject(async () => await orders.CreateAsync(ToAddress(pickable.Id, addressee.Id)), "error.sd.order_delivery_address_invalid");
+    var resaved = await orders.UpdateAsync(shipped.Id, new UpdateSalesOrderRequest { BranchId = branch.Id, CustomerId = addressee.Id, DeliveryAddressId = pickable.Id, Notes = "edited", Items = [new() { ItemId = rsv.Id, Quantity = 2, UnitPrice = 100 }] });
+    Check(resaved!.DeliveryAddressId == pickable.Id && resaved.DeliveryRecipientName == shipped.DeliveryRecipientName && resaved.DeliveryAddressText == expectedText && resaved.DeliveryAddress == expectedText && resaved.Notes == "edited",
+        "an order can be saved again with the address it already holds after that address was deleted, keeping its copy");
+    await Reject(async () => await orders.UpdateAsync(shipped.Id, new UpdateSalesOrderRequest { BranchId = branch.Id, CustomerId = rich.Id, DeliveryAddressId = pickable.Id, Items = [new() { ItemId = rsv.Id, Quantity = 1, UnitPrice = 100 }] }), "error.sd.order_delivery_address_invalid");
     var cleared = await orders.UpdateAsync(shipped.Id, new UpdateSalesOrderRequest { BranchId = branch.Id, CustomerId = addressee.Id, DeliveryAddress = "Typed by hand", Items = [new() { ItemId = rsv.Id, Quantity = 1, UnitPrice = 100 }] });
     Check(cleared!.DeliveryAddressId == null && cleared.DeliveryRecipientName == null && cleared.DeliveryAddressText == null && cleared.DeliveryAddress == "Typed by hand", "dropping the address choice clears the copy");
     await db.SalesOrderItems.Where(i => i.SalesOrderId == warned.Id).ExecuteUpdateAsync(i => i.SetProperty(x => x.InvoicedQuantity, 1m));
