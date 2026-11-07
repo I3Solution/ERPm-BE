@@ -1,3 +1,4 @@
+using ERPm.Application.Common;
 using ERPm.Application.Common.Crud;
 using ERPm.Application.DTOs.Sales;
 using ERPm.Domain.Entities.Partner;
@@ -16,10 +17,10 @@ public sealed class SalesQuotationService(ApplicationDbContext context, PostingT
     private const int MaxLines = 200;
     private static readonly string[] OpenStatuses = [QuotationStatus.Draft, QuotationStatus.Sent, QuotationStatus.Accepted];
 
-    protected override IQueryable<SalesQuotation> PrepareQuery(IQueryable<SalesQuotation> query) => query.Include(q => q.Branch).Include(q => q.Salesperson);
+    protected override IQueryable<SalesQuotation> PrepareQuery(IQueryable<SalesQuotation> query) => query.Include(q => q.Salesperson);
 
     protected override Task<SalesQuotation?> FindEntityAsync(int id, CancellationToken ct) => Context.SalesQuotations
-        .Include(q => q.Branch).Include(q => q.Salesperson)
+        .Include(q => q.Salesperson)
         .Include(q => q.Items)
         .SingleOrDefaultAsync(q => q.Id == id, ct);
 
@@ -52,7 +53,6 @@ public sealed class SalesQuotationService(ApplicationDbContext context, PostingT
         SalespersonId = entity.SalespersonId,
         SalespersonName = entity.Salesperson?.FullName,
         BranchId = entity.BranchId,
-        BranchName = entity.Branch?.Name,
         DepartmentId = entity.DepartmentId,
         PriceListId = entity.PriceListId,
         Status = EffectiveStatus(entity),
@@ -77,6 +77,24 @@ public sealed class SalesQuotationService(ApplicationDbContext context, PostingT
         }).ToList()
     };
 
+    // The branch name is looked up apart: see BranchNames.
+    public override async Task<PagedResult<SalesQuotationDetailDto>> GetPagedAsync(BaseFilterQuery query, CancellationToken ct = default)
+    {
+        var page = await base.GetPagedAsync(query, ct);
+        await NameBranchesAsync(page.Items, ct);
+        return page;
+    }
+    public override async Task<SalesQuotationDetailDto?> GetByIdAsync(int id, CancellationToken ct = default)
+    {
+        var dto = await base.GetByIdAsync(id, ct);
+        return dto == null ? null : await NamedAsync(dto, ct);
+    }
+    private async Task<SalesQuotationDetailDto> NamedAsync(SalesQuotationDetailDto dto, CancellationToken ct) { await NameBranchesAsync([dto], ct); return dto; }
+    private async Task NameBranchesAsync(IEnumerable<SalesQuotationDetailDto> dtos, CancellationToken ct)
+    {
+        var names = await BranchNames.ForAsync(Context, dtos.Select(d => d.BranchId), ct);
+        foreach (var dto in dtos) dto.BranchName = names.GetValueOrDefault(dto.BranchId);
+    }
     protected override SalesQuotation MapToEntity(CreateSalesQuotationRequest request) => new();
 
     protected override async Task BeforeCreateAsync(SalesQuotation entity, CreateSalesQuotationRequest request, CancellationToken ct)
@@ -193,7 +211,7 @@ public sealed class SalesQuotationService(ApplicationDbContext context, PostingT
         Require(quotation.ValidUntil >= DateTime.UtcNow, "error.sd.quotation_expired", 409);
         quotation.Status = to;
         quotation.LastModifiedAtUtc = DateTime.UtcNow;
-        return MapToDto(quotation);
+        return await NamedAsync(MapToDto(quotation), ct);
     }, ct);
 
     private static string EffectiveStatus(SalesQuotation q) =>
@@ -203,7 +221,8 @@ public sealed class SalesQuotationService(ApplicationDbContext context, PostingT
     {
         Require(request.Items is { Count: > 0 and <= MaxLines }, "error.validation.request");
         Require(request.QuotationDate.Kind == DateTimeKind.Utc && request.ValidUntil.Kind == DateTimeKind.Utc && request.ValidUntil >= request.QuotationDate, "error.validation.request");
-        Require(await Context.Branches.AnyAsync(b => b.Id == request.BranchId && b.IsActive, ct), "error.validation.request");
+        // A seller limited to their own records has no branch in their data scope, so the branch is checked outside it.
+        Require(await Context.Branches.IgnoreQueryFilters().AnyAsync(b => !b.IsDeleted && b.Id == request.BranchId && b.IsActive, ct), "error.validation.request");
         Require(request.DepartmentId == null || await Context.Departments.AnyAsync(d => d.Id == request.DepartmentId, ct), "error.validation.reference");
         Require(request.SalespersonId == null || await Context.Employees.AnyAsync(e => e.Id == request.SalespersonId && e.IsActive, ct), "error.validation.reference");
         Require(request.PriceListId == null || await Context.PriceLists.AnyAsync(p => p.Id == request.PriceListId, ct), "error.validation.reference");
