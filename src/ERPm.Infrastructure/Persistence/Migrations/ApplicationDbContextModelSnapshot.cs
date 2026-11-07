@@ -2880,6 +2880,25 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(500)")
                         .HasColumnName("delivery_address");
 
+                    b.Property<int?>("DeliveryAddressId")
+                        .HasColumnType("integer")
+                        .HasColumnName("delivery_address_id");
+
+                    b.Property<string>("DeliveryAddressText")
+                        .HasMaxLength(800)
+                        .HasColumnType("character varying(800)")
+                        .HasColumnName("delivery_address_text");
+
+                    b.Property<string>("DeliveryPhone")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("delivery_phone");
+
+                    b.Property<string>("DeliveryRecipientName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("delivery_recipient_name");
+
                     b.Property<int?>("DepartmentId")
                         .HasColumnType("integer")
                         .HasColumnName("department_id");
@@ -2982,6 +3001,9 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     b.HasIndex("CustomerId")
                         .HasDatabaseName("ix_tbl_sale_order_customer_id");
 
+                    b.HasIndex("DeliveryAddressId")
+                        .HasDatabaseName("ix_tbl_sale_order_delivery_address_id");
+
                     b.HasIndex("DepartmentId")
                         .HasDatabaseName("ix_tbl_sale_order_department_id");
 
@@ -3063,6 +3085,11 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("sales_order_id");
 
+                    b.Property<decimal>("TaxAmount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("tax_amount");
+
                     b.Property<string>("UnitName")
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)")
@@ -3072,6 +3099,11 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasPrecision(18, 4)
                         .HasColumnType("numeric(18,4)")
                         .HasColumnName("unit_price");
+
+                    b.Property<decimal>("VatRate")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)")
+                        .HasColumnName("vat_rate");
 
                     b.HasKey("Id")
                         .HasName("pk_tbl_sale_order_item");
@@ -5304,6 +5336,12 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasForeignKey("CustomerId")
                         .OnDelete(DeleteBehavior.SetNull)
                         .HasConstraintName("fk_tbl_sale_order_tbl_crm_partner_customer_id");
+
+                    b.HasOne("ERPm.Domain.Entities.Partner.PartnerDeliveryAddress", null)
+                        .WithMany()
+                        .HasForeignKey("DeliveryAddressId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_tbl_sale_order_tbl_crm_partner_delivery_address_delivery_addr");
 
                     b.HasOne("ERPm.Domain.Entities.HumanResource.Department", null)
                         .WithMany()

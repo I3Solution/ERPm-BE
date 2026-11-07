@@ -437,8 +437,8 @@ try
     var timed = await orders.CreateAsync(new CreateSalesOrderRequest { BranchId = branch.Id, CustomerId = rich.Id, ExpectedDeliveryDate = deliveryAt, Items = [new() { ItemId = rsv.Id, Quantity = 1, UnitPrice = 100 }] });
     await using (var reread = Db(user))
     {
-        var stored = (await reread.SalesOrders.AsNoTracking().SingleAsync(o => o.Id == timed.Id)).ExpectedDeliveryDate;
-        Check(stored == deliveryAt && stored.Value.Kind == DateTimeKind.Utc && timed.ExpectedDeliveryDate == deliveryAt, "the expected delivery keeps hours and minutes in UTC");
+        var storedDelivery = (await reread.SalesOrders.AsNoTracking().SingleAsync(o => o.Id == timed.Id)).ExpectedDeliveryDate;
+        Check(storedDelivery == deliveryAt && storedDelivery.Value.Kind == DateTimeKind.Utc && timed.ExpectedDeliveryDate == deliveryAt, "the expected delivery keeps hours and minutes in UTC");
     }
     await Reject(async () => await orders.CreateAsync(new CreateSalesOrderRequest { BranchId = branch.Id, CustomerId = rich.Id, ExpectedDeliveryDate = new DateTime(2026, 11, 10, 8, 30, 0, DateTimeKind.Unspecified), Items = [new() { ItemId = rsv.Id, Quantity = 1, UnitPrice = 100 }] }), "error.validation.request");
 
@@ -720,7 +720,7 @@ try
         using var branchDeleteDenied = await http.DeleteAsync($"/api/v1/branches/{allowedBranch.Id}");
         Check(branchEditDenied.StatusCode == HttpStatusCode.Forbidden && branchDeleteDenied.StatusCode == HttpStatusCode.Forbidden, "viewer cannot edit or delete branches");
         http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
-        using var order = await http.PostAsJsonAsync("/api/v1/sales/orders", new { branchId = branch.Id, customerId = customer.Id, discountAmount = 10, taxAmount = 5, items = new[] { new { itemId = item.Id, quantity = 2, unitPrice = 100 } } });
+        using var order = await http.PostAsJsonAsync("/api/v1/sales/orders", new { branchId = branch.Id, customerId = customer.Id, discountAmount = 10, items = new[] { new { itemId = item.Id, quantity = 2, unitPrice = 100, vatRate = 2.5 } } });
         if (!order.IsSuccessStatusCode) throw new Exception("Order failed: " + await order.Content.ReadAsStringAsync());
         using var orderPayload = JsonDocument.Parse(await order.Content.ReadAsStringAsync());
         var orderData = orderPayload.RootElement.GetProperty("data"); var orderId = orderData.GetProperty("id").GetInt32();
