@@ -92,6 +92,8 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             c => JsonSerializer.Deserialize<Dictionary<string, object>>(JsonSerializer.Serialize(c, (JsonSerializerOptions?)null), (JsonSerializerOptions?)null)!);
 
         modelBuilder.HasSequence<long>("erpm_document_number");
+        // Version of every permission change, shared by all API instances: they cache principals per version.
+        modelBuilder.HasSequence<long>("erpm_permission_version");
         modelBuilder.Entity<AppUser>(entity =>
         {
             entity.ToTable("tbl_SYS_User");
@@ -634,6 +636,9 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.HasOne<Department>().WithMany().HasForeignKey(e => e.DepartmentId).OnDelete(DeleteBehavior.Restrict);
             entity.ToTable("tbl_SALE_Invoice");
             ConfigureDualKeyAuditable(entity);
+            entity.HasOne<SalesOrder>().WithMany().HasForeignKey(e => e.SalesOrderId).OnDelete(DeleteBehavior.Restrict);
+            // An order is invoiced once.
+            entity.HasIndex(e => e.SalesOrderId).IsUnique().HasFilter("sales_order_id IS NOT NULL");
             entity.Property(e => e.InvoiceNumber).HasMaxLength(50).IsRequired();
             entity.Property(e => e.CustomerName).HasMaxLength(255).IsRequired();
 

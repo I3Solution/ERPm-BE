@@ -164,6 +164,102 @@ public static class NotificationTemplateSeeder
             },
             new()
             {
+                Code = "SD_ORDER_INVOICED",
+                Name = "Đơn hàng đã xuất hóa đơn",
+                Category = NotificationCategory.SD,
+                DefaultSeverity = NotificationSeverity.INFO,
+                SupportedChannels = [NotificationChannel.InApp, NotificationChannel.PushMobile],
+                TitleTemplate = "Đơn hàng {order_code} đã xuất hóa đơn",
+                BodyTemplate = "Đơn {order_code} đã xuất hóa đơn {invoice_code}, tổng tiền {total_amount} đ.",
+                ActionUrlPattern = "/sales/invoices",
+                Translations = new Dictionary<string, NotificationTemplateTranslation>
+                {
+                    ["vi"] = new()
+                    {
+                        Title = "Đơn hàng {order_code} đã xuất hóa đơn",
+                        Body = "Đơn {order_code} đã xuất hóa đơn {invoice_code}, tổng tiền {total_amount} đ."
+                    },
+                    ["en"] = new()
+                    {
+                        Title = "Order {order_code} invoiced",
+                        Body = "Order {order_code} was invoiced as {invoice_code}, total {total_amount}."
+                    }
+                }
+            },
+            new()
+            {
+                Code = "SD_QUOTATION_ACCEPTED",
+                Name = "Khách đồng ý báo giá",
+                Category = NotificationCategory.SD,
+                DefaultSeverity = NotificationSeverity.INFO,
+                SupportedChannels = [NotificationChannel.InApp, NotificationChannel.PushMobile],
+                TitleTemplate = "Báo giá {quotation_code} được chấp nhận",
+                BodyTemplate = "Khách hàng {customer_name} đã chấp nhận báo giá {quotation_code} trị giá {total_amount} đ. Có thể chuyển thành đơn bán.",
+                ActionUrlPattern = "/sales/quotations",
+                Translations = new Dictionary<string, NotificationTemplateTranslation>
+                {
+                    ["vi"] = new()
+                    {
+                        Title = "Báo giá {quotation_code} được chấp nhận",
+                        Body = "Khách hàng {customer_name} đã chấp nhận báo giá {quotation_code} trị giá {total_amount} đ. Có thể chuyển thành đơn bán."
+                    },
+                    ["en"] = new()
+                    {
+                        Title = "Quotation {quotation_code} accepted",
+                        Body = "Customer {customer_name} accepted quotation {quotation_code} worth {total_amount}. It can be converted into a sales order."
+                    }
+                }
+            },
+            new()
+            {
+                Code = "SD_QUOTATION_REJECTED",
+                Name = "Khách từ chối báo giá",
+                Category = NotificationCategory.SD,
+                DefaultSeverity = NotificationSeverity.WARNING,
+                SupportedChannels = [NotificationChannel.InApp, NotificationChannel.PushMobile],
+                TitleTemplate = "Báo giá {quotation_code} bị từ chối",
+                BodyTemplate = "Khách hàng {customer_name} đã từ chối báo giá {quotation_code} trị giá {total_amount} đ.",
+                ActionUrlPattern = "/sales/quotations",
+                Translations = new Dictionary<string, NotificationTemplateTranslation>
+                {
+                    ["vi"] = new()
+                    {
+                        Title = "Báo giá {quotation_code} bị từ chối",
+                        Body = "Khách hàng {customer_name} đã từ chối báo giá {quotation_code} trị giá {total_amount} đ."
+                    },
+                    ["en"] = new()
+                    {
+                        Title = "Quotation {quotation_code} rejected",
+                        Body = "Customer {customer_name} rejected quotation {quotation_code} worth {total_amount}."
+                    }
+                }
+            },
+            new()
+            {
+                Code = "SD_QUOTATION_CONVERTED",
+                Name = "Báo giá đã chuyển thành đơn bán",
+                Category = NotificationCategory.SD,
+                DefaultSeverity = NotificationSeverity.INFO,
+                SupportedChannels = [NotificationChannel.InApp, NotificationChannel.PushMobile],
+                TitleTemplate = "Báo giá {quotation_code} đã thành đơn {order_code}",
+                BodyTemplate = "Báo giá {quotation_code} của khách hàng {customer_name} đã được chuyển thành đơn bán {order_code}.",
+                ActionUrlPattern = "/sales/quotations",
+                Translations = new Dictionary<string, NotificationTemplateTranslation>
+                {
+                    ["vi"] = new()
+                    {
+                        Title = "Báo giá {quotation_code} đã thành đơn {order_code}",
+                        Body = "Báo giá {quotation_code} của khách hàng {customer_name} đã được chuyển thành đơn bán {order_code}."
+                    },
+                    ["en"] = new()
+                    {
+                        Title = "Quotation {quotation_code} became order {order_code}",
+                        Body = "Quotation {quotation_code} of customer {customer_name} was converted into sales order {order_code}."
+                    }
+                }
+            },
+            new()
+            {
                 Code = "SD_INVOICE_CANCELLED",
                 Name = "Cảnh báo hủy hóa đơn",
                 Category = NotificationCategory.SD,

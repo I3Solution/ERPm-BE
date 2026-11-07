@@ -18,6 +18,8 @@ public partial class SalesInvoiceService
                 .Include(i => i.JournalEntry!).ThenInclude(j => j.Lines).SingleOrDefaultAsync(i => i.Id == id, cancellationToken);
             Require(invoice != null && invoice.Status != VoucherStatus.Draft, "error.sales.cancelled", 409);
             if (invoice!.Status == VoucherStatus.Cancelled) return Map(invoice);
+            // The order is Completed with its stock issued; undoing the invoice alone would leave it inconsistent, so goods come back as a sales return.
+            Require(invoice.SalesOrderId == null, "error.sd.invoice_from_order_locked", 409);
             // Returned goods are already back in stock and refunded; cancelling the invoice too would count them twice.
             Require(!await context.SalesReturns.IgnoreQueryFilters().AnyAsync(r => !r.IsDeleted && r.InvoiceId == id && r.Status == VoucherStatus.Posted, cancellationToken), "error.sd.invoice_has_returns", 409);
             Require(invoice.JournalEntry != null, "error.accounting.accounts_missing", 409);
