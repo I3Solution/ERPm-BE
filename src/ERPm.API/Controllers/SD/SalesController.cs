@@ -29,6 +29,14 @@ public class SalesController : BaseApiController
         return Ok(ApiResponse<List<SalesInvoiceDto>>.Ok(result));
     }
 
+    [RequirePermission("sd:invoice:view")]
+    [HttpGet("invoices/{id:int}")]
+    public async Task<ActionResult<ApiResponse<SalesInvoiceDto>>> GetInvoice(int id, CancellationToken cancellationToken)
+    {
+        var result = await _salesService.GetInvoiceAsync(id, cancellationToken);
+        return result == null ? NotFound(ApiResponse<SalesInvoiceDto>.Fail("error.validation.reference")) : Ok(ApiResponse<SalesInvoiceDto>.Ok(result));
+    }
+
     [RequirePermission("sd:invoice:create")]
     [HttpPost("pos-checkout")]
     public async Task<ActionResult<ApiResponse<SalesInvoiceDto>>> Checkout([FromBody] CreateSalesInvoiceRequest request, CancellationToken cancellationToken)

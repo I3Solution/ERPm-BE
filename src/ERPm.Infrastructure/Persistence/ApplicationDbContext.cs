@@ -57,6 +57,13 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<StockIssueItem> StockIssueItems => Set<StockIssueItem>();
     public DbSet<SalesOrder> SalesOrders => Set<SalesOrder>();
     public DbSet<SalesOrderItem> SalesOrderItems => Set<SalesOrderItem>();
+    public DbSet<PriceList> PriceLists => Set<PriceList>();
+    public DbSet<PriceListItem> PriceListItems => Set<PriceListItem>();
+    public DbSet<SalesQuotation> SalesQuotations => Set<SalesQuotation>();
+    public DbSet<SalesQuotationItem> SalesQuotationItems => Set<SalesQuotationItem>();
+    public DbSet<StockReservation> StockReservations => Set<StockReservation>();
+    public DbSet<SalesReturn> SalesReturns => Set<SalesReturn>();
+    public DbSet<SalesReturnItem> SalesReturnItems => Set<SalesReturnItem>();
     public DbSet<SalesInvoice> SalesInvoices => Set<SalesInvoice>();
     public DbSet<SalesInvoiceItem> SalesInvoiceItems => Set<SalesInvoiceItem>();
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
@@ -474,6 +481,8 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.Property(e => e.CreditLimit).HasPrecision(18, 4);
             entity.Property(e => e.DebtBalance).HasPrecision(18, 4);
 
+            entity.HasOne<PriceList>().WithMany().HasForeignKey(e => e.PriceListId).OnDelete(DeleteBehavior.SetNull);
+
             entity.HasIndex(e => e.Code).IsUnique();
             entity.HasQueryFilter(e => !e.IsDeleted);
         });
@@ -506,6 +515,8 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.ToTable("tbl_WMS_StockBalance");
             ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.QuantityOnHand).HasPrecision(18, 4);
+            entity.Property(e => e.QuantityReserved).HasPrecision(18, 4);
+            entity.ToTable(t => t.HasCheckConstraint("CK_tbl_WMS_StockBalance_Reserved", "quantity_reserved >= 0"));
             entity.Property(e => e.AverageCostPrice).HasPrecision(18, 4);
             entity.Property(e => e.InventoryValue).HasPrecision(18, 4);
 
@@ -688,6 +699,169 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        // 5.0 SALE - Price lists
+        modelBuilder.Entity<PriceList>(entity =>
+        {
+            entity.ToTable("tbl_SD_PriceList");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.Currency).HasMaxLength(3).IsRequired();
+
+            entity.HasOne(e => e.Branch)
+                .WithMany()
+                .HasForeignKey(e => e.BranchId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Code is unique among live price lists so a deleted code can be reused.
+            entity.HasIndex(e => e.Code).IsUnique().HasFilter("is_deleted = false");
+            entity.HasIndex(e => new { e.IsActive, e.EffectiveFrom, e.EffectiveTo });
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<PriceListItem>(entity =>
+        {
+            entity.ToTable("tbl_SD_PriceListItem");
+            ConfigureDualKeyEntity(entity);
+            entity.Property(e => e.UnitPrice).HasPrecision(18, 4);
+            entity.Property(e => e.MinQuantity).HasPrecision(18, 4);
+            entity.Property(e => e.DiscountPercent).HasPrecision(18, 4);
+
+            entity.HasOne(e => e.PriceList)
+                .WithMany(p => p.Items)
+                .HasForeignKey(e => e.PriceListId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Item)
+                .WithMany()
+                .HasForeignKey(e => e.ItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Uom)
+                .WithMany()
+                .HasForeignKey(e => e.UomId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // One price per item, unit and quantity tier within a list.
+            entity.HasIndex(e => new { e.PriceListId, e.ItemId, e.UomId, e.MinQuantity }).IsUnique().AreNullsDistinct(false);
+            entity.ToTable(t => t.HasCheckConstraint("CK_tbl_SD_PriceListItem_Values", "unit_price >= 0 AND min_quantity >= 0 AND discount_percent BETWEEN 0 AND 100"));
+        });
+
+        // 5.0b SALE - Quotations
+        modelBuilder.Entity<SalesQuotation>(entity =>
+        {
+            entity.ToTable("tbl_SD_SalesQuotation");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.QuotationNumber).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.CustomerName).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.CustomerPhone).HasMaxLength(50);
+            entity.Property(e => e.CustomerEmail).HasMaxLength(100);
+            entity.Property(e => e.Status).HasMaxLength(50).IsRequired();
+
+            entity.Property(e => e.SubTotal).HasPrecision(18, 4);
+            entity.Property(e => e.DiscountAmount).HasPrecision(18, 4);
+            entity.Property(e => e.TaxAmount).HasPrecision(18, 4);
+            entity.Property(e => e.TotalAmount).HasPrecision(18, 4);
+
+            entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Salesperson).WithMany().HasForeignKey(e => e.SalespersonId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Department>().WithMany().HasForeignKey(e => e.DepartmentId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<PriceList>().WithMany().HasForeignKey(e => e.PriceListId).OnDelete(DeleteBehavior.SetNull);
+            // A quotation converts into at most one order.
+            entity.HasOne(e => e.ConvertedSalesOrder).WithMany().HasForeignKey(e => e.ConvertedSalesOrderId).OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => e.QuotationNumber).IsUnique();
+            entity.HasIndex(e => e.ConvertedSalesOrderId).IsUnique().HasFilter("converted_sales_order_id IS NOT NULL");
+            entity.HasIndex(e => new { e.Status, e.ValidUntil });
+            entity.HasIndex(e => e.CustomerId);
+            entity.HasIndex(e => e.SalespersonId);
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<SalesQuotationItem>(entity =>
+        {
+            entity.ToTable("tbl_SD_SalesQuotationItem");
+            ConfigureDualKeyEntity(entity);
+            entity.Property(e => e.ItemCode).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.ItemName).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.UnitName).HasMaxLength(50);
+            entity.Property(e => e.Notes).HasMaxLength(500);
+
+            entity.Property(e => e.Quantity).HasPrecision(18, 4);
+            entity.Property(e => e.UnitPrice).HasPrecision(18, 4);
+            entity.Property(e => e.DiscountAmount).HasPrecision(18, 4);
+            entity.Property(e => e.LineTotal).HasPrecision(18, 4);
+
+            entity.HasOne(e => e.SalesQuotation).WithMany(q => q.Items).HasForeignKey(e => e.SalesQuotationId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Item).WithMany().HasForeignKey(e => e.ItemId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => e.SalesQuotationId);
+            entity.ToTable(t => t.HasCheckConstraint("CK_tbl_SD_SalesQuotationItem_Values", "quantity > 0 AND unit_price >= 0 AND discount_amount >= 0 AND line_total >= 0"));
+        });
+
+        // 5.0c SALE - Stock reservations
+        modelBuilder.Entity<StockReservation>(entity =>
+        {
+            entity.ToTable("tbl_SD_StockReservation");
+            ConfigureDualKeyEntity(entity);
+            entity.Property(e => e.Quantity).HasPrecision(18, 4);
+            entity.Property(e => e.Status).HasMaxLength(20).IsRequired();
+            entity.HasOne(e => e.SalesOrder).WithMany().HasForeignKey(e => e.SalesOrderId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.SalesOrderItem).WithMany().HasForeignKey(e => e.SalesOrderItemId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Warehouse).WithMany().HasForeignKey(e => e.WarehouseId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Item).WithMany().HasForeignKey(e => e.ItemId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.SalesOrderId, e.Status });
+            entity.HasIndex(e => new { e.WarehouseId, e.ItemId, e.Status });
+            entity.ToTable(t => t.HasCheckConstraint("CK_tbl_SD_StockReservation_Quantity", "quantity > 0"));
+        });
+
+        // 5.0d SALE - Returns
+        modelBuilder.Entity<SalesReturn>(entity =>
+        {
+            entity.ToTable("tbl_SD_SalesReturn");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.ReturnNumber).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.CustomerName).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.Reason).HasMaxLength(500).IsRequired();
+            entity.Property(e => e.TotalRefundAmount).HasPrecision(18, 4);
+            entity.Property(e => e.TotalCostAmount).HasPrecision(18, 4);
+
+            entity.HasOne(e => e.Invoice).WithMany().HasForeignKey(e => e.InvoiceId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Customer).WithMany().HasForeignKey(e => e.CustomerId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Warehouse).WithMany().HasForeignKey(e => e.WarehouseId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.StockReceipt).WithMany().HasForeignKey(e => e.StockReceiptId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.JournalEntry).WithMany().HasForeignKey(e => e.JournalEntryId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Department>().WithMany().HasForeignKey(e => e.DepartmentId).OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => e.ReturnNumber).IsUnique();
+            entity.HasIndex(e => e.InvoiceId);
+            entity.HasIndex(e => e.CustomerId);
+            entity.ToTable(t => t.HasCheckConstraint("CK_tbl_SD_SalesReturn_Amounts", "total_refund_amount >= 0 AND total_cost_amount >= 0"));
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<SalesReturnItem>(entity =>
+        {
+            entity.ToTable("tbl_SD_SalesReturnItem");
+            ConfigureDualKeyEntity(entity);
+            entity.Property(e => e.ItemCode).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.ItemName).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.UnitName).HasMaxLength(50);
+            entity.Property(e => e.Reason).HasMaxLength(500);
+            entity.Property(e => e.ReturnQuantity).HasPrecision(18, 4);
+            entity.Property(e => e.UnitPrice).HasPrecision(18, 4);
+            entity.Property(e => e.RefundAmount).HasPrecision(18, 4);
+            entity.Property(e => e.CostAmount).HasPrecision(18, 4);
+
+            entity.HasOne(e => e.SalesReturn).WithMany(r => r.Items).HasForeignKey(e => e.SalesReturnId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.InvoiceItem).WithMany().HasForeignKey(e => e.InvoiceItemId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Item).WithMany().HasForeignKey(e => e.ItemId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => e.SalesReturnId);
+            entity.HasIndex(e => e.InvoiceItemId);
+            entity.ToTable(t => t.HasCheckConstraint("CK_tbl_SD_SalesReturnItem_Values", "return_quantity > 0 AND unit_price >= 0 AND refund_amount >= 0 AND cost_amount >= 0"));
+        });
+
         // 5.1 SALE - Orders
         modelBuilder.Entity<SalesOrder>(entity =>
         {
@@ -697,6 +871,17 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.Property(e => e.OrderNumber).HasMaxLength(50).IsRequired();
             entity.Property(e => e.CustomerName).HasMaxLength(255).IsRequired();
             entity.Property(e => e.Status).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.CreditCheckStatus).HasMaxLength(50).HasDefaultValue(CreditCheckStatus.Passed).IsRequired();
+            entity.Property(e => e.ReservationStatus).HasMaxLength(50).HasDefaultValue(OrderReservationStatus.None).IsRequired();
+            entity.Property(e => e.CreditApprovalReason).HasMaxLength(500);
+            entity.Property(e => e.CancelReason).HasMaxLength(500);
+            entity.Property(e => e.DeliveryAddress).HasMaxLength(500);
+            entity.HasOne(e => e.Salesperson).WithMany().HasForeignKey(e => e.SalespersonId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Quotation).WithMany().HasForeignKey(e => e.QuotationId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<PriceList>().WithMany().HasForeignKey(e => e.PriceListId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(e => e.QuotationId);
+            entity.HasIndex(e => e.SalespersonId);
+            entity.HasIndex(e => e.Status);
 
             entity.Property(e => e.SubTotal).HasPrecision(18, 4);
             entity.Property(e => e.DiscountAmount).HasPrecision(18, 4);
@@ -730,6 +915,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.Property(e => e.UnitPrice).HasPrecision(18, 4);
             entity.Property(e => e.DiscountAmount).HasPrecision(18, 4);
             entity.Property(e => e.LineTotal).HasPrecision(18, 4);
+            entity.Property(e => e.InvoicedQuantity).HasPrecision(18, 4);
 
             entity.HasOne(e => e.SalesOrder)
                 .WithMany(o => o.Items)
@@ -883,6 +1069,16 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<StockIssueItem>().HasQueryFilter(e => !e.StockIssue!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.StockIssue.BranchId)
             || (e.StockIssue.DepartmentId != null && AllowedDepartmentIds.Contains(e.StockIssue.DepartmentId.Value)) || (OwnRecordsUserId != null && e.StockIssue.CreatedBy == OwnRecordsUserId)));
         modelBuilder.Entity<JournalEntryLine>().HasQueryFilter(e => !e.JournalEntry!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.JournalEntry.BranchId)));
+        modelBuilder.Entity<PriceListItem>().HasQueryFilter(e => !e.PriceList!.IsDeleted);
+        modelBuilder.Entity<SalesQuotation>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)
+            || (e.DepartmentId != null && AllowedDepartmentIds.Contains(e.DepartmentId.Value)) || (OwnRecordsUserId != null && e.CreatedBy == OwnRecordsUserId)));
+        modelBuilder.Entity<SalesReturn>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)
+            || (e.DepartmentId != null && AllowedDepartmentIds.Contains(e.DepartmentId.Value)) || (OwnRecordsUserId != null && e.CreatedBy == OwnRecordsUserId)));
+        modelBuilder.Entity<SalesReturnItem>().HasQueryFilter(e => !e.SalesReturn!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.SalesReturn.BranchId)
+            || (e.SalesReturn.DepartmentId != null && AllowedDepartmentIds.Contains(e.SalesReturn.DepartmentId.Value)) || (OwnRecordsUserId != null && e.SalesReturn.CreatedBy == OwnRecordsUserId)));
+        modelBuilder.Entity<StockReservation>().HasQueryFilter(e => !e.SalesOrder!.IsDeleted);
+        modelBuilder.Entity<SalesQuotationItem>().HasQueryFilter(e => !e.SalesQuotation!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.SalesQuotation.BranchId)
+            || (e.SalesQuotation.DepartmentId != null && AllowedDepartmentIds.Contains(e.SalesQuotation.DepartmentId.Value)) || (OwnRecordsUserId != null && e.SalesQuotation.CreatedBy == OwnRecordsUserId)));
         modelBuilder.Entity<SalesOrderItem>().HasQueryFilter(e => !e.SalesOrder!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.SalesOrder.BranchId)
             || (e.SalesOrder.DepartmentId != null && AllowedDepartmentIds.Contains(e.SalesOrder.DepartmentId.Value)) || (OwnRecordsUserId != null && e.SalesOrder.CreatedBy == OwnRecordsUserId)));
         modelBuilder.Entity<PurchaseOrderItem>().HasQueryFilter(e => !e.PurchaseOrder!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.PurchaseOrder.BranchId)
@@ -946,6 +1142,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
                 {
                     SalesInvoiceItem => await SalesInvoices.IgnoreQueryFilters().AnyAsync(i => i.Id == entry.OriginalValues.GetValue<int>("SalesInvoiceId") && i.Status != VoucherStatus.Draft, cancellationToken),
                     StockReceiptItem => await StockReceipts.IgnoreQueryFilters().AnyAsync(i => i.Id == entry.OriginalValues.GetValue<int>("StockReceiptId") && i.Status != VoucherStatus.Draft, cancellationToken),
+                    SalesReturnItem => await SalesReturns.IgnoreQueryFilters().AnyAsync(i => i.Id == entry.OriginalValues.GetValue<int>("SalesReturnId") && i.Status != VoucherStatus.Draft, cancellationToken),
                     StockIssueItem => await StockIssues.IgnoreQueryFilters().AnyAsync(i => i.Id == entry.OriginalValues.GetValue<int>("StockIssueId") && i.Status != VoucherStatus.Draft, cancellationToken),
                     JournalEntryLine => await JournalEntries.IgnoreQueryFilters().AnyAsync(i => i.Id == entry.OriginalValues.GetValue<int>("JournalEntryId") && i.Status != VoucherStatus.Draft, cancellationToken),
                     _ => false
@@ -955,7 +1152,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         }
         foreach (var entry in ChangeTracker.Entries().Where(e => e.State is EntityState.Modified or EntityState.Deleted))
         {
-            if (entry.Entity is SalesInvoice or StockReceipt or StockIssue or JournalEntry)
+            if (entry.Entity is SalesInvoice or SalesReturn or StockReceipt or StockIssue or JournalEntry)
             {
                 var originalStatus = entry.OriginalValues.GetValue<VoucherStatus>("Status");
                 if (originalStatus != VoucherStatus.Draft && !AllowCancellation)

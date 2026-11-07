@@ -1,5 +1,10 @@
 using System.Text.Json;
 using ERPm.Application.Common;
+using ERPm.Domain.Entities.HumanResource;
+using ERPm.Domain.Entities.Inventory;
+using ERPm.Application.Common.Crud;
+using ERPm.Domain.Services.Iam;
+using ERPm.Domain.Services.Sales;
 using ERPm.Application.Common.Interfaces;
 using ERPm.Application.DTOs.Inventory;
 using ERPm.Application.DTOs.Sales;
@@ -142,6 +147,277 @@ try
     Check(await db.JournalEntries.CountAsync(j => j.ReversesJournalEntryId == cancelTarget.JournalEntryId) == 1, "cancellation creates one reversing journal");
     await Sales(db).CancelInvoiceAsync(cancelTarget.Id, "Verification reversal");
     Check(await db.JournalEntries.CountAsync(j => j.ReversesJournalEntryId == cancelTarget.JournalEntryId) == 1, "repeated cancellation is idempotent");
+    // Price lists: unique live code, one price per item/unit/tier (NULL unit included), value ranges, partner link, soft delete.
+    async Task<bool> Rejected(Func<Task> action) { try { await action(); return false; } catch (DbUpdateException) { db.ChangeTracker.Clear(); return true; } }
+    var priceList = new PriceList { Code = "PL-RETAIL", Name = "Retail", Items = [new() { ItemId = item.Id, UnitPrice = 90, MinQuantity = 0 }, new() { ItemId = item.Id, UnitPrice = 80, MinQuantity = 10, DiscountPercent = 5 }] };
+    db.PriceLists.Add(priceList); await db.SaveChangesAsync();
+    Check((await db.PriceLists.Include(p => p.Items).SingleAsync(p => p.Code == "PL-RETAIL")).Items.Count == 2 && priceList.ExternalId.Version == 7, "price list keeps its quantity tiers");
+    Check(await Rejected(async () => { db.PriceLists.Add(new PriceList { Code = "PL-RETAIL", Name = "Duplicate" }); await db.SaveChangesAsync(); }), "price list code is unique");
+    Check(await Rejected(async () => { db.PriceListItems.Add(new PriceListItem { PriceListId = priceList.Id, ItemId = item.Id, UnitPrice = 70, MinQuantity = 10 }); await db.SaveChangesAsync(); }), "same item, unit and tier cannot be priced twice");
+    Check(await Rejected(async () => { db.PriceListItems.Add(new PriceListItem { PriceListId = priceList.Id, ItemId = item.Id, UnitPrice = -1, MinQuantity = 20 }); await db.SaveChangesAsync(); }), "negative price is rejected");
+    Check(await Rejected(async () => { db.PriceListItems.Add(new PriceListItem { PriceListId = priceList.Id, ItemId = item.Id, UnitPrice = 1, MinQuantity = 20, DiscountPercent = 101 }); await db.SaveChangesAsync(); }), "discount above 100 percent is rejected");
+    var linked = await db.Partners.SingleAsync(p => p.Id == customer.Id); linked.PriceListId = priceList.Id; await db.SaveChangesAsync();
+    Check((await db.Partners.SingleAsync(p => p.Id == customer.Id)).PriceListId == priceList.Id, "customer keeps its default price list");
+    linked.PriceListId = null; (await db.PriceLists.SingleAsync(p => p.Id == priceList.Id)).IsDeleted = true; await db.SaveChangesAsync(); db.ChangeTracker.Clear();
+    Check(!await db.PriceLists.AnyAsync() && !await db.PriceListItems.AnyAsync(), "deleted price list and its lines are hidden");
+    db.PriceLists.Add(new PriceList { Code = "PL-RETAIL", Name = "Reused code" }); await db.SaveChangesAsync();
+    Check(await db.PriceLists.CountAsync() == 1, "deleted price list code can be reused");
+    // Pricing engine (pure rules) and price list service.
+    PriceTier T(decimal min, decimal price, decimal pct = 0) => new(min, price, pct);
+    PriceCandidate L(int id, bool own, bool branchOnly, params PriceTier[] tiers) => new(id, "L" + id, own, branchOnly, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), tiers);
+    var tiered = PricingEngine.Price(100, 12, [L(1, false, false, T(0, 90), T(10, 80, 5))]);
+    Check(tiered.UnitPrice == 80 && tiered.DiscountAmount == 48 && tiered.LineTotal == 912 && tiered.AppliedPriceListId == 1 && tiered.OriginalPrice == 100, "pricing picks the highest quantity tier and its discount");
+    Check(PricingEngine.Price(100, 5, [L(1, false, false, T(10, 80))]).UnitPrice == 100 && PricingEngine.Price(100, 5, []).AppliedPriceListId == null, "pricing falls back to the catalogue price");
+    Check(PricingEngine.Price(100, 1, [L(1, false, false, T(0, 70)), L(2, false, false, T(0, 80, 20))]).AppliedPriceListId == 2, "pricing without own list picks the lowest net price");
+    Check(PricingEngine.Price(100, 1, [L(1, false, false, T(0, 60)), L(2, true, false, T(0, 90))]).AppliedPriceListId == 2, "the customer's own list wins over a cheaper one");
+    Check(PricingEngine.Price(100, 1, [L(1, false, false, T(0, 70)), L(2, false, true, T(0, 70))]).AppliedPriceListId == 2, "equal prices prefer the branch-specific list");
+    Check(PermissionCatalog.Contains("sd:pricelist:view") && PermissionCatalog.Contains("sd:pricelist:delete"), "price list permissions are in the catalog");
+
+    var lists = new PriceListService(db);
+    var from = DateTime.UtcNow.AddDays(-1);
+    CreatePriceListRequest ListRequest(string code, decimal price, int? branchId = null, bool active = true, DateTime? to = null) =>
+        new() { Code = code, Name = code, Currency = "vnd", EffectiveFrom = from, EffectiveTo = to, BranchId = branchId, IsActive = active, Items = [new() { ItemId = item.Id, UnitPrice = price }] };
+    var wholesale = await lists.CreateAsync(ListRequest("wholesale", 70));
+    Check(wholesale.Code == "WHOLESALE" && wholesale.Currency == "VND" && wholesale.Items.Single().ItemCode == "ITEM" && wholesale.Items.Single().UnitName != null, "price list is created normalized and returns its lines");
+    await Reject(async () => await lists.CreateAsync(ListRequest("Wholesale", 1)), "error.sd.pricelist_duplicate_code");
+    var bad = ListRequest("BAD", 1); bad.Items[0].DiscountPercent = 101;
+    await Reject(async () => await lists.CreateAsync(bad), "error.validation.number");
+    var twice = ListRequest("TWICE", 1); twice.Items.Add(new() { ItemId = item.Id, UnitPrice = 2 });
+    await Reject(async () => await lists.CreateAsync(twice), "error.validation.request");
+    var backwards = ListRequest("BACK", 1, to: from.AddDays(-1));
+    await Reject(async () => await lists.CreateAsync(backwards), "error.validation.request");
+    var vip = await lists.CreateAsync(ListRequest("VIP", 60, branch.Id));
+    await lists.CreateAsync(ListRequest("OFF", 10, active: false));
+    await lists.CreateAsync(ListRequest("OLD", 5, to: from.AddHours(1)));
+    var paged = await lists.GetPagedAsync(new BaseFilterQuery { Keyword = "vip" });
+    Check(paged.TotalCount == 1 && paged.Items.Single().BranchName == branch.Name && paged.Items.Single().Items.Count == 0, "price list page returns headers without lines");
+
+    var pricing = (IPricingService)lists;
+    CalculatePriceRequest Quote(int? customerId, decimal quantity = 1) => new() { CustomerId = customerId, BranchId = branch.Id, Items = [new() { ItemId = item.Id, Quantity = quantity }] };
+    var anonymous = (await pricing.CalculateAsync(Quote(null))).Items.Single();
+    Check(anonymous.AppliedPriceListId == vip.Id && anonymous.UnitPrice == 60 && anonymous.OriginalPrice == 100 && anonymous.LineTotal == 60, "calculate-price picks the best list and ignores inactive and expired ones");
+    await db.Partners.Where(p => p.Id == customer.Id).ExecuteUpdateAsync(p => p.SetProperty(c => c.PriceListId, wholesale.Id));
+    var own = (await pricing.CalculateAsync(Quote(customer.Id, 3))).Items.Single();
+    Check(own.AppliedPriceListId == wholesale.Id && own.UnitPrice == 70 && own.LineTotal == 210, "calculate-price uses the customer's own price list");
+    await Reject(async () => await pricing.CalculateAsync(Quote(supplier.Id)), "error.sales.customer");
+    await Reject(async () => await pricing.CalculateAsync(Quote(null, 0)), "error.validation.number");
+
+    var edit = ListRequest("WHOLESALE", 65); edit.Items.Add(new() { ItemId = item.Id, UnitPrice = 55, MinQuantity = 10 });
+    var keptLine = wholesale.Items.Single().Id;
+    var edited = await lists.UpdateAsync(wholesale.Id, new UpdatePriceListRequest { Code = edit.Code, Name = "Wholesale 2", Currency = "VND", EffectiveFrom = from, IsActive = true, Items = edit.Items });
+    Check(edited!.Name == "Wholesale 2" && edited.Items.Count == 2 && edited.Items.Any(i => i.Id == keptLine && i.UnitPrice == 65), "updating a price list keeps unchanged lines and adds new tiers");
+    var shrunk = await lists.UpdateAsync(wholesale.Id, new UpdatePriceListRequest { Code = "WHOLESALE", Name = "Wholesale 2", Currency = "VND", EffectiveFrom = from, IsActive = true, Items = [new() { ItemId = item.Id, UnitPrice = 65 }] });
+    Check(shrunk!.Items.Count == 1, "updating a price list removes dropped tiers");
+    Check(await lists.UpdateAsync(999999, new UpdatePriceListRequest { Code = "X", Name = "X", Currency = "VND", EffectiveFrom = from }) == null, "updating a missing price list returns nothing");
+    await Reject(async () => await lists.DeleteAsync(wholesale.Id), "error.sd.pricelist_in_use");
+    await db.Partners.Where(p => p.Id == customer.Id).ExecuteUpdateAsync(p => p.SetProperty(c => c.PriceListId, (int?)null));
+    Check(await lists.DeleteAsync(wholesale.Id) && await lists.GetByIdAsync(wholesale.Id) == null && !await lists.DeleteAsync(wholesale.Id), "an unused price list can be deleted once");
+    // Quotations: lifecycle, validity, conversion into a Draft order.
+    var quotes = new SalesQuotationService(db, new PostingTransaction(db));
+    var quoteDate = DateTime.UtcNow;
+    CreateSalesQuotationRequest QuoteRequest(decimal quantity = 2, decimal discount = 20, DateTime? date = null, DateTime? until = null) => new()
+    {
+        QuotationDate = date ?? quoteDate, ValidUntil = until ?? quoteDate.AddDays(7), CustomerId = customer.Id, BranchId = branch.Id, TermsAndConditions = "Net 30",
+        Items = [new() { ItemId = item.Id, Quantity = quantity, UnitPrice = 100, DiscountAmount = discount, Notes = "line" }]
+    };
+    var quote = await quotes.CreateAsync(QuoteRequest());
+    Check(System.Text.RegularExpressions.Regex.IsMatch(quote.QuotationNumber, @"^BG-\d{6}-\d{4,}$") && quote.Status == "Draft" && quote.SubTotal == 200 && quote.DiscountAmount == 20 && quote.TotalAmount == 180
+        && quote.CustomerName == "Customer" && quote.Items.Single().ItemCode == "ITEM" && quote.Items.Single().LineTotal == 180, "quotation is numbered, priced and snapshots customer and lines");
+    await Reject(async () => await quotes.CreateAsync(new CreateSalesQuotationRequest { QuotationDate = quoteDate, ValidUntil = quoteDate, CustomerId = customer.Id, BranchId = branch.Id }), "error.validation.request");
+    var toSupplier = QuoteRequest(); toSupplier.CustomerId = supplier.Id;
+    await Reject(async () => await quotes.CreateAsync(toSupplier), "error.sales.customer");
+    await Reject(async () => await quotes.CreateAsync(QuoteRequest(discount: 500)), "error.sales.discount");
+    await Reject(async () => await quotes.CreateAsync(QuoteRequest(until: quoteDate.AddDays(-1))), "error.validation.request");
+    var found = await quotes.GetPagedAsync(new BaseFilterQuery { Keyword = quote.QuotationNumber, Status = "Draft" });
+    Check(found.TotalCount == 1 && found.Items.Single().Items.Count == 0 && found.Items.Single().BranchName == branch.Name, "quotation page filters by number and status and returns headers only");
+
+    Check((await quotes.SendAsync(quote.Id)).Status == "Sent", "a draft quotation can be sent");
+    await Reject(async () => await quotes.SendAsync(quote.Id), "error.sd.quotation_invalid_status");
+    var revised = await quotes.UpdateAsync(quote.Id, new UpdateSalesQuotationRequest { QuotationDate = quoteDate, ValidUntil = quoteDate.AddDays(7), CustomerId = customer.Id, BranchId = branch.Id, Items = [new() { ItemId = item.Id, Quantity = 3, UnitPrice = 100 }] });
+    Check(revised!.TotalAmount == 300 && revised.Items.Count == 1 && revised.Status == "Sent", "a sent quotation can be revised and its lines are replaced");
+    Check((await quotes.AcceptAsync(quote.Id)).Status == "Accepted", "a sent quotation can be accepted");
+    await Reject(async () => await quotes.UpdateAsync(quote.Id, new UpdateSalesQuotationRequest { QuotationDate = quoteDate, ValidUntil = quoteDate.AddDays(7), CustomerId = customer.Id, BranchId = branch.Id, Items = [new() { ItemId = item.Id, Quantity = 1, UnitPrice = 1 }] }), "error.sd.quotation_invalid_status");
+    await Reject(async () => await quotes.DeleteAsync(quote.Id), "error.sd.quotation_invalid_status");
+
+    var converted = await quotes.ConvertToOrderAsync(quote.Id);
+    var convertedOrder = await db.SalesOrders.Include(o => o.Items).SingleAsync(o => o.Id == converted.SalesOrderId);
+    Check(convertedOrder.Status == "Draft" && convertedOrder.TotalAmount == 300 && convertedOrder.Items.Single().Quantity == 3 && convertedOrder.CustomerId == customer.Id && convertedOrder.OrderNumber == converted.OrderNumber && convertedOrder.Notes == quote.QuotationNumber,
+        "conversion creates a Draft order with the quotation lines");
+    var after = await quotes.GetByIdAsync(quote.Id);
+    Check(after!.Status == "Converted" && after.ConvertedSalesOrderId == converted.SalesOrderId, "the converted quotation points at its order");
+    await Reject(async () => await quotes.ConvertToOrderAsync(quote.Id), "error.sd.quotation_already_converted");
+    await Reject(async () => await quotes.RejectAsync(quote.Id), "error.sd.quotation_invalid_status");
+
+    var stale = await quotes.CreateAsync(QuoteRequest(date: quoteDate.AddDays(-10), until: quoteDate.AddDays(-5)));
+    Check(stale.Status == "Expired" && (await quotes.GetPagedAsync(new BaseFilterQuery { Status = "Expired" })).Items.Any(q => q.Id == stale.Id) && !(await quotes.GetPagedAsync(new BaseFilterQuery { Status = "Draft" })).Items.Any(q => q.Id == stale.Id),
+        "a quotation past its validity date reads as Expired");
+    await Reject(async () => await quotes.SendAsync(stale.Id), "error.sd.quotation_expired");
+    await Reject(async () => await quotes.ConvertToOrderAsync(stale.Id), "error.sd.quotation_expired");
+    var extended = await quotes.UpdateAsync(stale.Id, new UpdateSalesQuotationRequest { QuotationDate = quoteDate, ValidUntil = quoteDate.AddDays(3), CustomerId = customer.Id, BranchId = branch.Id, Items = [new() { ItemId = item.Id, Quantity = 1, UnitPrice = 100 }] });
+    Check(extended!.Status == "Draft", "an expired draft revives when its validity date is extended");
+
+    var refused = await quotes.CreateAsync(QuoteRequest());
+    await quotes.SendAsync(refused.Id);
+    Check((await quotes.RejectAsync(refused.Id)).Status == "Rejected", "a sent quotation can be rejected");
+    await Reject(async () => await quotes.ConvertToOrderAsync(refused.Id), "error.sd.quotation_invalid_status");
+    await Reject(async () => await quotes.AcceptAsync(refused.Id), "error.sd.quotation_invalid_status");
+    var scratch = await quotes.CreateAsync(QuoteRequest());
+    Check(await quotes.DeleteAsync(scratch.Id) && await quotes.GetByIdAsync(scratch.Id) == null, "a draft quotation can be deleted");
+    Check(PermissionCatalog.Contains("sd:quotation:view") && PermissionCatalog.Contains("sd:quotation:delete"), "quotation permissions are in the catalog");
+    // Orders: credit check, stock reservation, credit approval and cancellation.
+    var orders = new SalesOrderService(db, new PostingTransaction(db));
+    Check(convertedOrder.QuotationId == quote.Id && convertedOrder.CustomerId == customer.Id, "a converted order remembers its quotation");
+    var rsv = new Item { Code = "RSV", Name = "Reserved goods", BaseUomId = uom.Id, SalePrice = 100, CostPrice = 1 };
+    var rich = new Partner { Code = "RICH", Name = "Rich", CreditLimit = 1000000, PartnerType = PartnerType.Customer };
+    var poor = new Partner { Code = "POOR", Name = "Poor", CreditLimit = 0, PartnerType = PartnerType.Customer };
+    var edge = new Partner { Code = "EDGE", Name = "Edge", CreditLimit = 1000, PartnerType = PartnerType.Customer };
+    db.Items.Add(rsv); db.Partners.AddRange(rich, poor, edge); await db.SaveChangesAsync();
+    db.StockBalances.Add(new StockBalance { WarehouseId = warehouse.Id, ItemId = rsv.Id, QuantityOnHand = 10, AverageCostPrice = 1, InventoryValue = 10 }); await db.SaveChangesAsync();
+    async Task<decimal> Reserved() => (await db.StockBalances.AsNoTracking().SingleAsync(b => b.ItemId == rsv.Id)).QuantityReserved;
+    async Task<SalesOrderDto> DraftOrder(int customerId, decimal quantity, decimal price = 100) => await orders.CreateAsync(new CreateSalesOrderRequest
+    { BranchId = branch.Id, CustomerId = customerId, DeliveryAddress = "1 Main Street", Items = [new() { ItemId = rsv.Id, Quantity = quantity, UnitPrice = price }] });
+
+    var draftOrder = await DraftOrder(rich.Id, 4);
+    Check(draftOrder.BranchName == branch.Name && draftOrder.CreditCheckStatus == "Passed" && draftOrder.ReservationStatus == "None" && draftOrder.DeliveryAddress == "1 Main Street" && draftOrder.Items.Single().InvoicedQuantity == 0, "a new order returns its branch, delivery address and empty credit and reservation state");
+    var first = await orders.ConfirmAsync(draftOrder.Id, default);
+    Check(first.Status == "Confirmed" && first.CreditCheckStatus == "Passed" && first.ReservationStatus == "Reserved" && await Reserved() == 4, "confirming an order within credit reserves its stock");
+    var big = await DraftOrder(rich.Id, 7);
+    await Reject(async () => await orders.ConfirmAsync(big.Id, default), "error.sd.insufficient_available_stock");
+    Check((await orders.GetByIdAsync(big.Id))!.Status == "Draft" && await Reserved() == 4 && !await db.StockReservations.AnyAsync(r => r.SalesOrderId == big.Id), "a stock shortage leaves the order Draft and reserves nothing");
+    var pos = new CreateSalesInvoiceRequest { RequestId = Guid.NewGuid(), WarehouseId = warehouse.Id, CustomerId = rich.Id, PaidAmount = 800, Items = [new() { ItemId = rsv.Id, Quantity = 8, UnitPrice = 100 }] };
+    await Reject(async () => await Sales(db).CreateInvoiceAsync(pos), "error.stock.insufficient");
+
+    var cancelled = await orders.CancelAsync(first.Id, "customer changed mind", default);
+    Check(cancelled.Status == "Cancelled" && cancelled.ReservationStatus == "Released" && await Reserved() == 0 && !await db.StockReservations.AnyAsync(r => r.SalesOrderId == first.Id && r.Status == "Active"), "cancelling an order releases its reserved stock");
+    await Reject(async () => await orders.CancelAsync(first.Id, "again", default), "error.sd.order_invalid_status_for_action");
+    await Reject(async () => await orders.CancelAsync(big.Id, " ", default), "error.validation.request");
+    var cancelledDraft = await orders.CancelAsync(big.Id, "not needed", default);
+    Check(cancelledDraft.Status == "Cancelled" && cancelledDraft.ReservationStatus == "None", "a Draft order can be cancelled without any stock to release");
+
+    var held = await orders.ConfirmAsync((await DraftOrder(poor.Id, 2)).Id, default);
+    Check(held.Status == "PendingApproval" && held.CreditCheckStatus == "PendingApproval" && held.ReservationStatus == "None" && await Reserved() == 0, "an order over the credit limit waits for approval and holds no stock");
+    Check((await orders.GetPagedAsync(new BaseFilterQuery { Status = "PendingApproval" })).Items.Any(o => o.Id == held.Id), "the order page filters by status");
+    await Reject(async () => await orders.ApproveCreditAsync(held.Id, "", default), "error.validation.request");
+    var approved = await orders.ApproveCreditAsync(held.Id, "Paid in advance", default);
+    Check(approved.Status == "Confirmed" && approved.CreditCheckStatus == "Overridden" && approved.ReservationStatus == "Reserved" && await Reserved() == 2, "approving credit confirms the order and reserves its stock");
+    await Reject(async () => await orders.ApproveCreditAsync(held.Id, "again", default), "error.sd.order_invalid_status_for_action");
+    await Reject(async () => await orders.ApproveCreditAsync(999999, "x", default), "error.order.not_found");
+
+    var warned = await orders.ConfirmAsync((await DraftOrder(edge.Id, 2, 450)).Id, default);
+    Check(warned.Status == "Confirmed" && warned.CreditCheckStatus == "Warning" && await Reserved() == 4, "an order close to the credit limit is confirmed with a warning");
+    var second = await orders.ConfirmAsync((await DraftOrder(edge.Id, 1, 200)).Id, default);
+    Check(second.Status == "PendingApproval", "orders already confirmed for a customer count against its credit limit");
+    await db.SalesOrderItems.Where(i => i.SalesOrderId == warned.Id).ExecuteUpdateAsync(i => i.SetProperty(x => x.InvoicedQuantity, 1m));
+    await Reject(async () => await orders.CancelAsync(warned.Id, "too late", default), "error.sd.cannot_cancel_invoiced_order");
+    // Tester findings: F1 pricing outside the data scope, F2 deleting a list used by an order, F3 order state errors.
+    var fixList = await lists.CreateAsync(ListRequest("FIXPL", 80));
+    await using (var outsider = Db(new TestUser(false, [999999])))
+    {
+        var scoped = await new PriceListService(outsider).CalculateAsync(new CalculatePriceRequest { BranchId = branch.Id, Items = [new() { ItemId = item.Id, Quantity = 1 }] });
+        Check(scoped.Items.Single().UnitPrice > 0, "a seller outside every branch scope can still calculate prices");
+    }
+    var listedQuote = QuoteRequest(); listedQuote.PriceListId = fixList.Id;
+    var listedOrder = await quotes.ConvertToOrderAsync((await quotes.CreateAsync(listedQuote)).Id);
+    Check((await db.SalesOrders.AsNoTracking().SingleAsync(o => o.Id == listedOrder.SalesOrderId)).PriceListId == fixList.Id, "an order converted from a quotation keeps its price list");
+    await Reject(async () => await lists.DeleteAsync(fixList.Id), "error.sd.pricelist_in_use");
+    await Reject(async () => await orders.ConfirmAsync(approved.Id, default), "error.sd.order_invalid_status_for_action");
+    await Reject(async () => await orders.UpdateAsync(approved.Id, new UpdateSalesOrderRequest { BranchId = branch.Id, Items = [new() { ItemId = rsv.Id, Quantity = 1, UnitPrice = 100 }] }), "error.sd.order_invalid_status_for_action");
+    await Reject(async () => await orders.DeleteAsync(approved.Id), "error.sd.order_invalid_status_for_action");
+    // Sales returns: stock back at the original cost, revenue and cost reversal, refund methods, limits.
+    var revenueSwitch = await db.Accounts.SingleAsync(a => a.Code == "511"); revenueSwitch.IsActive = true; await db.SaveChangesAsync();   // earlier checks switched revenue off
+    var returns = new SalesReturnService(db, new PostingTransaction(db));
+    var ret = new Item { Code = "RET", Name = "Returnable goods", BaseUomId = uom.Id, SalePrice = 100, CostPrice = 1 };
+    var retCustomer = new Partner { Code = "RETCUST", Name = "Return customer", CreditLimit = 100000, PartnerType = PartnerType.Customer };
+    db.Items.Add(ret); db.Partners.Add(retCustomer); await db.SaveChangesAsync();
+    db.StockBalances.Add(new StockBalance { WarehouseId = warehouse.Id, ItemId = ret.Id, QuantityOnHand = 10, AverageCostPrice = 6, InventoryValue = 60 }); await db.SaveChangesAsync();
+    var soldInvoice = await Sales(db).CreateInvoiceAsync(new CreateSalesInvoiceRequest { RequestId = Guid.NewGuid(), WarehouseId = warehouse.Id, CustomerId = retCustomer.Id, PaidAmount = 100, Items = [new() { ItemId = ret.Id, Quantity = 4, UnitPrice = 100 }] });
+    var soldLine = (await db.SalesInvoiceItems.AsNoTracking().SingleAsync(i => i.SalesInvoiceId == soldInvoice.Id)).Id;
+    async Task<StockBalance> RetBalance() => await db.StockBalances.AsNoTracking().SingleAsync(b => b.ItemId == ret.Id);
+    CreateSalesReturnRequest ReturnOf(decimal quantity, RefundMethod method, int? invoiceId = null, int? lineId = null, decimal price = 0) => new()
+    {
+        InvoiceId = invoiceId, CustomerId = invoiceId == null ? retCustomer.Id : null, BranchId = branch.Id, WarehouseId = warehouse.Id, RefundMethod = (int)method, Reason = "Faulty",
+        Items = [new() { InvoiceItemId = lineId, ItemId = ret.Id, Quantity = quantity, UnitPrice = price, Reason = "Broken" }]
+    };
+    Check((await RetBalance()).QuantityOnHand == 6 && (await RetBalance()).InventoryValue == 36 && await new PostingTransaction(db).ReceivablesAsync(retCustomer.Id, default) == 300, "the sale leaves 6 in stock and 300 receivable");
+
+    var creditRefund = await returns.CreateAsync(ReturnOf(1, RefundMethod.ReduceDebt, soldInvoice.Id, soldLine));
+    Check(System.Text.RegularExpressions.Regex.IsMatch(creditRefund.ReturnNumber, @"^SR-\d{6}-\d{4,}$") && creditRefund.Status == "Posted" && creditRefund.TotalRefundAmount == 100 && creditRefund.InvoiceNumber == soldInvoice.InvoiceNumber
+        && creditRefund.Items.Single().UnitPrice == 100 && creditRefund.StockReceiptId != null && creditRefund.JournalEntryId != null, "a return against an invoice is posted with its refund, receipt and journal");
+    var retStock = await RetBalance();
+    Check(retStock.QuantityOnHand == 7 && retStock.InventoryValue == 42 && retStock.AverageCostPrice == 6, "returned goods go back into stock at the cost they left it");
+    var creditLines = await db.JournalEntryLines.AsNoTracking().Where(l => l.JournalEntryId == creditRefund.JournalEntryId).Select(l => new { l.Account!.Code, l.DebitAmount, l.CreditAmount }).ToListAsync();
+    Check(creditLines.Count == 4 && creditLines.Single(l => l.Code == "521").DebitAmount == 100 && creditLines.Single(l => l.Code == "131").CreditAmount == 100
+        && creditLines.Single(l => l.Code == "156").DebitAmount == 6 && creditLines.Single(l => l.Code == "632").CreditAmount == 6, "the return reverses revenue against receivables and cost of sales against inventory");
+    Check(await new PostingTransaction(db).ReceivablesAsync(retCustomer.Id, default) == 200 && (await db.Partners.AsNoTracking().SingleAsync(p => p.Id == retCustomer.Id)).DebtBalance == 200, "a credit-memo return reduces the customer's receivable");
+
+    await Reject(async () => await returns.CreateAsync(ReturnOf(4, RefundMethod.Cash, soldInvoice.Id, soldLine)), "error.sd.return_quantity_exceeds_invoiced");
+    await Reject(async () => await returns.CreateAsync(ReturnOf(3, RefundMethod.ReduceDebt, soldInvoice.Id, soldLine)), "error.sd.return_refund_exceeds_debt");
+    var cashRefund = await returns.CreateAsync(ReturnOf(3, RefundMethod.Cash, soldInvoice.Id, soldLine));
+    Check(cashRefund.TotalRefundAmount == 300 && (await db.JournalEntryLines.AsNoTracking().AnyAsync(l => l.JournalEntryId == cashRefund.JournalEntryId && l.Account!.Code == "111" && l.CreditAmount == 300)), "a cash refund credits the cash account");
+    await Reject(async () => await returns.CreateAsync(ReturnOf(1, RefundMethod.Cash, soldInvoice.Id, soldLine)), "error.sd.return_quantity_exceeds_invoiced");
+    await Reject(async () => await Sales(db).CancelInvoiceAsync(soldInvoice.Id, "late"), "error.sd.invoice_has_returns");
+
+    var freeRefund = await returns.CreateAsync(ReturnOf(2, RefundMethod.BankTransfer, price: 90));
+    var freeStock = await RetBalance();
+    Check(freeRefund.InvoiceId == null && freeRefund.TotalRefundAmount == 180 && freeStock.QuantityOnHand == 12 && freeStock.AverageCostPrice == 6 && await db.JournalEntryLines.AsNoTracking().AnyAsync(l => l.JournalEntryId == freeRefund.JournalEntryId && l.Account!.Code == "112" && l.CreditAmount == 180),
+        "a return without invoice is priced as asked and costed at the average cost");
+    var anonymousReturn = ReturnOf(1, RefundMethod.ReduceDebt, price: 90); anonymousReturn.CustomerId = null;
+    await Reject(async () => await returns.CreateAsync(anonymousReturn), "error.sales.customer_required");
+    var noReason = ReturnOf(1, RefundMethod.Cash, price: 90); noReason.Reason = " ";
+    await Reject(async () => await returns.CreateAsync(noReason), "error.validation.request");
+    await Reject(async () => await returns.UpdateAsync(freeRefund.Id, ReturnOf(1, RefundMethod.Cash, price: 90)), "error.accounting.posted_immutable");
+    await Reject(async () => await returns.DeleteAsync(freeRefund.Id), "error.accounting.posted_immutable");
+
+    var discounted = await Sales(db).CreateInvoiceAsync(new CreateSalesInvoiceRequest { RequestId = Guid.NewGuid(), WarehouseId = warehouse.Id, DiscountAmount = 20, PaidAmount = 180, Items = [new() { ItemId = ret.Id, Quantity = 2, UnitPrice = 100 }] });
+    var discountedLine = (await db.SalesInvoiceItems.AsNoTracking().SingleAsync(i => i.SalesInvoiceId == discounted.Id)).Id;
+    var shareRefund = await returns.CreateAsync(new CreateSalesReturnRequest { InvoiceId = discounted.Id, BranchId = branch.Id, WarehouseId = warehouse.Id, RefundMethod = (int)RefundMethod.Cash, Reason = "Changed mind", Items = [new() { InvoiceItemId = discountedLine, ItemId = ret.Id, Quantity = 1 }] });
+    Check(shareRefund.TotalRefundAmount == 90 && shareRefund.CustomerName == discounted.CustomerName, "an invoice discount is shared across the returned quantity");
+    var invoiceDetail = await Sales(db).GetInvoiceAsync(soldInvoice.Id);
+    Check(invoiceDetail != null && invoiceDetail.Items.Single().Id == soldLine && await Sales(db).GetInvoiceAsync(999999) == null, "an invoice is readable by id with its line ids for returns");
+    var listed = await returns.GetPagedAsync(new BaseFilterQuery { Keyword = creditRefund.ReturnNumber, Status = "Posted" });
+    Check(listed.TotalCount == 1 && listed.Items.Single().Items.Count == 0, "the return page filters by number and status and returns headers only");
+    Check(PermissionCatalog.Contains("sd:return:view") && PermissionCatalog.Contains("sd:return:create"), "return permissions are in the catalog");
+    (await db.Accounts.SingleAsync(a => a.Code == "511")).IsActive = false; await db.SaveChangesAsync();   // restore the state the next checks expect
+    // Sales analytics (Dapper SQL) cross-checked against EF queries over the same data.
+    var analytics = new SalesAnalyticsService(db, new BranchService(db));
+    var allTime = new SalesAnalyticsQuery { From = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), To = DateTime.UtcNow.AddDays(1) };
+    var sellerPosition = await db.JobPositions.FirstOrDefaultAsync() ?? db.JobPositions.Add(new JobPosition { Code = "SELLER", Name = "Seller", CompanyId = branch.Id }).Entity;
+    await db.SaveChangesAsync();
+    var seller = await db.Employees.FirstOrDefaultAsync() ?? db.Employees.Add(new Employee { Code = "SELLER", FullName = "Seller", CompanyId = branch.Id, BranchId = branch.Id, JobPositionId = sellerPosition.Id }).Entity;
+    await db.SaveChangesAsync();
+    await db.SalesOrders.Where(o => o.Id == approved.Id).ExecuteUpdateAsync(o => o.SetProperty(x => x.SalespersonId, seller.Id));
+    var summary = await analytics.GetSummaryAsync(allTime);
+    var invoiced = await db.SalesInvoices.Where(i => i.Status == VoucherStatus.Posted).SumAsync(i => i.TotalAmount);
+    var invoicedCost = await db.SalesInvoiceItems.Where(i => i.SalesInvoice!.Status == VoucherStatus.Posted).SumAsync(i => i.CostAmount);
+    var refunded = await db.SalesReturns.Where(r => r.Status == VoucherStatus.Posted).SumAsync(r => r.TotalRefundAmount);
+    var restocked = await db.SalesReturns.Where(r => r.Status == VoucherStatus.Posted).SumAsync(r => r.TotalCostAmount);
+    Check(summary.TotalRevenue == invoiced - refunded && summary.TotalCost == invoicedCost - restocked && summary.GrossProfit == summary.TotalRevenue - summary.TotalCost && refunded > 0 && summary.TotalRevenue > 0,
+        "the sales summary nets posted returns off revenue and cost");
+    Check(summary.GrossMarginPercent == Math.Round(summary.GrossProfit / summary.TotalRevenue * 100m, 2), "the gross margin is profit over revenue");
+    Check(summary.TotalOrders == await db.SalesOrders.CountAsync() && summary.CancelledOrders == await db.SalesOrders.CountAsync(o => o.Status == "Cancelled") && summary.CancelledOrders > 0 && summary.CompletedOrders == 0, "the sales summary counts orders by status");
+    var funnel = await analytics.GetFunnelAsync(allTime);
+    var liveOrders = db.SalesOrders.Where(o => o.Status == "Confirmed" || o.Status == "Processing" || o.Status == "Completed");
+    var quotationCount = await db.SalesQuotations.CountAsync();
+    Check(funnel.QuotationCount == quotationCount && funnel.QuotationTotalAmount == await db.SalesQuotations.SumAsync(q => q.TotalAmount) && funnel.OrderCount == await liveOrders.CountAsync() && funnel.OrderTotalAmount == await liveOrders.SumAsync(o => o.TotalAmount)
+        && funnel.InvoiceCount == await db.SalesInvoices.CountAsync(i => i.Status == VoucherStatus.Posted) && funnel.InvoiceTotalAmount == invoiced, "the sales funnel counts quotations, live orders and posted invoices");
+    Check(funnel.ConversionRatePercent == Math.Round(await db.SalesQuotations.CountAsync(q => q.Status == "Converted") * 100m / quotationCount, 2) && funnel.ConversionRatePercent > 0, "the funnel reports the quotation conversion rate");
+    var kpi = await analytics.GetSalespersonKpiAsync(allTime);
+    var sellerOrders = liveOrders.Where(o => o.SalespersonId == seller.Id);
+    Check(kpi.Count == 1 && kpi[0].SalespersonId == seller.Id && kpi[0].SalespersonName == seller.FullName && kpi[0].TotalOrders == await sellerOrders.CountAsync() && kpi[0].TotalRevenue == await sellerOrders.SumAsync(o => o.TotalAmount) && kpi[0].TargetRevenue == null,
+        "the salesperson KPI totals the live orders of each seller");
+    var thisBranch = await analytics.GetSummaryAsync(new SalesAnalyticsQuery { From = allTime.From, To = allTime.To, BranchId = branch.Id });
+    Check(thisBranch.TotalRevenue == summary.TotalRevenue && thisBranch.TotalOrders == summary.TotalOrders, "the branch filter keeps the figures of that branch");
+    var future = await analytics.GetSummaryAsync(new SalesAnalyticsQuery { From = DateTime.UtcNow.AddDays(30), To = DateTime.UtcNow.AddDays(60) });
+    Check(future.TotalRevenue == 0 && future.TotalOrders == 0 && (await analytics.GetSalespersonKpiAsync(new SalesAnalyticsQuery { From = DateTime.UtcNow.AddDays(30), To = DateTime.UtcNow.AddDays(60) })).Count == 0, "a period without activity reports zero");
+    await Reject(async () => await analytics.GetSummaryAsync(new SalesAnalyticsQuery { From = allTime.To, To = allTime.From }), "error.validation.request");
+    await using (var elsewhere = Db(new TestUser(false, [999999])))
+    {
+        var hidden = new SalesAnalyticsService(elsewhere, new BranchService(elsewhere));
+        var none = await hidden.GetSummaryAsync(allTime);
+        var noFunnel = await hidden.GetFunnelAsync(allTime);
+        Check(none.TotalRevenue == 0 && none.TotalOrders == 0 && noFunnel.OrderCount == 0 && noFunnel.QuotationCount == 0 && noFunnel.InvoiceCount == 0 && (await hidden.GetSalespersonKpiAsync(allTime)).Count == 0, "analytics only count records inside the caller's data scope");
+    }
+    Check(PermissionCatalog.Contains("sd:report:view"), "the report permission is in the catalog");
     await using var denied = Db(new TestUser(false, [999999]));
     Check(!await denied.SalesInvoices.AnyAsync() && !await denied.StockBalances.AnyAsync(), "server filters inaccessible branches");
     db.ChangeTracker.Clear(); var immutable = await db.SalesInvoices.FirstAsync(); immutable.TotalAmount = 1;
@@ -251,6 +527,28 @@ try
             "super administrator reads the permission catalog and roles");
         Check((await http.GetAsync("/api/v1/sys/notifications/unread-count")).IsSuccessStatusCode, "admin reads unread notification count over HTTP");
         Check((await http.GetAsync("/api/v1/sys/notifications")).IsSuccessStatusCode, "admin reads notification list over HTTP");
+        // Step-22: price list endpoints, the fixed route "calculate-price" must not be taken for an id.
+        using var listPage = JsonDocument.Parse(await http.GetStringAsync("/api/v1/sales/price-lists"));
+        Check(listPage.RootElement.GetProperty("data").GetProperty("totalCount").GetInt32() >= 1, "admin reads the price list page over HTTP");
+        using var priced = await http.PostAsJsonAsync("/api/v1/sales/price-lists/calculate-price", new { branchId = allowedBranch.Id, items = new[] { new { itemId = 1, quantity = 1 } } });
+        Check(priced.StatusCode != HttpStatusCode.NotFound && priced.StatusCode != HttpStatusCode.MethodNotAllowed && priced.StatusCode != HttpStatusCode.Forbidden, "calculate-price is routed and allowed for the administrator");
+        Check((await http.GetAsync("/api/v1/sales/quotations")).IsSuccessStatusCode, "admin reads the quotation page over HTTP");
+        Check((await http.PostAsync("/api/v1/sales/quotations/999999/convert-to-order", null)).StatusCode == HttpStatusCode.NotFound, "converting a missing quotation answers not found");
+        Check((await http.PostAsJsonAsync("/api/v1/sales/orders/999999/cancel", new { reason = "x" })).StatusCode == HttpStatusCode.NotFound, "cancelling a missing order answers not found");
+        Check((await http.PostAsJsonAsync("/api/v1/sales/orders/999999/approve-credit", new { reason = "x" })).StatusCode == HttpStatusCode.NotFound, "approving credit of a missing order answers not found");
+        Check((await http.GetAsync("/api/v1/sales/returns")).IsSuccessStatusCode, "admin reads the sales return page over HTTP");
+        Check((await http.GetAsync("/api/v1/sales/returns/999999")).StatusCode == HttpStatusCode.NotFound, "reading a missing return answers not found");
+        Check((await http.GetAsync("/api/v1/sales/analytics/summary")).IsSuccessStatusCode && (await http.GetAsync("/api/v1/sales/analytics/salesperson-kpi")).IsSuccessStatusCode && (await http.GetAsync("/api/v1/sales/analytics/funnel")).IsSuccessStatusCode, "admin reads the three sales analytics endpoints over HTTP");
+        Check((await http.GetAsync("/api/v1/sales/analytics/summary?from=2026-02-01T00:00:00Z&to=2026-01-01T00:00:00Z")).StatusCode == HttpStatusCode.BadRequest, "an inverted analytics period answers bad request");
+        Check((await http.GetAsync("/api/v1/sales/invoices/999999")).StatusCode == HttpStatusCode.NotFound, "reading a missing invoice answers not found");
+        http.DefaultRequestHeaders.Authorization = new("Bearer", viewerToken);
+        Check((await http.PostAsync("/api/v1/sales/quotations/1/send", null)).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without sd:quotation:edit cannot send a quotation");
+        Check((await http.PostAsJsonAsync("/api/v1/sales/orders/1/approve-credit", new { reason = "x" })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden && (await http.PostAsJsonAsync("/api/v1/sales/orders/1/cancel", new { reason = "x" })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without the permission cannot approve credit or cancel an order");
+        Check((await http.PostAsJsonAsync("/api/v1/sales/returns", new { branchId = 1, warehouseId = 1, refundMethod = 1, reason = "x", items = Array.Empty<object>() })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without sd:return:create cannot post a return");
+        http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
+        http.DefaultRequestHeaders.Authorization = new("Bearer", viewerToken);
+        Check((await http.PostAsJsonAsync("/api/v1/sales/price-lists", new { code = "X", name = "X", currency = "VND", effectiveFrom = DateTime.UtcNow })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without sd:pricelist:create cannot create a price list");
+        http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
         Check((await http.GetAsync("/api/v1/sys/notifications/preferences")).IsSuccessStatusCode, "admin reads preferences over HTTP");
         using var broadcastResp = await http.PostAsJsonAsync("/api/v1/sys/notifications/broadcast", new { title = "Broadcast", body = "System announcement", category = "SYS", severity = "INFO", targetType = "ALL" });
         Check(broadcastResp.IsSuccessStatusCode, "admin can broadcast notification over HTTP");

@@ -39,6 +39,13 @@ public interface IApplicationDbContext
     // Sales & Invoicing
     DbSet<SalesOrder> SalesOrders { get; }
     DbSet<SalesOrderItem> SalesOrderItems { get; }
+    DbSet<PriceList> PriceLists { get; }
+    DbSet<PriceListItem> PriceListItems { get; }
+    DbSet<SalesQuotation> SalesQuotations { get; }
+    DbSet<SalesQuotationItem> SalesQuotationItems { get; }
+    DbSet<StockReservation> StockReservations { get; }
+    DbSet<SalesReturn> SalesReturns { get; }
+    DbSet<SalesReturnItem> SalesReturnItems { get; }
     DbSet<SalesInvoice> SalesInvoices { get; }
     DbSet<SalesInvoiceItem> SalesInvoiceItems { get; }
 

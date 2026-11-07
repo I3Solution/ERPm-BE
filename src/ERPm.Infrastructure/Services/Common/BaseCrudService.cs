@@ -167,7 +167,7 @@ public class BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
             var parameter = Expression.Parameter(typeof(TEntity), "e");
             var keyword = Expression.Constant(filter.Keyword.Trim().ToLowerInvariant());
             Expression? predicate = null;
-            foreach (var name in new[] { "Code", "Name", "OrderNumber", "CustomerName", "SupplierName" })
+            foreach (var name in new[] { "Code", "Name", "OrderNumber", "QuotationNumber", "ReturnNumber", "CustomerName", "SupplierName" })
             {
                 var property = typeof(TEntity).GetProperty(name);
                 if (property?.PropertyType != typeof(string)) continue;

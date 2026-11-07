@@ -22,6 +22,10 @@ public class StockBalanceDto
     public string? Barcode { get; set; }
     public string? UomName { get; set; }
     public decimal QuantityOnHand { get; set; }
+    /// <summary>Held for confirmed sales orders.</summary>
+    public decimal QuantityReserved { get; set; }
+    /// <summary>On hand minus reserved: what can still be sold.</summary>
+    public decimal QuantityAvailable { get; set; }
     public decimal AverageCostPrice { get; set; }
     public decimal TotalValue { get; set; }
     public bool IsLowStock { get; set; }
@@ -32,6 +36,7 @@ public class CreateStockReceiptRequest
     public Guid RequestId { get; set; }
     public bool IsOpeningBalance { get; set; }
     public int? BranchId { get; set; }
+    public int? DepartmentId { get; set; }
     public int WarehouseId { get; set; }
     public int? SupplierId { get; set; }
     public string? Notes { get; set; }

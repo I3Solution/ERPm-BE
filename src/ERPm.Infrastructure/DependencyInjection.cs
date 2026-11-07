@@ -46,11 +46,21 @@ public static class DependencyInjection
         // Register Generic Base CRUD Service for open generic types (Type-safe & Zero boilerplate for Solo Dev)
         services.AddScoped(typeof(IBaseCrudService<,,,,>), typeof(BaseCrudService<,,,,>));
         services.AddScoped(typeof(IBaseCrudService<,,,>), typeof(BaseCrudService<,,,>));
+        services.AddScoped<ISalesAnalyticsService, SalesAnalyticsService>();
+        services.AddScoped<SalesReturnService>();
+        services.AddScoped<IBaseCrudService<ERPm.Domain.Entities.Sales.SalesReturn, ERPm.Application.DTOs.Sales.SalesReturnDetailDto, ERPm.Application.DTOs.Sales.CreateSalesReturnRequest, ERPm.Application.DTOs.Sales.CreateSalesReturnRequest>>(p => p.GetRequiredService<SalesReturnService>());
+        services.AddScoped<SalesQuotationService>();
+        services.AddScoped<IBaseCrudService<ERPm.Domain.Entities.Sales.SalesQuotation, ERPm.Application.DTOs.Sales.SalesQuotationDetailDto, ERPm.Application.DTOs.Sales.CreateSalesQuotationRequest, ERPm.Application.DTOs.Sales.UpdateSalesQuotationRequest>>(p => p.GetRequiredService<SalesQuotationService>());
+        services.AddScoped<IQuotationWorkflow>(p => p.GetRequiredService<SalesQuotationService>());
+        services.AddScoped<PriceListService>();
+        services.AddScoped<IBaseCrudService<ERPm.Domain.Entities.Sales.PriceList, ERPm.Application.DTOs.Sales.PriceListDetailDto, ERPm.Application.DTOs.Sales.CreatePriceListRequest, ERPm.Application.DTOs.Sales.UpdatePriceListRequest>>(p => p.GetRequiredService<PriceListService>());
+        services.AddScoped<IPricingService>(p => p.GetRequiredService<PriceListService>());
         services.AddScoped<SalesOrderService>();
         services.AddScoped<PurchaseOrderService>();
         services.AddScoped<IBaseCrudService<ERPm.Domain.Entities.Sales.SalesOrder, ERPm.Application.DTOs.Sales.SalesOrderDto, ERPm.Application.DTOs.Sales.CreateSalesOrderRequest, ERPm.Application.DTOs.Sales.UpdateSalesOrderRequest>>(p => p.GetRequiredService<SalesOrderService>());
         services.AddScoped<IBaseCrudService<ERPm.Domain.Entities.Purchase.PurchaseOrder, ERPm.Application.DTOs.Purchase.PurchaseOrderDto, ERPm.Application.DTOs.Purchase.CreatePurchaseOrderRequest, ERPm.Application.DTOs.Purchase.UpdatePurchaseOrderRequest>>(p => p.GetRequiredService<PurchaseOrderService>());
         services.AddScoped<IOrderWorkflow<ERPm.Application.DTOs.Sales.SalesOrderDto>>(p => p.GetRequiredService<SalesOrderService>());
+        services.AddScoped<IOrderApproval<ERPm.Application.DTOs.Sales.SalesOrderDto>>(p => p.GetRequiredService<SalesOrderService>());
         services.AddScoped<IOrderWorkflow<ERPm.Application.DTOs.Purchase.PurchaseOrderDto>>(p => p.GetRequiredService<PurchaseOrderService>());
 
         // Register All Domain & Feature Services

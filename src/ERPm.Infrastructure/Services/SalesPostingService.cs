@@ -1,4 +1,4 @@
-using ERPm.Application.DTOs.Sales;
+﻿using ERPm.Application.DTOs.Sales;
 using ERPm.Application.Common.Interfaces;
 using ERPm.Application.Features.Sales;
 using ERPm.Application.Features.System;
@@ -27,6 +27,13 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
         var invoices = await query.Include(i => i.Branch).Include(i => i.Items).ThenInclude(i => i.Item)
             .OrderByDescending(i => i.InvoiceDate).ThenByDescending(i => i.Id).Take(50).ToListAsync(cancellationToken);
         return invoices.Select(Map).ToList();
+    }
+
+    public async Task<SalesInvoiceDto?> GetInvoiceAsync(int id, CancellationToken cancellationToken = default)
+    {
+        var invoice = await context.SalesInvoices.AsNoTracking().Include(i => i.Branch).Include(i => i.Items).ThenInclude(i => i.Item)
+            .SingleOrDefaultAsync(i => i.Id == id, cancellationToken);
+        return invoice == null ? null : Map(invoice);
     }
 
     public Task<SalesInvoiceDto> CreateInvoiceAsync(CreateSalesInvoiceRequest request, CancellationToken cancellationToken = default)
@@ -64,18 +71,18 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
             Require(items.Count == itemIds.Length && items.Values.All(i => i.ItemType != ItemType.Combo), "error.inventory.item");
             var balances = await context.StockBalances.Where(b => b.WarehouseId == warehouse!.Id && itemIds.Contains(b.ItemId)).ToDictionaryAsync(b => b.ItemId, cancellationToken);
             foreach (var group in request.Items.GroupBy(i => i.ItemId).Where(g => items[g.Key].ItemType == ItemType.Goods))
-                Require(balances.TryGetValue(group.Key, out var balance) && balance.QuantityOnHand >= group.Sum(i => i.Quantity), "error.stock.insufficient", 409);
+                Require(balances.TryGetValue(group.Key, out var balance) && balance.QuantityOnHand - balance.QuantityReserved >= group.Sum(i => i.Quantity), "error.stock.insufficient", 409);
 
             var invoice = new SalesInvoice
             {
                 RequestId = request.RequestId, RequestHash = hash,
-                InvoiceNumber = await posting.NumberAsync("HD", cancellationToken), BranchId = warehouse!.BranchId,
+                InvoiceNumber = await posting.NumberAsync("HD", cancellationToken), BranchId = warehouse!.BranchId, DepartmentId = request.DepartmentId,
                 WarehouseId = warehouse.Id, CustomerId = request.CustomerId, PaymentMethod = request.PaymentMethod,
                 CustomerName = request.CustomerName.Trim(), DiscountAmount = request.DiscountAmount, Notes = request.Notes, Status = VoucherStatus.Posted
             };
             var issue = new StockIssue
             {
-                Code = await posting.NumberAsync("PXK", cancellationToken), BranchId = warehouse.BranchId,
+                Code = await posting.NumberAsync("PXK", cancellationToken), BranchId = warehouse.BranchId, DepartmentId = request.DepartmentId,
                 WarehouseId = warehouse.Id, CustomerId = request.CustomerId, Status = VoucherStatus.Posted, Reason = invoice.InvoiceNumber
             };
             foreach (var line in request.Items)
@@ -139,8 +146,7 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
             if (invoice.RemainingDebt > 0)
             {
                 Require(customer != null, "error.sales.customer_required");
-                var receivables = await context.SalesInvoices.IgnoreQueryFilters().Where(i => !i.IsDeleted && i.Status == VoucherStatus.Posted && i.CustomerId == request.CustomerId)
-                    .SumAsync(i => i.RemainingDebt, cancellationToken);
+                var receivables = await posting.ReceivablesAsync(customer!.Id, cancellationToken);
                 Require(customer!.CreditLimit >= receivables + invoice.RemainingDebt, "error.sales.credit_limit", 409);
                 customer.DebtBalance += invoice.RemainingDebt;
             }
@@ -179,14 +185,14 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
 
     private static SalesInvoiceDto Map(SalesInvoice i) => new()
     {
-        Id = i.Id, InvoiceNumber = i.InvoiceNumber, InvoiceDate = i.InvoiceDate, BranchId = i.BranchId,
+        Id = i.Id, InvoiceNumber = i.InvoiceNumber, InvoiceDate = i.InvoiceDate, BranchId = i.BranchId, DepartmentId = i.DepartmentId,
         BranchCode = i.Branch?.Code, BranchName = i.Branch?.Name, CustomerName = i.CustomerName,
         PaymentMethodName = i.PaymentMethod switch { PaymentMethod.Cash => "sales.cash", PaymentMethod.BankTransfer => "sales.bank_transfer", _ => "sales.credit" },
         Status = i.Status.ToString(), SubTotal = i.SubTotal, DiscountAmount = i.DiscountAmount,
         TotalAmount = i.TotalAmount, PaidAmount = i.PaidAmount, TenderedAmount = i.TenderedAmount, ChangeAmount = i.ChangeAmount, RemainingDebt = i.RemainingDebt,
         Items = i.Items.Select(l => new SalesInvoiceItemDto
         {
-            ItemId = l.ItemId, ItemCode = string.IsNullOrEmpty(l.ItemCode) ? l.Item?.Code ?? "" : l.ItemCode,
+            Id = l.Id, ItemId = l.ItemId, ItemCode = string.IsNullOrEmpty(l.ItemCode) ? l.Item?.Code ?? "" : l.ItemCode,
             ItemName = string.IsNullOrEmpty(l.ItemName) ? l.Item?.Name ?? "" : l.ItemName,
             Quantity = l.Quantity, UnitPrice = l.UnitPrice, Amount = l.Amount
         }).ToList()
