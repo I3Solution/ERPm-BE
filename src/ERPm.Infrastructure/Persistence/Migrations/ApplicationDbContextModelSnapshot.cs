@@ -1991,6 +1991,10 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("is_deleted");
 
+                    b.Property<bool>("IsUnlimitedCredit")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_unlimited_credit");
+
                     b.Property<DateTime?>("LastModifiedAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_modified_at_utc");
@@ -2048,6 +2052,108 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_tbl_crm_partner_price_list_id");
 
                     b.ToTable("tbl_CRM_Partner", (string)null);
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Partner.PartnerDeliveryAddress", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Address")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("address");
+
+                    b.Property<string>("City")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("city");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("created_by");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at_utc");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("deleted_by");
+
+                    b.Property<string>("District")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("district");
+
+                    b.Property<Guid>("ExternalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("external_id");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_default");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
+                    b.Property<DateTime?>("LastModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_modified_at_utc");
+
+                    b.Property<string>("LastModifiedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("last_modified_by");
+
+                    b.Property<int>("PartnerId")
+                        .HasColumnType("integer")
+                        .HasColumnName("partner_id");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("phone");
+
+                    b.Property<string>("RecipientName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("recipient_name");
+
+                    b.Property<int?>("TenantId")
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("Ward")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("ward");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_crm_partner_delivery_address");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_crm_partner_delivery_address_external_id");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id", "IsDeleted" });
+
+                    b.HasIndex("PartnerId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_partner_delivery_address_default")
+                        .HasFilter("is_default = true AND is_deleted = false");
+
+                    b.ToTable("tbl_CRM_PartnerDeliveryAddress", (string)null);
                 });
 
             modelBuilder.Entity("ERPm.Domain.Entities.Purchase.PurchaseOrder", b =>
@@ -5005,6 +5111,18 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasForeignKey("PriceListId")
                         .OnDelete(DeleteBehavior.SetNull)
                         .HasConstraintName("fk_tbl_crm_partner_price_lists_price_list_id");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Partner.PartnerDeliveryAddress", b =>
+                {
+                    b.HasOne("ERPm.Domain.Entities.Partner.Partner", "Partner")
+                        .WithMany()
+                        .HasForeignKey("PartnerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_crm_partner_delivery_address_tbl_crm_partner_partner_id");
+
+                    b.Navigation("Partner");
                 });
 
             modelBuilder.Entity("ERPm.Domain.Entities.Purchase.PurchaseOrder", b =>

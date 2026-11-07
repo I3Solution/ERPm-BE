@@ -49,6 +49,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<Item> Items => Set<Item>();
     public DbSet<ItemAttribute> ItemAttributes => Set<ItemAttribute>();
     public DbSet<Partner> Partners => Set<Partner>();
+    public DbSet<PartnerDeliveryAddress> PartnerDeliveryAddresses => Set<PartnerDeliveryAddress>();
     public DbSet<Warehouse> Warehouses => Set<Warehouse>();
     public DbSet<StockBalance> StockBalances => Set<StockBalance>();
     public DbSet<StockReceipt> StockReceipts => Set<StockReceipt>();
@@ -487,6 +488,27 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
 
             entity.HasIndex(e => e.Code).IsUnique();
             entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        // 3.1 CRM - Partner delivery addresses
+        modelBuilder.Entity<PartnerDeliveryAddress>(entity =>
+        {
+            entity.ToTable("tbl_CRM_PartnerDeliveryAddress");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.RecipientName).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.Phone).HasMaxLength(50);
+            entity.Property(e => e.Address).HasMaxLength(500).IsRequired();
+            entity.Property(e => e.City).HasMaxLength(100);
+            entity.Property(e => e.District).HasMaxLength(100);
+            entity.Property(e => e.Ward).HasMaxLength(100);
+
+            entity.HasOne(e => e.Partner).WithMany().HasForeignKey(e => e.PartnerId).OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => e.PartnerId);
+            // At most one live default address per partner.
+            entity.HasIndex(e => e.PartnerId).IsUnique().HasFilter("is_default = true AND is_deleted = false")
+                .HasDatabaseName("ux_partner_delivery_address_default");
+            entity.HasQueryFilter(e => !e.IsDeleted && !e.Partner!.IsDeleted);
         });
 
         // 4. WMS - Inventory
