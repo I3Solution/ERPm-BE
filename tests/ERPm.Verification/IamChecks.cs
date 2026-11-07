@@ -143,6 +143,31 @@ static class IamChecks
         t.Check((await reader.IamRoles.AsNoTracking().SingleAsync(r => r.Id == concurrentRole.Id)).Name == "First edit", "stale role edit is refused and the first save is kept");
         await roles.SetUserAccessAsync(account.Id, new UserAccessPolicyDto());
 
+        // Atomic save: a statement of the batch fails (the user row is locked by another transaction) and nothing stays half written.
+        await using (var holder = t.Db(null))
+        {
+            await using var lockTx = await holder.Database.BeginTransactionAsync();
+            await holder.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"tbl_SYS_User\" SET is_active = is_active WHERE id = {account.Id}");
+            await using var blocked = t.Db(null);
+            await blocked.Database.OpenConnectionAsync();   // keeps one session so the lock timeout below applies to the save
+            await blocked.Database.ExecuteSqlRawAsync("SET lock_timeout = '300ms'");
+            var failed = false;
+            try
+            {
+                await new RoleService(blocked, Iam(blocked)).SetUserAccessAsync(account.Id, new UserAccessPolicyDto
+                {
+                    Roles = [new() { RoleId = warehouse.Id }],
+                    InlinePolicy = SystemRoles.Policy(SystemRoles.Deny("HalfWritten", ["sd:order:*"]))
+                });
+            }
+            catch (Exception e) { failed = e.ToString().Contains("55P03"); }   // PostgreSQL lock_not_available, i.e. the save really started and was refused
+            await lockTx.RollbackAsync();
+            await using var after = t.Db(null);
+            var linked = await after.UserRoles.AsNoTracking().CountAsync(l => l.UserId == account.Id);
+            var inline = (await after.AppUsers.AsNoTracking().SingleAsync(u => u.Id == account.Id)).InlinePolicy;
+            t.Check(failed && linked == 0 && inline == null, "a failed role assignment save leaves neither the roles nor the inline policy half written");
+        }
+
         var workHistories = new WorkHistoryService(db, Iam(db));
         await workHistories.CreateAsync(new CreateWorkHistoryRequest
         {
