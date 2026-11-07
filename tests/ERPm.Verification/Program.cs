@@ -335,6 +335,7 @@ try
     var unlimitedOrder = await orders.ConfirmAsync((await DraftOrder(unlimited.Id, 1)).Id, default);
     Check(unlimitedOrder.Status == "Confirmed" && unlimitedOrder.CreditCheckStatus == "Passed" && unlimitedOrder.ReservationStatus == "Reserved", "an order of a customer with unlimited credit is confirmed without approval or warning");
     await orders.CancelAsync(unlimitedOrder.Id, "credit test done", default);
+    (await db.Accounts.SingleAsync(a => a.Code == "511")).IsActive = true; await db.SaveChangesAsync();   // earlier checks switched revenue off
     CreateSalesInvoiceRequest OnCredit(int customerId) => new() { RequestId = Guid.NewGuid(), WarehouseId = warehouse.Id, CustomerId = customerId, PaidAmount = 0, Items = [new() { ItemId = creditItem.Id, Quantity = 1, UnitPrice = 100 }] };
     await Reject(async () => await Sales(db).CreateInvoiceAsync(OnCredit(limitedTwin.Id)), "error.sales.credit_limit");
     var unlimitedInvoice = await Sales(db).CreateInvoiceAsync(OnCredit(unlimited.Id));
@@ -364,6 +365,7 @@ try
     await PartnersAs(holderB).SetUnlimitedCreditAsync(limitedTwin.Id, false);
     await Reject(async () => await Sales(db).CreateInvoiceAsync(OnCredit(limitedTwin.Id)), "error.sales.credit_limit");
     await Reject(async () => await PartnersAs(holderA).SetUnlimitedCreditAsync(999999, true), "error.crm.partner_not_found");
+    (await db.Accounts.SingleAsync(a => a.Code == "511")).IsActive = false; await db.SaveChangesAsync();   // restore the state the next checks expect
 
     // Delivery addresses: default rules, limit, validation and soft delete.
     var addressee = new Partner { Code = "ADDR", Name = "Addressee", PartnerType = PartnerType.Customer };
