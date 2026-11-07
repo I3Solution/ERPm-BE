@@ -164,6 +164,30 @@ public static class NotificationTemplateSeeder
             },
             new()
             {
+                Code = "CRM_PARTNER_UNLIMITED_CREDIT_CHANGED",
+                Name = "Đổi hạn mức nợ không giới hạn của đối tác",
+                Category = NotificationCategory.CRM,
+                DefaultSeverity = NotificationSeverity.WARNING,
+                SupportedChannels = [NotificationChannel.InApp, NotificationChannel.PushMobile],
+                TitleTemplate = "Hạn mức nợ không giới hạn: {partner_name}",
+                BodyTemplate = "Đối tác {partner_name} ({partner_code}) vừa được đổi chế độ không giới hạn hạn mức nợ, trạng thái mới: {state}.",
+                ActionUrlPattern = "/crm/partners",
+                Translations = new Dictionary<string, NotificationTemplateTranslation>
+                {
+                    ["vi"] = new()
+                    {
+                        Title = "Hạn mức nợ không giới hạn: {partner_name}",
+                        Body = "Đối tác {partner_name} ({partner_code}) vừa được đổi chế độ không giới hạn hạn mức nợ, trạng thái mới: {state}."
+                    },
+                    ["en"] = new()
+                    {
+                        Title = "Unlimited credit: {partner_name}",
+                        Body = "Partner {partner_name} ({partner_code}) had its unlimited credit setting changed, new state: {state}."
+                    }
+                }
+            },
+            new()
+            {
                 Code = "SD_ORDER_INVOICED",
                 Name = "Đơn hàng đã xuất hóa đơn",
                 Category = NotificationCategory.SD,

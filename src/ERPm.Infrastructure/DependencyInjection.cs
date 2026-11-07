@@ -70,6 +70,7 @@ public static class DependencyInjection
         services.AddScoped<IStockService, StockService>();
         services.AddScoped<ISalesInvoiceService, SalesInvoiceService>();
         services.AddScoped<IPartnerService, PartnerService>();
+        services.AddScoped<IPartnerDeliveryAddressService, PartnerDeliveryAddressService>();
         services.AddScoped<IDashboardService, DashboardService>();
 
         // IAM (dynamic roles, policy evaluation) and HRM organization

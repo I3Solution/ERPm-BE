@@ -1,6 +1,10 @@
+using ERPm.Application.Common;
 using ERPm.Application.Common.Interfaces;
+using ERPm.Application.Common.Notifications;
 using ERPm.Application.DTOs.Partner;
 using ERPm.Application.Features.Partner;
+using ERPm.Application.Features.System;
+using ERPm.Infrastructure.Persistence;
 using ERPm.Domain.Entities.Partner;
 using Microsoft.EntityFrameworkCore;
 using ERPm.Domain.Common;
@@ -11,13 +15,19 @@ namespace ERPm.Infrastructure.Services;
 
 public class PartnerService : IPartnerService
 {
-    private readonly IApplicationDbContext _context;
-    private readonly ICurrentUser? _user;
+    public const string UnlimitedCreditAction = "crm:partner:unlimited-credit";
 
-    public PartnerService(IApplicationDbContext context, ICurrentUser? user = null)
+    private readonly ApplicationDbContext _context;
+    private readonly ICurrentUser? _user;
+    private readonly IIamService? _iam;
+    private readonly INotificationEngine? _notificationEngine;
+
+    public PartnerService(ApplicationDbContext context, ICurrentUser? user = null, IIamService? iam = null, INotificationEngine? notificationEngine = null)
     {
         _context = context;
         _user = user;
+        _iam = iam;
+        _notificationEngine = notificationEngine;
     }
 
     public async Task<List<PartnerDto>> GetPartnersAsync(CancellationToken cancellationToken = default)
@@ -39,6 +49,7 @@ public class PartnerService : IPartnerService
                     _context.SalesInvoices.Where(i => i.CustomerId == p.Id && i.Status == VoucherStatus.Posted).Sum(i => i.RemainingDebt) -
                     _context.StockReceipts.Where(r => r.SupplierId == p.Id && r.Status == VoucherStatus.Posted).Sum(r => r.TotalAmount),
                 PriceListId = p.PriceListId,
+                IsUnlimitedCredit = p.IsUnlimitedCredit,
                 IsActive = p.IsActive
             })
             .ToListAsync(cancellationToken);
@@ -48,6 +59,7 @@ public class PartnerService : IPartnerService
     {
         Require(!string.IsNullOrWhiteSpace(request.Name) && request.Name.Length <= 255 && request.Code.Length <= 50 && Enum.IsDefined(request.PartnerType), "error.validation.request");
         ValidateNumber(request.CreditLimit);
+        if (request.IsUnlimitedCredit) await RequireUnlimitedCreditRightAsync(cancellationToken);
         Require(request.PriceListId == null || await _context.PriceLists.AnyAsync(l => l.Id == request.PriceListId && l.IsActive, cancellationToken), "error.validation.reference");
         var partner = new Partner
         {
@@ -61,27 +73,77 @@ public class PartnerService : IPartnerService
             CreditLimit = request.CreditLimit,
             DebtBalance = 0m,
             PriceListId = request.PriceListId,
+            IsUnlimitedCredit = request.IsUnlimitedCredit,
             IsActive = true,
             Notes = request.Notes
         };
 
         await _context.Partners.AddAsync(partner, cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
-
-        return new PartnerDto
-        {
-            Id = partner.Id,
-            Code = partner.Code,
-            Name = partner.Name,
-            PartnerType = partner.PartnerType,
-            Phone = partner.Phone,
-            Email = partner.Email,
-            Address = partner.Address,
-            TaxCode = partner.TaxCode,
-            CreditLimit = partner.CreditLimit,
-            DebtBalance = partner.DebtBalance,
-            PriceListId = partner.PriceListId,
-            IsActive = partner.IsActive
-        };
+        if (partner.IsUnlimitedCredit) await AnnounceUnlimitedCreditAsync(partner, cancellationToken);
+        return ToDto(partner);
     }
+
+    public async Task<PartnerDto> SetUnlimitedCreditAsync(int partnerId, bool isUnlimitedCredit, CancellationToken cancellationToken = default)
+    {
+        var partner = await _context.Partners.SingleOrDefaultAsync(p => p.Id == partnerId, cancellationToken);
+        Require(partner != null, "error.crm.partner_not_found", 404);
+        // Sending the value the partner already has changes nothing, so it needs no right and raises no notice.
+        if (partner!.IsUnlimitedCredit == isUnlimitedCredit) return ToDto(partner);
+        await RequireUnlimitedCreditRightAsync(cancellationToken);
+        partner.IsUnlimitedCredit = isUnlimitedCredit;
+        await _context.SaveChangesAsync(cancellationToken);
+        await AnnounceUnlimitedCreditAsync(partner, cancellationToken);
+        return ToDto(partner);
+    }
+
+    // System calls (seeding, background jobs) have no signed-in principal and are not restricted.
+    private async Task RequireUnlimitedCreditRightAsync(CancellationToken ct)
+    {
+        if (_iam == null) return;
+        var principal = await _iam.GetCurrentPrincipalAsync(ct);
+        Require(principal == null || principal.Can(UnlimitedCreditAction), "error.crm.unlimited_credit_forbidden", 403);
+    }
+
+    // Sent after the change is saved, to everyone who may switch the flag except the person who just did.
+    private async Task AnnounceUnlimitedCreditAsync(Partner partner, CancellationToken ct)
+    {
+        if (_notificationEngine == null || _iam == null) return;
+        int.TryParse(_user?.UserId, out var actorId);
+        var userIds = await _context.AppUsers.AsNoTracking().Where(u => u.IsActive && u.Id != actorId).Select(u => u.Id).ToListAsync(ct);
+        foreach (var userId in userIds)
+        {
+            if (!(await _iam.GetPrincipalAsync(userId, ct)).Can(UnlimitedCreditAction)) continue;
+            _ = _notificationEngine.PublishAsync(new ERPm.Domain.Events.NotificationEvent(
+                "CRM_PARTNER_UNLIMITED_CREDIT_CHANGED",
+                ERPm.Domain.Enums.NotificationCategory.CRM,
+                partner.IsUnlimitedCredit ? ERPm.Domain.Enums.NotificationSeverity.WARNING : ERPm.Domain.Enums.NotificationSeverity.INFO,
+                ERPm.Domain.Enums.NotificationTargetType.User,
+                targetId: userId,
+                parameters: new Dictionary<string, object>
+                {
+                    ["partner_code"] = partner.Code,
+                    ["partner_name"] = partner.Name,
+                    ["state"] = partner.IsUnlimitedCredit ? "ON" : "OFF"
+                },
+                actionUrl: "/crm/partners"));
+        }
+    }
+
+    private static PartnerDto ToDto(Partner partner) => new()
+    {
+        Id = partner.Id,
+        Code = partner.Code,
+        Name = partner.Name,
+        PartnerType = partner.PartnerType,
+        Phone = partner.Phone,
+        Email = partner.Email,
+        Address = partner.Address,
+        TaxCode = partner.TaxCode,
+        CreditLimit = partner.CreditLimit,
+        DebtBalance = partner.DebtBalance,
+        PriceListId = partner.PriceListId,
+        IsUnlimitedCredit = partner.IsUnlimitedCredit,
+        IsActive = partner.IsActive
+    };
 }

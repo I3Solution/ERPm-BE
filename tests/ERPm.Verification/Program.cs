@@ -8,6 +8,7 @@ using ERPm.Domain.Services.Sales;
 using ERPm.Application.Common.Interfaces;
 using ERPm.Application.DTOs.Inventory;
 using ERPm.Application.DTOs.Sales;
+using ERPm.Application.DTOs.Partner;
 using ERPm.Domain.Entities.Accounting;
 using ERPm.Domain.Entities.Catalog;
 using ERPm.Domain.Entities.Partner;
@@ -323,6 +324,89 @@ try
     Check(warned.Status == "Confirmed" && warned.CreditCheckStatus == "Warning" && await Reserved() == 4, "an order close to the credit limit is confirmed with a warning");
     var second = await orders.ConfirmAsync((await DraftOrder(edge.Id, 1, 200)).Id, default);
     Check(second.Status == "PendingApproval", "orders already confirmed for a customer count against its credit limit");
+    // Unlimited credit: one shared policy lifts the limit for orders and invoices, and raises no warning.
+    var unlimited = new Partner { Code = "UNLIM", Name = "Unlimited", CreditLimit = 0, IsUnlimitedCredit = true, PartnerType = PartnerType.Customer };
+    var limitedTwin = new Partner { Code = "LTWIN", Name = "Limited twin", CreditLimit = 0, PartnerType = PartnerType.Customer };
+    var creditItem = new Item { Code = "CREDIT", Name = "Credit goods", BaseUomId = uom.Id, SalePrice = 100, CostPrice = 1 };
+    db.Partners.AddRange(unlimited, limitedTwin); db.Items.Add(creditItem); await db.SaveChangesAsync();
+    db.StockBalances.Add(new StockBalance { WarehouseId = warehouse.Id, ItemId = creditItem.Id, QuantityOnHand = 10, AverageCostPrice = 1, InventoryValue = 10 }); await db.SaveChangesAsync();
+    Check(CreditLimitPolicy.Evaluate(true, 100, 5000) == CreditLevel.Passed && CreditLimitPolicy.Evaluate(false, 100, 90) == CreditLevel.Warning
+        && CreditLimitPolicy.Evaluate(false, 100, 101) == CreditLevel.Exceeded && CreditLimitPolicy.Evaluate(false, 100, 10) == CreditLevel.Passed, "the credit policy lifts the limit only for unlimited customers");
+    var unlimitedOrder = await orders.ConfirmAsync((await DraftOrder(unlimited.Id, 1)).Id, default);
+    Check(unlimitedOrder.Status == "Confirmed" && unlimitedOrder.CreditCheckStatus == "Passed" && unlimitedOrder.ReservationStatus == "Reserved", "an order of a customer with unlimited credit is confirmed without approval or warning");
+    await orders.CancelAsync(unlimitedOrder.Id, "credit test done", default);
+    CreateSalesInvoiceRequest OnCredit(int customerId) => new() { RequestId = Guid.NewGuid(), WarehouseId = warehouse.Id, CustomerId = customerId, PaidAmount = 0, Items = [new() { ItemId = creditItem.Id, Quantity = 1, UnitPrice = 100 }] };
+    await Reject(async () => await Sales(db).CreateInvoiceAsync(OnCredit(limitedTwin.Id)), "error.sales.credit_limit");
+    var unlimitedInvoice = await Sales(db).CreateInvoiceAsync(OnCredit(unlimited.Id));
+    Check(unlimitedInvoice.RemainingDebt == 100 && (await db.Partners.AsNoTracking().SingleAsync(p => p.Id == unlimited.Id)).DebtBalance == 100, "an invoice on credit is posted for an unlimited customer and its debt is still recorded");
+
+    // Changing the flag needs its own right, tells the other holders of that right and ignores a repeated value.
+    Check(PermissionCatalog.Contains("crm:partner:unlimited-credit"), "the permission catalog lists the unlimited credit right");
+    var holderA = new AppUser { UserName = "UNL_A", DisplayName = "Holder A", Role = "Viewer" };
+    var holderB = new AppUser { UserName = "UNL_B", DisplayName = "Holder B", Role = "Viewer" };
+    var withoutRight = new AppUser { UserName = "UNL_C", DisplayName = "No right", Role = "Viewer" };
+    db.AppUsers.AddRange(holderA, holderB, withoutRight); await db.SaveChangesAsync();
+    IamPrincipal Rights(params string[] actions) => new([SystemRoles.Allow("Test", actions)], new OrgContext { CompanyId = 1 }, false);
+    var iamStub = new IamStub(new() { [holderA.Id] = Rights("crm:partner:unlimited-credit"), [holderB.Id] = Rights("crm:partner:unlimited-credit"), [withoutRight.Id] = Rights("crm:partner:create") });
+    var partnerEvents = new RecordingEngine();
+    PartnerService PartnersAs(AppUser who) { iamStub.CurrentUserId = who.Id; return new PartnerService(db, new ActorUser(who.Id), iamStub, partnerEvents); }
+    await Reject(async () => await PartnersAs(withoutRight).SetUnlimitedCreditAsync(limitedTwin.Id, true), "error.crm.unlimited_credit_forbidden");
+    await Reject(async () => await PartnersAs(withoutRight).CreatePartnerAsync(new CreatePartnerRequest { Code = "NORIGHT", Name = "No right", IsUnlimitedCredit = true }), "error.crm.unlimited_credit_forbidden");
+    var plain = await PartnersAs(withoutRight).CreatePartnerAsync(new CreatePartnerRequest { Code = "PLAIN", Name = "Plain" });
+    Check(!plain.IsUnlimitedCredit && partnerEvents.Events.Count == 0, "a user without the right can still create a partner with limited credit and nobody is notified");
+    var switchedOn = await PartnersAs(holderA).SetUnlimitedCreditAsync(limitedTwin.Id, true);
+    var announced = partnerEvents.Events.OfType<ERPm.Domain.Events.NotificationEvent>().ToList();
+    Check(switchedOn.IsUnlimitedCredit && announced.Count == 1 && announced[0].TemplateCode == "CRM_PARTNER_UNLIMITED_CREDIT_CHANGED" && announced[0].TargetId == holderB.Id, "switching unlimited credit on notifies the other holders of the right but not the actor");
+    await PartnersAs(holderA).SetUnlimitedCreditAsync(limitedTwin.Id, true);
+    Check(partnerEvents.Events.Count == 1, "repeating the same value changes nothing and sends no notification");
+    var twinInvoice = await Sales(db).CreateInvoiceAsync(OnCredit(limitedTwin.Id));
+    Check(twinInvoice.RemainingDebt == 100, "once switched on, the customer's credit invoices are no longer blocked");
+    await PartnersAs(holderB).SetUnlimitedCreditAsync(limitedTwin.Id, false);
+    await Reject(async () => await Sales(db).CreateInvoiceAsync(OnCredit(limitedTwin.Id)), "error.sales.credit_limit");
+    await Reject(async () => await PartnersAs(holderA).SetUnlimitedCreditAsync(999999, true), "error.crm.partner_not_found");
+
+    // Delivery addresses: default rules, limit, validation and soft delete.
+    var addressee = new Partner { Code = "ADDR", Name = "Addressee", PartnerType = PartnerType.Customer };
+    db.Partners.Add(addressee); await db.SaveChangesAsync();
+    PartnerDeliveryAddressService Addresses(ApplicationDbContext c) => new(c, new PostingTransaction(c));
+    SaveDeliveryAddressRequest Address(string name, bool isDefault = false, string? phone = null) => new() { RecipientName = name, Address = name + " Street", Phone = phone, City = "Hanoi", IsDefault = isDefault };
+    var addresses = Addresses(db);
+    var firstAddress = await addresses.CreateAsync(addressee.Id, Address("One"));
+    Check(firstAddress.IsDefault && firstAddress.PartnerId == addressee.Id && firstAddress.Phone == null && firstAddress.CreatedAt.Kind == DateTimeKind.Utc, "the first address of a partner becomes its default");
+    var secondAddress = await addresses.CreateAsync(addressee.Id, Address("Two", isDefault: true, phone: "+84 (90) 123-4567"));
+    var listedAddresses = await addresses.GetAsync(addressee.Id);
+    Check(secondAddress.IsDefault && secondAddress.Phone == "+84901234567" && listedAddresses.Select(a => a.RecipientName).SequenceEqual(["Two", "One"]) && listedAddresses.Count(a => a.IsDefault) == 1, "a new default replaces the old one and the phone is stored normalized, default first");
+    var thirdAddress = await addresses.CreateAsync(addressee.Id, Address("Three"));
+    Check(!thirdAddress.IsDefault, "a later address is not the default unless asked");
+    var lowered = await addresses.UpdateAsync(addressee.Id, secondAddress.Id, Address("Two", isDefault: false));
+    Check(lowered.IsDefault, "a default address cannot be lowered, another one must be chosen");
+    var renamed = await addresses.UpdateAsync(addressee.Id, thirdAddress.Id, Address("Three renamed", isDefault: true));
+    Check(renamed.IsDefault && !(await addresses.GetByIdAsync(addressee.Id, secondAddress.Id)).IsDefault, "updating with the default flag moves the default in one step");
+    var again = await addresses.SetDefaultAsync(addressee.Id, firstAddress.Id);
+    var repeated = await addresses.SetDefaultAsync(addressee.Id, firstAddress.Id);
+    Check(again.IsDefault && repeated.IsDefault && (await addresses.GetAsync(addressee.Id)).Count(a => a.IsDefault) == 1, "set-default is atomic and idempotent");
+    await using (var left = Db(user)) await using (var right = Db(user))
+    {
+        await Task.WhenAll(Addresses(left).SetDefaultAsync(addressee.Id, secondAddress.Id), Addresses(right).SetDefaultAsync(addressee.Id, thirdAddress.Id));
+        Check((await addresses.GetAsync(addressee.Id)).Count(a => a.IsDefault) == 1, "two simultaneous set-default requests still leave a single default");
+    }
+    var defaultNow = (await addresses.GetAsync(addressee.Id)).Single(a => a.IsDefault);
+    await addresses.DeleteAsync(addressee.Id, defaultNow.Id);
+    var afterDelete = await addresses.GetAsync(addressee.Id);
+    var expectedNext = afterDelete.OrderBy(a => a.CreatedAt).ThenBy(a => a.Id).First();
+    Check(afterDelete.Count == 2 && afterDelete.Count(a => a.IsDefault) == 1 && afterDelete.Single(a => a.IsDefault).Id == expectedNext.Id && afterDelete.All(a => a.Id != defaultNow.Id), "deleting the default moves it to the oldest remaining address");
+    Check((await db.PartnerDeliveryAddresses.IgnoreQueryFilters().AsNoTracking().SingleAsync(a => a.Id == defaultNow.Id)).IsDeleted, "a deleted address stays in the table as a soft delete");
+    await Reject(async () => await addresses.GetByIdAsync(addressee.Id, defaultNow.Id), "error.crm.delivery_address_not_found");
+    await Reject(async () => await addresses.GetByIdAsync(customer.Id, afterDelete[0].Id), "error.crm.delivery_address_not_found");
+    await Reject(async () => await addresses.GetAsync(999999), "error.crm.partner_not_found");
+    await Reject(async () => await addresses.CreateAsync(addressee.Id, Address(" ")), "error.crm.delivery_address_recipient_required");
+    await Reject(async () => await addresses.CreateAsync(addressee.Id, new SaveDeliveryAddressRequest { RecipientName = "X", Address = " " }), "error.crm.delivery_address_address_required");
+    await Reject(async () => await addresses.CreateAsync(addressee.Id, Address("Bad phone", phone: "12ab")), "error.crm.delivery_address_phone_invalid");
+    await Reject(async () => await addresses.CreateAsync(addressee.Id, Address("Short phone", phone: "1234567")), "error.crm.delivery_address_phone_invalid");
+    for (var n = afterDelete.Count; n < PartnerDeliveryAddressService.MaxAddressesPerPartner; n++) await addresses.CreateAsync(addressee.Id, Address("Fill " + n));
+    await Reject(async () => await addresses.CreateAsync(addressee.Id, Address("One too many")), "error.crm.delivery_address_limit");
+    await addresses.DeleteAsync(addressee.Id, (await addresses.GetAsync(addressee.Id)).Last().Id);
+    Check((await addresses.CreateAsync(addressee.Id, Address("Fits again"))).PartnerId == addressee.Id, "deleting an address frees a slot under the limit");
     await db.SalesOrderItems.Where(i => i.SalesOrderId == warned.Id).ExecuteUpdateAsync(i => i.SetProperty(x => x.InvoicedQuantity, 1m));
     await Reject(async () => await orders.CancelAsync(warned.Id, "too late", default), "error.sd.cannot_cancel_invoiced_order");
     // Tester findings: F1 pricing outside the data scope, F2 deleting a list used by an order, F3 order state errors.
@@ -718,6 +802,24 @@ sealed class RecordingEngine : ERPm.Application.Common.Notifications.INotificati
     }
     public Task<ERPm.Application.DTOs.System.NotificationResult> BroadcastAsync(ERPm.Application.DTOs.System.BroadcastNotificationRequest request, int? senderUserId = null, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
+}
+/// <summary>Answers permission lookups from a fixed table, so rights can be tested without building roles.</summary>
+sealed class IamStub(Dictionary<int, ERPm.Domain.Services.Iam.IamPrincipal> principals) : ERPm.Application.Features.System.IIamService
+{
+    public int CurrentUserId { get; set; }
+    static ERPm.Domain.Services.Iam.IamPrincipal NoRights() => new([], new ERPm.Domain.Services.Iam.OrgContext { CompanyId = 1 }, false);
+    public Task<ERPm.Domain.Services.Iam.IamPrincipal> GetPrincipalAsync(int userId, CancellationToken cancellationToken = default) => Task.FromResult(principals.TryGetValue(userId, out var p) ? p : NoRights());
+    public Task<ERPm.Domain.Services.Iam.IamPrincipal?> GetCurrentPrincipalAsync(CancellationToken cancellationToken = default) => Task.FromResult<ERPm.Domain.Services.Iam.IamPrincipal?>(principals.TryGetValue(CurrentUserId, out var p) ? p : NoRights());
+    public Task<List<ERPm.Application.DTOs.System.EffectivePermissionDto>> GetEffectiveAsync(int userId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    public Task EnsureCanGrantAsync(IEnumerable<ERPm.Domain.Entities.System.IamStatement> statements, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    public void Invalidate() { }
+}
+sealed class ActorUser(int id) : ICurrentUser
+{
+    public string? UserId => id.ToString();
+    public bool IsSystem => false;
+    public bool IsAdmin => true;
+    public int[] BranchIds => [];
 }
 /// <summary>A seller who only sees the records they created (SELF scope): no branch, own records on.</summary>
 sealed class SelfUser : ICurrentUser
