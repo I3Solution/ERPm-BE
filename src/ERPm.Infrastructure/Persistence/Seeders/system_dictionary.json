@@ -706,7 +706,10 @@
     "table.sku": "Mã SKU",
     "table.product_name": "Tên sản phẩm",
     "table.quantity": "Số lượng",
-    "table.unit_price": "Đơn giá"
+    "table.unit_price": "Đơn giá",
+    "sq.payment_terms": "Điều khoản thanh toán",
+    "pl.simulate_pricing": "Mô phỏng tính giá",
+    "pl.effective_dates": "Thời hạn áp dụng"
   },
   "en": {
     "common.app_name": "ERPm - Sales & Inventory Management",
@@ -1415,6 +1418,9 @@
     "table.sku": "SKU",
     "table.product_name": "Product Name",
     "table.quantity": "Quantity",
-    "table.unit_price": "Unit Price"
+    "table.unit_price": "Unit Price",
+    "sq.payment_terms": "Payment Terms",
+    "pl.simulate_pricing": "Simulate Pricing",
+    "pl.effective_dates": "Effective Dates"
   }
 }
