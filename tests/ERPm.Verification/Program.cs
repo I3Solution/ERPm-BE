@@ -704,7 +704,7 @@ try
     await docReturns.CreateAsync(ReturnOf(1, RefundMethod.Cash, price: 10));
     Check(DocTold("SD_RETURN_POSTED").SequenceEqual(Expected()), "a posted return notifies viewers of returns in a scope reaching it, not the actor");
     (await db.Accounts.SingleAsync(a => a.Code == "511")).IsActive = true; await db.SaveChangesAsync();   // earlier checks switched revenue off
-    var invoicer = new SalesInvoiceService(db, new BranchService(db), new PostingTransaction(db), new TestUser(false, [branch.Id]), docEngine, docIam);
+    var invoicer = new SalesInvoiceService(db, new BranchService(db), new PostingTransaction(db), new ActorUser(quoteActor.Id), docEngine, docIam);
     var toInvoice = await docOrders.ConfirmAsync((await docOrders.CreateAsync(new CreateSalesOrderRequest { BranchId = branch.Id, CustomerId = rich.Id, Items = [new() { ItemId = creditItem.Id, Quantity = 1, UnitPrice = 100 }] })).Id, default);
     await invoicer.CreateInvoiceFromOrderAsync(toInvoice.Id, FromOrder(PaymentMethod.Cash, 100));
     (await db.Accounts.SingleAsync(a => a.Code == "511")).IsActive = false; await db.SaveChangesAsync();   // restore the state the next checks expect
