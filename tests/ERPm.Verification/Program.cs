@@ -355,8 +355,8 @@ try
     var plain = await PartnersAs(withoutRight).CreatePartnerAsync(new CreatePartnerRequest { Code = "PLAIN", Name = "Plain" });
     Check(!plain.IsUnlimitedCredit && partnerEvents.Events.Count == 0, "a user without the right can still create a partner with limited credit and nobody is notified");
     var switchedOn = await PartnersAs(holderA).SetUnlimitedCreditAsync(limitedTwin.Id, true);
-    var announced = partnerEvents.Events.OfType<ERPm.Domain.Events.NotificationEvent>().ToList();
-    Check(switchedOn.IsUnlimitedCredit && announced.Count == 1 && announced[0].TemplateCode == "CRM_PARTNER_UNLIMITED_CREDIT_CHANGED" && announced[0].TargetId == holderB.Id, "switching unlimited credit on notifies the other holders of the right but not the actor");
+    var creditNotices = partnerEvents.Events.OfType<ERPm.Domain.Events.NotificationEvent>().ToList();
+    Check(switchedOn.IsUnlimitedCredit && creditNotices.Count == 1 && creditNotices[0].TemplateCode == "CRM_PARTNER_UNLIMITED_CREDIT_CHANGED" && creditNotices[0].TargetId == holderB.Id, "switching unlimited credit on notifies the other holders of the right but not the actor");
     await PartnersAs(holderA).SetUnlimitedCreditAsync(limitedTwin.Id, true);
     Check(partnerEvents.Events.Count == 1, "repeating the same value changes nothing and sends no notification");
     var twinInvoice = await Sales(db).CreateInvoiceAsync(OnCredit(limitedTwin.Id));
