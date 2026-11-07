@@ -131,9 +131,13 @@ public sealed class PartnerDeliveryAddressService(ApplicationDbContext context, 
     /// <summary>Checks the request and returns the phone number in its normalized form.</summary>
     private static string? Validate(SaveDeliveryAddressRequest request)
     {
-        Require(!string.IsNullOrWhiteSpace(request.RecipientName) && request.RecipientName.Trim().Length <= 255, "error.crm.delivery_address_recipient_required");
-        Require(!string.IsNullOrWhiteSpace(request.Address) && request.Address.Trim().Length <= 500, "error.crm.delivery_address_address_required");
-        Require((request.City?.Trim().Length ?? 0) <= 100 && (request.District?.Trim().Length ?? 0) <= 100 && (request.Ward?.Trim().Length ?? 0) <= 100, "error.validation.request");
+        Require(!string.IsNullOrWhiteSpace(request.RecipientName), "error.crm.delivery_address_recipient_required");
+        Require(request.RecipientName.Trim().Length <= 255, "error.crm.delivery_address_recipient_too_long");
+        Require(!string.IsNullOrWhiteSpace(request.Address), "error.crm.delivery_address_address_required");
+        Require(request.Address.Trim().Length <= 500, "error.crm.delivery_address_address_too_long");
+        Require((request.City?.Trim().Length ?? 0) <= 100, "error.crm.delivery_address_city_too_long");
+        Require((request.District?.Trim().Length ?? 0) <= 100, "error.crm.delivery_address_district_too_long");
+        Require((request.Ward?.Trim().Length ?? 0) <= 100, "error.crm.delivery_address_ward_too_long");
         if (string.IsNullOrWhiteSpace(request.Phone)) return null;
         var phone = Regex.Replace(request.Phone, @"[\s.\-()]", string.Empty);
         Require(PhoneDigits.IsMatch(phone), "error.crm.delivery_address_phone_invalid");

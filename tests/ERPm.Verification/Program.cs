@@ -360,6 +360,8 @@ try
     Check(switchedOn.IsUnlimitedCredit && creditNotices.Count == 1 && creditNotices[0].TemplateCode == "CRM_PARTNER_UNLIMITED_CREDIT_CHANGED" && creditNotices[0].TargetId == holderB.Id, "switching unlimited credit on notifies the other holders of the right but not the actor");
     await PartnersAs(holderA).SetUnlimitedCreditAsync(limitedTwin.Id, true);
     Check(partnerEvents.Events.Count == 1, "repeating the same value changes nothing and sends no notification");
+    await Reject(async () => await PartnersAs(holderA).SetUnlimitedCreditAsync(limitedTwin.Id, null), "error.crm.unlimited_credit_value_required");
+    Check(partnerEvents.Events.Count == 1 && (await db.Partners.AsNoTracking().SingleAsync(p => p.Id == limitedTwin.Id)).IsUnlimitedCredit, "a request without the value leaves the flag on and sends no notification");
     var twinInvoice = await Sales(db).CreateInvoiceAsync(OnCredit(limitedTwin.Id));
     Check(twinInvoice.RemainingDebt == 100, "once switched on, the customer's credit invoices are no longer blocked");
     await PartnersAs(holderB).SetUnlimitedCreditAsync(limitedTwin.Id, false);
@@ -405,6 +407,11 @@ try
     await Reject(async () => await addresses.CreateAsync(addressee.Id, new SaveDeliveryAddressRequest { RecipientName = "X", Address = " " }), "error.crm.delivery_address_address_required");
     await Reject(async () => await addresses.CreateAsync(addressee.Id, Address("Bad phone", phone: "12ab")), "error.crm.delivery_address_phone_invalid");
     await Reject(async () => await addresses.CreateAsync(addressee.Id, Address("Short phone", phone: "1234567")), "error.crm.delivery_address_phone_invalid");
+    await Reject(async () => await addresses.CreateAsync(addressee.Id, Address(new string('r', 256))), "error.crm.delivery_address_recipient_too_long");
+    await Reject(async () => await addresses.CreateAsync(addressee.Id, new SaveDeliveryAddressRequest { RecipientName = "X", Address = new string('a', 501) }), "error.crm.delivery_address_address_too_long");
+    await Reject(async () => await addresses.CreateAsync(addressee.Id, new SaveDeliveryAddressRequest { RecipientName = "X", Address = "A", City = new string('c', 101) }), "error.crm.delivery_address_city_too_long");
+    await Reject(async () => await addresses.CreateAsync(addressee.Id, new SaveDeliveryAddressRequest { RecipientName = "X", Address = "A", District = new string('d', 101) }), "error.crm.delivery_address_district_too_long");
+    await Reject(async () => await addresses.CreateAsync(addressee.Id, new SaveDeliveryAddressRequest { RecipientName = "X", Address = "A", Ward = new string('w', 101) }), "error.crm.delivery_address_ward_too_long");
     for (var n = afterDelete.Count; n < PartnerDeliveryAddressService.MaxAddressesPerPartner; n++) await addresses.CreateAsync(addressee.Id, Address("Fill " + n));
     await Reject(async () => await addresses.CreateAsync(addressee.Id, Address("One too many")), "error.crm.delivery_address_limit");
     await addresses.DeleteAsync(addressee.Id, (await addresses.GetAsync(addressee.Id)).Last().Id);
