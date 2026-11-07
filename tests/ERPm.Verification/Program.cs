@@ -470,6 +470,22 @@ try
     await Reject(async () => await seller3.CreateInvoiceFromOrderAsync(retail.Id, FromOrder(PaymentMethod.Debt)), "error.sales.customer_required");
     Check((await InvStock()).QuantityReserved == heldBefore && (await orders.GetByIdAsync(retail.Id))!.Status == "Confirmed", "a refused invoice leaves the order Confirmed with its stock still held");
     (await db.Accounts.SingleAsync(a => a.Code == "511")).IsActive = false; await db.SaveChangesAsync();   // restore the state the next checks expect
+    // Quotation notifications follow the customer's answer and the conversion, and only for changes that were saved.
+    var recorder = new RecordingEngine();
+    var talking = new SalesQuotationService(db, new PostingTransaction(db), recorder);
+    var announced = await talking.CreateAsync(QuoteRequest());
+    await talking.SendAsync(announced.Id);
+    Check(recorder.Events.Count == 0, "sending a quotation notifies nobody");
+    await talking.AcceptAsync(announced.Id);
+    Check(recorder.Events.Count == 1 && recorder.Events[0].TemplateCode == "SD_QUOTATION_ACCEPTED" && recorder.Events[0].BranchId == branch.Id && recorder.Events[0].Parameters["quotation_code"].ToString() == announced.QuotationNumber,
+        "an accepted quotation notifies its branch");
+    var conversion = await talking.ConvertToOrderAsync(announced.Id);
+    Check(recorder.Events.Count == 2 && recorder.Events[1].TemplateCode == "SD_QUOTATION_CONVERTED" && recorder.Events[1].Parameters["order_code"].ToString() == conversion.OrderNumber, "a converted quotation notifies with the new order number");
+    await Reject(async () => await talking.ConvertToOrderAsync(announced.Id), "error.sd.quotation_already_converted");
+    var turnedDown = await talking.CreateAsync(QuoteRequest());
+    await talking.SendAsync(turnedDown.Id);
+    await talking.RejectAsync(turnedDown.Id);
+    Check(recorder.Events.Count == 3 && recorder.Events[2].TemplateCode == "SD_QUOTATION_REJECTED" && recorder.Events[2].Severity == "WARNING", "a rejected quotation raises a warning");
     await using var denied = Db(new TestUser(false, [999999]));
     Check(!await denied.SalesInvoices.AnyAsync() && !await denied.StockBalances.AnyAsync(), "server filters inaccessible branches");
     db.ChangeTracker.Clear(); var immutable = await db.SalesInvoices.FirstAsync(); immutable.TotalAmount = 1;
@@ -675,6 +691,18 @@ try
 }
 catch { Console.Error.WriteLine($"Verification failed; isolated database retained: {testName}"); throw; }
 
+/// <summary>Remembers what would have been published, so checks can read it.</summary>
+sealed class RecordingEngine : ERPm.Application.Common.Notifications.INotificationEngine
+{
+    public List<ERPm.Domain.Events.INotificationEvent> Events { get; } = new();
+    public Task<ERPm.Application.DTOs.System.NotificationResult> PublishAsync(ERPm.Domain.Events.INotificationEvent notifEvent, CancellationToken cancellationToken = default)
+    {
+        Events.Add(notifEvent);
+        return Task.FromResult(new ERPm.Application.DTOs.System.NotificationResult(true, null, 0));
+    }
+    public Task<ERPm.Application.DTOs.System.NotificationResult> BroadcastAsync(ERPm.Application.DTOs.System.BroadcastNotificationRequest request, int? senderUserId = null, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+}
 /// <summary>A seller who only sees the records they created (SELF scope): no branch, own records on.</summary>
 sealed class SelfUser : ICurrentUser
 {
