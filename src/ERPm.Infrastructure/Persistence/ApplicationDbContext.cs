@@ -903,9 +903,14 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.Property(e => e.CreditApprovalReason).HasMaxLength(500);
             entity.Property(e => e.CancelReason).HasMaxLength(500);
             entity.Property(e => e.DeliveryAddress).HasMaxLength(500);
+            entity.Property(e => e.DeliveryRecipientName).HasMaxLength(255);
+            entity.Property(e => e.DeliveryPhone).HasMaxLength(50);
+            entity.Property(e => e.DeliveryAddressText).HasMaxLength(800);
             entity.HasOne(e => e.Salesperson).WithMany().HasForeignKey(e => e.SalespersonId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Quotation).WithMany().HasForeignKey(e => e.QuotationId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<PriceList>().WithMany().HasForeignKey(e => e.PriceListId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<PartnerDeliveryAddress>().WithMany().HasForeignKey(e => e.DeliveryAddressId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(e => e.DeliveryAddressId);
             entity.HasIndex(e => e.QuotationId);
             entity.HasIndex(e => e.SalespersonId);
             entity.HasIndex(e => e.Status);
@@ -942,6 +947,8 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.Property(e => e.UnitPrice).HasPrecision(18, 4);
             entity.Property(e => e.DiscountAmount).HasPrecision(18, 4);
             entity.Property(e => e.LineTotal).HasPrecision(18, 4);
+            entity.Property(e => e.VatRate).HasPrecision(5, 2);
+            entity.Property(e => e.TaxAmount).HasPrecision(18, 4);
             entity.Property(e => e.InvoicedQuantity).HasPrecision(18, 4);
 
             entity.HasOne(e => e.SalesOrder)
