@@ -17,6 +17,7 @@ public class Item : BaseAuditableEntity
     // Pricing and stock thresholds (Required decimal(18, 4) per accounting discipline)
     public decimal SalePrice { get; set; } = 0m;
     public decimal CostPrice { get; set; } = 0m;
+    public decimal VatRate { get; set; } = 0m;
     public decimal MinStockAlert { get; set; } = 0m;
     public decimal MaxStockAlert { get; set; } = 0m;
 
