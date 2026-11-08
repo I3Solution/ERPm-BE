@@ -46,25 +46,27 @@ public class PartnerService : IPartnerService
     /// </summary>
     public async Task<PartnerDto> UpdatePartnerAsync(int partnerId, UpdatePartnerRequest request, CancellationToken cancellationToken = default)
     {
-        Require(!string.IsNullOrWhiteSpace(request.Name) && request.Name.Trim().Length <= 255 && Enum.IsDefined(request.PartnerType), "error.validation.request");
+        Require(!string.IsNullOrWhiteSpace(request.Name) && request.Name.Trim().Length <= 255 && request.PartnerType.HasValue && Enum.IsDefined(request.PartnerType.Value)
+            && request.CreditLimit.HasValue && request.IsActive.HasValue, "error.validation.request");
+        Require(string.IsNullOrWhiteSpace(request.Email) || (System.Net.Mail.MailAddress.TryCreate(request.Email.Trim(), out var mail) && mail.Address == request.Email.Trim()), "error.validation.request");
         Require((request.Phone?.Length ?? 0) <= 50 && (request.Email?.Length ?? 0) <= 100 && (request.TaxCode?.Length ?? 0) <= 50
             && (request.Address?.Length ?? 0) <= 500 && (request.Notes?.Length ?? 0) <= 2000, "error.validation.request");
-        ValidateNumber(request.CreditLimit);
+        ValidateNumber(request.CreditLimit!.Value);
         var partner = await _context.Partners.SingleOrDefaultAsync(p => p.Id == partnerId, cancellationToken);
         Require(partner != null, "error.crm.partner_not_found", 404);
         // Keeping a list that was switched off since is allowed; choosing one needs it to be active.
         Require(request.PriceListId == null || request.PriceListId == partner!.PriceListId
             || await _context.PriceLists.AnyAsync(l => l.Id == request.PriceListId && l.IsActive, cancellationToken), "error.validation.reference");
         partner!.Name = request.Name.Trim();
-        partner.PartnerType = request.PartnerType;
+        partner.PartnerType = request.PartnerType!.Value;
         partner.Phone = Clean(request.Phone);
         partner.Email = Clean(request.Email);
         partner.Address = Clean(request.Address);
         partner.TaxCode = Clean(request.TaxCode);
-        partner.CreditLimit = request.CreditLimit;
+        partner.CreditLimit = request.CreditLimit!.Value;
         partner.PriceListId = request.PriceListId;
         partner.Notes = Clean(request.Notes);
-        partner.IsActive = request.IsActive;
+        partner.IsActive = request.IsActive!.Value;
         await _context.SaveChangesAsync(cancellationToken);
         return await GetPartnerAsync(partnerId, cancellationToken);
     }
