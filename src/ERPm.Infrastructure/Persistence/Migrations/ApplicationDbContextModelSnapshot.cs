@@ -499,6 +499,11 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("jsonb")
                         .HasColumnName("translations");
 
+                    b.Property<decimal>("VatRate")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("vat_rate");
+
                     b.HasKey("Id")
                         .HasName("pk_tbl_wms_item");
 

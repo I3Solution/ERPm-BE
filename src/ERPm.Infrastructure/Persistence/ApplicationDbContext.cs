@@ -426,6 +426,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
 
             entity.Property(e => e.SalePrice).HasPrecision(18, 4);
             entity.Property(e => e.CostPrice).HasPrecision(18, 4);
+            entity.Property(e => e.VatRate).HasPrecision(18, 4);
             entity.Property(e => e.MinStockAlert).HasPrecision(18, 4);
             entity.Property(e => e.MaxStockAlert).HasPrecision(18, 4);
 

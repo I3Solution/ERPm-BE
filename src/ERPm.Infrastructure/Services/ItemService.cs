@@ -74,6 +74,7 @@ public class ItemService : IItemService
                 BaseUomName = i.BaseUom != null ? i.BaseUom.Name : null,
                 SalePrice = i.SalePrice,
                 CostPrice = i.CostPrice,
+                VatRate = i.VatRate,
                 MinStockAlert = i.MinStockAlert,
                 MaxStockAlert = i.MaxStockAlert,
                 ImageUrl = i.ImageUrl,
@@ -116,6 +117,7 @@ public class ItemService : IItemService
             BaseUomName = item.BaseUom?.Name,
             SalePrice = item.SalePrice,
             CostPrice = item.CostPrice,
+            VatRate = item.VatRate,
             MinStockAlert = item.MinStockAlert,
             MaxStockAlert = item.MaxStockAlert,
             ImageUrl = item.ImageUrl,
@@ -139,6 +141,7 @@ public class ItemService : IItemService
             BaseUomId = request.BaseUomId,
             SalePrice = request.SalePrice,
             CostPrice = request.CostPrice,
+            VatRate = request.VatRate,
             MinStockAlert = request.MinStockAlert,
             MaxStockAlert = request.MaxStockAlert,
             ImageUrl = request.ImageUrl,
@@ -174,6 +177,7 @@ public class ItemService : IItemService
         item.BaseUomId = request.BaseUomId;
         item.SalePrice = request.SalePrice;
         item.CostPrice = request.CostPrice;
+        item.VatRate = request.VatRate;
         item.MinStockAlert = request.MinStockAlert;
         item.MaxStockAlert = request.MaxStockAlert;
         item.ImageUrl = request.ImageUrl;
@@ -212,7 +216,8 @@ public class ItemService : IItemService
     private async Task ValidateAsync(CreateItemRequest request, CancellationToken ct)
     {
         Require(!string.IsNullOrWhiteSpace(request.Name) && request.Name.Trim().Length <= 255 && request.Code.Length <= 50 && (request.Barcode?.Length ?? 0) <= 100 && Enum.IsDefined(request.ItemType), "error.validation.request");
-        ValidateNumber(request.SalePrice); ValidateNumber(request.CostPrice); ValidateNumber(request.MinStockAlert); ValidateNumber(request.MaxStockAlert);
+        ValidateNumber(request.SalePrice); ValidateNumber(request.CostPrice); ValidateNumber(request.VatRate); ValidateNumber(request.MinStockAlert); ValidateNumber(request.MaxStockAlert);
+        Require(request.VatRate >= 0 && request.VatRate <= 100, "error.validation.request");
         Require(request.MaxStockAlert == 0 || request.MaxStockAlert >= request.MinStockAlert, "error.validation.request");
         Require(await _context.UnitsOfMeasure.AnyAsync(u => u.Id == request.BaseUomId && u.IsActive, ct), "error.validation.reference");
         Require(request.CategoryId == null || await _context.Categories.AnyAsync(c => c.Id == request.CategoryId && c.IsActive, ct), "error.validation.reference");
