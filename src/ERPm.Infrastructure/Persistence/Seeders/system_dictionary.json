@@ -756,7 +756,15 @@
     "so.duplicate_item_incremented": "Đã cộng dồn số lượng sản phẩm trùng",
     "so.vat_rate": "Thuế VAT (%)",
     "so.tax_amount": "Tiền thuế GTGT",
-    "table.line_total": "Thành tiền"
+    "table.line_total": "Thành tiền",
+    "common.back": "Quay lại",
+    "catalog.vat_rate": "Thuế suất VAT (%)",
+    "catalog.purchase_price": "Giá mua / nhập",
+    "catalog.selling_price": "Giá bán",
+    "catalog.vat_0": "0% (Không chịu thuế)",
+    "catalog.vat_5": "5%",
+    "catalog.vat_8": "8%",
+    "catalog.vat_10": "10%"
   },
   "en": {
     "common.app_name": "ERPm - Sales & Inventory Management",
@@ -1515,6 +1523,14 @@
     "so.duplicate_item_incremented": "Incremented quantity for existing product",
     "so.vat_rate": "VAT (%)",
     "so.tax_amount": "VAT Tax Amount",
-    "table.line_total": "Line Total"
+    "table.line_total": "Line Total",
+    "common.back": "Back",
+    "catalog.vat_rate": "VAT Rate (%)",
+    "catalog.purchase_price": "Purchase Price",
+    "catalog.selling_price": "Selling Price",
+    "catalog.vat_0": "0% (Tax exempt)",
+    "catalog.vat_5": "5%",
+    "catalog.vat_8": "8%",
+    "catalog.vat_10": "10%"
   }
 }
