@@ -25,6 +25,17 @@ public class PartnersController : BaseApiController
         return Ok(ApiResponse<List<PartnerDto>>.Ok(result));
     }
 
+    [RequirePermission("crm:partner:view")]
+    [HttpGet("{id:int}")]
+    public async Task<ActionResult<ApiResponse<PartnerDto>>> GetPartner(int id, CancellationToken cancellationToken) =>
+        Ok(ApiResponse<PartnerDto>.Ok(await _partnerService.GetPartnerAsync(id, cancellationToken)));
+
+    // The catalog has no separate edit right for partners yet, so editing needs the create right like the delivery addresses.
+    [RequirePermission("crm:partner:create")]
+    [HttpPut("{id:int}")]
+    public async Task<ActionResult<ApiResponse<PartnerDto>>> UpdatePartner(int id, [FromBody] UpdatePartnerRequest request, CancellationToken cancellationToken) =>
+        Ok(ApiResponse<PartnerDto>.Ok(await _partnerService.UpdatePartnerAsync(id, request, cancellationToken), "common.saved"));
+
     [RequirePermission("crm:partner:create")]
     [HttpPost]
     public async Task<ActionResult<ApiResponse<PartnerDto>>> CreatePartner([FromBody] CreatePartnerRequest request, CancellationToken cancellationToken)
