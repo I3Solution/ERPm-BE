@@ -634,7 +634,7 @@ try
     var waitingOrder = await orders.ConfirmAsync((await InvOrder(approvedPartner.Id, 1, 100)).Id, default);
     Check(waitingOrder.Status == "PendingApproval", "an order over the credit limit waits for approval before it can be invoiced");
     await Reject(async () => await seller3.CreateInvoiceFromOrderAsync(waitingOrder.Id, FromOrder(PaymentMethod.Debt)), "error.sd.order_invalid_status_for_action");
-    await orders.ApproveCreditAsync(waitingOrder.Id, "Prepaid by wire", default);
+    await new SalesOrderService(db, new PostingTransaction(db), null, null, user).ApproveCreditAsync(waitingOrder.Id, "Prepaid by wire", default);
     var approvalOnOrder = await db.SalesOrders.AsNoTracking().SingleAsync(o => o.Id == waitingOrder.Id);
     Check(approvalOnOrder.CreditApprovedBy == "verification" && approvalOnOrder.CreditApprovedAtUtc != null && approvalOnOrder.CreditApprovalReason == "Prepaid by wire", "the approver, the time and the reason are kept on the order");
     var onCredit = await seller3.CreateInvoiceFromOrderAsync(waitingOrder.Id, FromOrder(PaymentMethod.Debt));
