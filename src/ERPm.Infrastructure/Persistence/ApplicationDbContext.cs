@@ -901,6 +901,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.Property(e => e.CreditCheckStatus).HasMaxLength(50).HasDefaultValue(CreditCheckStatus.Passed).IsRequired();
             entity.Property(e => e.ReservationStatus).HasMaxLength(50).HasDefaultValue(OrderReservationStatus.None).IsRequired();
             entity.Property(e => e.CreditApprovalReason).HasMaxLength(500);
+            entity.Property(e => e.CreditApprovedBy).HasMaxLength(100);
             entity.Property(e => e.CancelReason).HasMaxLength(500);
             entity.Property(e => e.DeliveryAddress).HasMaxLength(500);
             entity.Property(e => e.DeliveryRecipientName).HasMaxLength(255);

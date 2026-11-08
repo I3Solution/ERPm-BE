@@ -154,7 +154,11 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
             {
                 Require(customer != null, "error.sales.customer_required");
                 var receivables = await posting.ReceivablesAsync(customer!.Id, cancellationToken);
-                Require(CreditLimitPolicy.Evaluate(customer!.IsUnlimitedCredit, customer.CreditLimit, receivables + invoice.RemainingDebt) != CreditLevel.Exceeded, "error.sales.credit_limit", 409);
+                // Going over the limit was approved when the order was confirmed (who and when are kept on the order), so
+                // invoicing that order on credit is not stopped again. Any other sale is held to the limit as before.
+                var approvedOnOrder = salesOrderId.HasValue && await context.SalesOrders.IgnoreQueryFilters()
+                    .AnyAsync(o => o.Id == salesOrderId && !o.IsDeleted && o.CreditCheckStatus == CreditCheckStatus.Overridden, cancellationToken);
+                Require(approvedOnOrder || CreditLimitPolicy.Evaluate(customer!.IsUnlimitedCredit, customer.CreditLimit, receivables + invoice.RemainingDebt) != CreditLevel.Exceeded, "error.sales.credit_limit", 409);
                 customer.DebtBalance += invoice.RemainingDebt;
             }
             issue.TotalCostAmount = issue.Items.Sum(i => i.TotalCost);

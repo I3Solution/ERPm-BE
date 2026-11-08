@@ -52,6 +52,8 @@ public class SalesOrder : BaseAuditableEntity
     public string CreditCheckStatus { get; set; } = Sales.CreditCheckStatus.Passed;
     public string ReservationStatus { get; set; } = OrderReservationStatus.None;
     public string? CreditApprovalReason { get; set; }
+    public string? CreditApprovedBy { get; set; }          // Who approved going over the credit limit
+    public DateTime? CreditApprovedAtUtc { get; set; }     // When it was approved
     public string? CancelReason { get; set; }
     public string? Notes { get; set; }
 

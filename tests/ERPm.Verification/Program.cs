@@ -626,6 +626,24 @@ try
     await Reject(async () => await seller3.CreateInvoiceFromOrderAsync(draftOnly.Id, FromOrder()), "error.sd.order_invalid_status_for_action");
     var taxed = await orders.ConfirmAsync((await InvOrder(rich.Id, 1, 100, tax: 10)).Id, default);
     await Reject(async () => await seller3.CreateInvoiceFromOrderAsync(taxed.Id, FromOrder()), "error.sd.order_tax_not_supported");
+    // An approved credit is honoured when the order is invoiced; an order that was never approved is still held to the limit.
+    await db.StockBalances.Where(b => b.ItemId == inv.Id).ExecuteUpdateAsync(b => b.SetProperty(x => x.QuantityOnHand, 100m));
+    var approvedPartner = new Partner { Code = "APPR", Name = "Approved", CreditLimit = 0, PartnerType = PartnerType.Customer };
+    var heldPartner = new Partner { Code = "LIM2", Name = "Limited 2", CreditLimit = 1000, PartnerType = PartnerType.Customer };
+    db.Partners.AddRange(approvedPartner, heldPartner); await db.SaveChangesAsync();
+    var waitingOrder = await orders.ConfirmAsync((await InvOrder(approvedPartner.Id, 1, 100)).Id, default);
+    Check(waitingOrder.Status == "PendingApproval", "an order over the credit limit waits for approval before it can be invoiced");
+    await Reject(async () => await seller3.CreateInvoiceFromOrderAsync(waitingOrder.Id, FromOrder(PaymentMethod.Debt)), "error.sd.order_invalid_status_for_action");
+    await orders.ApproveCreditAsync(waitingOrder.Id, "Prepaid by wire", default);
+    var approvalOnOrder = await db.SalesOrders.AsNoTracking().SingleAsync(o => o.Id == waitingOrder.Id);
+    Check(approvalOnOrder.CreditApprovedBy == "verification" && approvalOnOrder.CreditApprovedAtUtc != null && approvalOnOrder.CreditApprovalReason == "Prepaid by wire", "the approver, the time and the reason are kept on the order");
+    var onCredit = await seller3.CreateInvoiceFromOrderAsync(waitingOrder.Id, FromOrder(PaymentMethod.Debt));
+    Check(onCredit.RemainingDebt == 100 && (await db.Partners.AsNoTracking().SingleAsync(p => p.Id == approvedPartner.Id)).DebtBalance == 100, "an order whose credit was approved is invoiced on credit above the limit and its debt is booked");
+    var withinLimit = await orders.ConfirmAsync((await InvOrder(heldPartner.Id, 1, 600)).Id, default);
+    Check(withinLimit.CreditCheckStatus == "Passed" && withinLimit.Status == "Confirmed", "an order inside the limit is confirmed without approval");
+    await Sales(db).CreateInvoiceAsync(new CreateSalesInvoiceRequest { RequestId = Guid.NewGuid(), WarehouseId = warehouse.Id, CustomerId = heldPartner.Id, PaidAmount = 0, Items = [new() { ItemId = inv.Id, Quantity = 1, UnitPrice = 100 }] });
+    await db.Partners.Where(p => p.Id == heldPartner.Id).ExecuteUpdateAsync(p => p.SetProperty(x => x.CreditLimit, 650m));
+    await Reject(async () => await seller3.CreateInvoiceFromOrderAsync(withinLimit.Id, FromOrder(PaymentMethod.Debt)), "error.sales.credit_limit");
     var retail = await orders.ConfirmAsync((await InvOrder(null, 2, 100)).Id, default);
     var heldBefore = (await InvStock()).QuantityReserved;
     await Reject(async () => await seller3.CreateInvoiceFromOrderAsync(retail.Id, FromOrder(PaymentMethod.Debt)), "error.sales.customer_required");
