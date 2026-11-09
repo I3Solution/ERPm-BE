@@ -155,6 +155,7 @@ public class BranchService : IBranchService
             OrgUnitType.Group => parent == null && !await _context.Branches.AnyAsync(b => b.OrgUnitType == OrgUnitType.Group, cancellationToken),
             OrgUnitType.Company => parent?.OrgUnitType == OrgUnitType.Group,
             OrgUnitType.Branch => parent != null,
+            OrgUnitType.Warehouse => parent != null,
             _ => false
         } && (request.TaxCode?.Length ?? 0) <= 50, "error.validation.request");
         var branch = new Branch
@@ -163,7 +164,7 @@ public class BranchService : IBranchService
             Name = request.Name.Trim(),
             ParentId = request.ParentId,
             OrgUnitType = request.OrgUnitType,
-            CompanyId = request.OrgUnitType == OrgUnitType.Branch ? parent!.CompanyId : null,
+            CompanyId = (request.OrgUnitType == OrgUnitType.Branch || request.OrgUnitType == OrgUnitType.Warehouse) ? parent!.CompanyId : null,
             TaxCode = string.IsNullOrWhiteSpace(request.TaxCode) ? null : request.TaxCode.Trim(),
             Address = request.Address,
             Phone = request.Phone,
@@ -231,14 +232,14 @@ public class BranchService : IBranchService
             PostingTransaction.Require(parent != null, "error.validation.reference");
             PostingTransaction.Require(branch.OrgUnitType == OrgUnitType.Company
                 ? parent!.OrgUnitType == OrgUnitType.Group
-                : parent!.OrgUnitType is OrgUnitType.Company or OrgUnitType.Branch, "error.validation.request");
+                : parent!.OrgUnitType is OrgUnitType.Company or OrgUnitType.Branch or OrgUnitType.Warehouse, "error.validation.request");
 
             // The whole tree (ignoring the caller's scope) decides cycles: the new parent may not sit inside this subtree.
             var all = await _context.Branches.IgnoreQueryFilters().Where(b => !b.IsDeleted).ToListAsync(cancellationToken);
             var subtree = CollectSubtree(all, id);
             PostingTransaction.Require(subtree.All(b => b.Id != parent!.Id), "error.validation.reference");
 
-            if (branch.OrgUnitType == OrgUnitType.Branch)
+            if (branch.OrgUnitType is OrgUnitType.Branch or OrgUnitType.Warehouse)
             {
                 var newCompanyId = parent!.OrgUnitType == OrgUnitType.Company ? parent.Id : parent.CompanyId;
                 var ids = subtree.Select(b => b.Id).ToArray();
@@ -246,7 +247,7 @@ public class BranchService : IBranchService
                     PostingTransaction.Require(!await _context.Departments.AnyAsync(d => ids.Contains(d.BranchId), cancellationToken)
                         && !await _context.Employees.AnyAsync(e => ids.Contains(e.BranchId), cancellationToken)
                         && !await _context.WorkHistories.AnyAsync(w => ids.Contains(w.BranchId), cancellationToken), "error.validation.reference", 409);
-                foreach (var node in subtree.Where(b => b.OrgUnitType == OrgUnitType.Branch)) node.CompanyId = newCompanyId;
+                foreach (var node in subtree.Where(b => b.OrgUnitType is OrgUnitType.Branch or OrgUnitType.Warehouse)) node.CompanyId = newCompanyId;
             }
             branch.ParentId = request.ParentId;
         }

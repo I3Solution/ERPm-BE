@@ -10,7 +10,8 @@ public enum OrgUnitType
 {
     Group = 0,
     Company = 1,
-    Branch = 2
+    Branch = 2,
+    Warehouse = 3
 }
 
 public class Branch : BaseAuditableEntity
