@@ -63,6 +63,7 @@ public class ItemDto
 
     public decimal SalePrice { get; set; }
     public decimal CostPrice { get; set; }
+    public decimal VatRate { get; set; }
     public decimal MinStockAlert { get; set; }
     public decimal MaxStockAlert { get; set; }
 
@@ -85,6 +86,7 @@ public class CreateItemRequest
 
     public decimal SalePrice { get; set; }
     public decimal CostPrice { get; set; }
+    public decimal VatRate { get; set; }
     public decimal MinStockAlert { get; set; }
     public decimal MaxStockAlert { get; set; }
 
