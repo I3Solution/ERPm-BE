@@ -369,6 +369,39 @@ try
     await Reject(async () => await PartnersAs(holderA).SetUnlimitedCreditAsync(999999, true), "error.crm.partner_not_found");
     (await db.Accounts.SingleAsync(a => a.Code == "511")).IsActive = false; await db.SaveChangesAsync();   // restore the state the next checks expect
 
+    // Reading and editing one partner.
+    var viewed = await PartnersAs(holderA).GetPartnerAsync(limitedTwin.Id);
+    Check(viewed.Id == limitedTwin.Id && viewed.Code == "LTWIN" && viewed.Name == "Limited twin" && !viewed.IsUnlimitedCredit, "one partner can be read by id");
+    await Reject(async () => await PartnersAs(holderA).GetPartnerAsync(999999), "error.crm.partner_not_found");
+    var activeList = await db.PriceLists.AsNoTracking().FirstAsync(l => l.IsActive);
+    var debtBefore = (await db.Partners.AsNoTracking().SingleAsync(p => p.Id == limitedTwin.Id)).DebtBalance;
+    var partnerEdit = await PartnersAs(holderA).UpdatePartnerAsync(limitedTwin.Id, new UpdatePartnerRequest
+    { Name = "  Twin renamed ", PartnerType = PartnerType.Customer, Phone = "0901234567", Email = "twin@example.test", Address = "9 Edit Road", TaxCode = "0312345678", CreditLimit = 5000, PriceListId = activeList.Id, Notes = "VIP", IsActive = true });
+    var storedTwin = await db.Partners.AsNoTracking().SingleAsync(p => p.Id == limitedTwin.Id);
+    Check(partnerEdit.Name == "Twin renamed" && partnerEdit.Phone == "0901234567" && partnerEdit.Email == "twin@example.test" && partnerEdit.Address == "9 Edit Road" && partnerEdit.TaxCode == "0312345678"
+        && partnerEdit.CreditLimit == 5000 && partnerEdit.PriceListId == activeList.Id && partnerEdit.Notes == "VIP", "editing a partner saves its descriptive fields, credit limit and price list");
+    Check(storedTwin.Code == "LTWIN" && storedTwin.DebtBalance == debtBefore && !storedTwin.IsUnlimitedCredit, "editing never changes the code, the debt balance or the unlimited credit flag");
+    Check(storedTwin.LastModifiedBy != null && storedTwin.LastModifiedAtUtc != null, "the editor and the time are recorded");
+    UpdatePartnerRequest Edit(string name = "Twin", Action<UpdatePartnerRequest>? change = null) { var e = new UpdatePartnerRequest { Name = name, PartnerType = PartnerType.Customer, CreditLimit = 0, IsActive = true }; change?.Invoke(e); return e; }
+    var partnerBlanked = await PartnersAs(holderA).UpdatePartnerAsync(limitedTwin.Id, Edit(change: e => { e.Phone = " "; e.Notes = ""; e.PriceListId = activeList.Id; e.IsActive = false; }));
+    Check(partnerBlanked.Phone == null && partnerBlanked.Notes == null && !partnerBlanked.IsActive && partnerBlanked.CreditLimit == 0, "blank optional fields are cleared and the partner can be deactivated");
+    await Reject(async () => await PartnersAs(holderA).UpdatePartnerAsync(limitedTwin.Id, Edit(" ")), "error.validation.request");
+    await Reject(async () => await PartnersAs(holderA).UpdatePartnerAsync(limitedTwin.Id, Edit(change: e => e.Phone = new string('1', 51))), "error.validation.request");
+    await Reject(async () => await PartnersAs(holderA).UpdatePartnerAsync(limitedTwin.Id, Edit(change: e => e.CreditLimit = -1)), "error.validation.number");
+    await Reject(async () => await PartnersAs(holderA).UpdatePartnerAsync(limitedTwin.Id, Edit(change: e => e.PriceListId = 999999)), "error.validation.reference");
+    await Reject(async () => await PartnersAs(holderA).UpdatePartnerAsync(limitedTwin.Id, Edit(change: e => e.PartnerType = (PartnerType)99)), "error.validation.request");
+    await Reject(async () => await PartnersAs(holderA).UpdatePartnerAsync(999999, Edit("X")), "error.crm.partner_not_found");
+    // A body that leaves out a required field must change nothing (it used to reset the limit and the active flag).
+    var beforeIncomplete = await db.Partners.AsNoTracking().SingleAsync(p => p.Id == limitedTwin.Id);
+    await Reject(async () => await PartnersAs(holderA).UpdatePartnerAsync(limitedTwin.Id, new UpdatePartnerRequest { Name = "Only name" }), "error.validation.request");
+    await Reject(async () => await PartnersAs(holderA).UpdatePartnerAsync(limitedTwin.Id, Edit(change: e => e.CreditLimit = null)), "error.validation.request");
+    await Reject(async () => await PartnersAs(holderA).UpdatePartnerAsync(limitedTwin.Id, Edit(change: e => e.IsActive = null)), "error.validation.request");
+    await Reject(async () => await PartnersAs(holderA).UpdatePartnerAsync(limitedTwin.Id, Edit(change: e => e.PartnerType = null)), "error.validation.request");
+    var afterIncomplete = await db.Partners.AsNoTracking().SingleAsync(p => p.Id == limitedTwin.Id);
+    Check(afterIncomplete.Name == beforeIncomplete.Name && afterIncomplete.CreditLimit == beforeIncomplete.CreditLimit && afterIncomplete.IsActive == beforeIncomplete.IsActive && afterIncomplete.PartnerType == beforeIncomplete.PartnerType, "an incomplete edit changes nothing");
+    await Reject(async () => await PartnersAs(holderA).UpdatePartnerAsync(limitedTwin.Id, Edit(change: e => e.Email = "not-an-email")), "error.validation.request");
+    await Reject(async () => await PartnersAs(holderA).UpdatePartnerAsync(limitedTwin.Id, Edit(change: e => e.Email = "a@b@c.test")), "error.validation.request");
+
     // Delivery addresses: default rules, limit, validation and soft delete.
     var addressee = new Partner { Code = "ADDR", Name = "Addressee", PartnerType = PartnerType.Customer };
     db.Partners.Add(addressee); await db.SaveChangesAsync();

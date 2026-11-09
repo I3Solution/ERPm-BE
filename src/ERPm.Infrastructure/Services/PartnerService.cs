@@ -30,11 +30,51 @@ public class PartnerService : IPartnerService
         _notificationEngine = notificationEngine;
     }
 
-    public async Task<List<PartnerDto>> GetPartnersAsync(CancellationToken cancellationToken = default)
+    public async Task<List<PartnerDto>> GetPartnersAsync(CancellationToken cancellationToken = default) =>
+        await Projection(_context.Partners).OrderBy(p => p.Code).ToListAsync(cancellationToken);
+
+    public async Task<PartnerDto> GetPartnerAsync(int partnerId, CancellationToken cancellationToken = default)
     {
-        return await _context.Partners
-            .OrderBy(p => p.Code)
-            .Select(p => new PartnerDto
+        var partner = await Projection(_context.Partners.Where(p => p.Id == partnerId)).SingleOrDefaultAsync(cancellationToken);
+        Require(partner != null, "error.crm.partner_not_found", 404);
+        return partner!;
+    }
+
+    /// <summary>
+    /// Changes the descriptive fields, the credit limit, the price list and the active flag. The code and debt balance
+    /// are kept; who changed it and when is recorded by the standard auditing.
+    /// </summary>
+    public async Task<PartnerDto> UpdatePartnerAsync(int partnerId, UpdatePartnerRequest request, CancellationToken cancellationToken = default)
+    {
+        Require(!string.IsNullOrWhiteSpace(request.Name) && request.Name.Trim().Length <= 255 && request.PartnerType.HasValue && Enum.IsDefined(request.PartnerType.Value)
+            && request.CreditLimit.HasValue && request.IsActive.HasValue, "error.validation.request");
+        Require(string.IsNullOrWhiteSpace(request.Email) || (System.Net.Mail.MailAddress.TryCreate(request.Email.Trim(), out var mail) && mail.Address == request.Email.Trim()), "error.validation.request");
+        Require((request.Phone?.Length ?? 0) <= 50 && (request.Email?.Length ?? 0) <= 100 && (request.TaxCode?.Length ?? 0) <= 50
+            && (request.Address?.Length ?? 0) <= 500 && (request.Notes?.Length ?? 0) <= 2000, "error.validation.request");
+        ValidateNumber(request.CreditLimit!.Value);
+        var partner = await _context.Partners.SingleOrDefaultAsync(p => p.Id == partnerId, cancellationToken);
+        Require(partner != null, "error.crm.partner_not_found", 404);
+        // Keeping a list that was switched off since is allowed; choosing one needs it to be active.
+        Require(request.PriceListId == null || request.PriceListId == partner!.PriceListId
+            || await _context.PriceLists.AnyAsync(l => l.Id == request.PriceListId && l.IsActive, cancellationToken), "error.validation.reference");
+        partner!.Name = request.Name.Trim();
+        partner.PartnerType = request.PartnerType!.Value;
+        partner.Phone = Clean(request.Phone);
+        partner.Email = Clean(request.Email);
+        partner.Address = Clean(request.Address);
+        partner.TaxCode = Clean(request.TaxCode);
+        partner.CreditLimit = request.CreditLimit!.Value;
+        partner.PriceListId = request.PriceListId;
+        partner.Notes = Clean(request.Notes);
+        partner.IsActive = request.IsActive!.Value;
+        await _context.SaveChangesAsync(cancellationToken);
+        return await GetPartnerAsync(partnerId, cancellationToken);
+    }
+
+    private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private IQueryable<PartnerDto> Projection(IQueryable<Partner> partners) =>
+            partners.Select(p => new PartnerDto
             {
                 Id = p.Id,
                 Code = p.Code,
@@ -50,10 +90,9 @@ public class PartnerService : IPartnerService
                     _context.StockReceipts.Where(r => r.SupplierId == p.Id && r.Status == VoucherStatus.Posted).Sum(r => r.TotalAmount),
                 PriceListId = p.PriceListId,
                 IsUnlimitedCredit = p.IsUnlimitedCredit,
+                Notes = p.Notes,
                 IsActive = p.IsActive
-            })
-            .ToListAsync(cancellationToken);
-    }
+            });
 
     public async Task<PartnerDto> CreatePartnerAsync(CreatePartnerRequest request, CancellationToken cancellationToken = default)
     {
@@ -147,6 +186,7 @@ public class PartnerService : IPartnerService
         DebtBalance = partner.DebtBalance,
         PriceListId = partner.PriceListId,
         IsUnlimitedCredit = partner.IsUnlimitedCredit,
+        Notes = partner.Notes,
         IsActive = partner.IsActive
     };
 }
