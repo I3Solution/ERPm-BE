@@ -36,6 +36,9 @@ public class SalesOrderDto
     public string CreditCheckStatus { get; set; } = "Passed";
     /// <summary>None, Reserved or Released.</summary>
     public string ReservationStatus { get; set; } = "None";
+    public string? CreditApprovalReason { get; set; }
+    public string? CreditApprovedBy { get; set; }
+    public DateTime? CreditApprovedAtUtc { get; set; }
     public string? Notes { get; set; }
 
     public string? BranchName { get; set; }

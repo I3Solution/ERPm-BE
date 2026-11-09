@@ -33,7 +33,7 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
         Id = o.Id, OrderNumber = o.OrderNumber, OrderDate = o.OrderDate, BranchId = o.BranchId, DepartmentId = o.DepartmentId,
         CustomerId = o.CustomerId, CustomerName = o.CustomerName,
         SubTotal = o.SubTotal, DiscountAmount = o.DiscountAmount, TaxAmount = o.TaxAmount, TotalAmount = o.TotalAmount, PaidAmount = o.PaidAmount,
-        Status = o.Status, CreditCheckStatus = o.CreditCheckStatus, ReservationStatus = o.ReservationStatus, Notes = o.Notes,
+        Status = o.Status, CreditCheckStatus = o.CreditCheckStatus, ReservationStatus = o.ReservationStatus, CreditApprovalReason = o.CreditApprovalReason, CreditApprovedBy = o.CreditApprovedBy, CreditApprovedAtUtc = o.CreditApprovedAtUtc, Notes = o.Notes,
         ExpectedDeliveryDate = o.ExpectedDeliveryDate, DeliveryAddress = o.DeliveryAddress, DeliveryAddressId = o.DeliveryAddressId,
         DeliveryRecipientName = o.DeliveryRecipientName, DeliveryPhone = o.DeliveryPhone, DeliveryAddressText = o.DeliveryAddressText, QuotationId = o.QuotationId, QuotationNumber = o.Quotation?.QuotationNumber,
         SalespersonId = o.SalespersonId, SalespersonName = o.Salesperson?.FullName, PriceListId = o.PriceListId,
@@ -148,6 +148,8 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
             await Reservations.ReserveAsync(entity, ct);
             entity.CreditCheckStatus = CreditCheckStatus.Overridden;
             entity.CreditApprovalReason = reason.Trim();
+            entity.CreditApprovedBy = currentUser?.UserId;
+            entity.CreditApprovedAtUtc = DateTime.UtcNow;
             entity.Status = SalesOrderStatus.Confirmed;
             publish = OrderEvent("SD_ORDER_CREDIT_APPROVED", ERPm.Domain.Enums.NotificationSeverity.INFO, entity, reason.Trim());
             await Context.SaveChangesAsync(ct);

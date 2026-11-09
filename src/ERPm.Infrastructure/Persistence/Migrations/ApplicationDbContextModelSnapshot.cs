@@ -2854,6 +2854,15 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(500)")
                         .HasColumnName("credit_approval_reason");
 
+                    b.Property<DateTime?>("CreditApprovedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("credit_approved_at_utc");
+
+                    b.Property<string>("CreditApprovedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("credit_approved_by");
+
                     b.Property<string>("CreditCheckStatus")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
