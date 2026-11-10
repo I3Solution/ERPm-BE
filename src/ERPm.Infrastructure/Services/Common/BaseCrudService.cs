@@ -27,7 +27,7 @@ public class BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
 
     public virtual async Task<PagedResult<TDto>> GetPagedAsync(BaseFilterQuery query, CancellationToken cancellationToken = default)
     {
-        var queryable = PrepareQuery(DbSet.AsNoTracking());
+        var queryable = query.Summary ? PrepareSummaryQuery(DbSet.AsNoTracking()) : PrepareQuery(DbSet.AsNoTracking());
 
         // 1. Automatically filter soft-deleted entities if TEntity implements ISoftDelete
         if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
@@ -157,6 +157,9 @@ public class BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
         return entity;
     }
 
+    /// <summary>What a list loads when it is asked for rows without their lines; by default the same as <see cref="PrepareQuery"/>.</summary>
+    protected virtual IQueryable<TEntity> PrepareSummaryQuery(IQueryable<TEntity> query) => PrepareQuery(query);
+
     /// <summary>
     /// Applies keyword or active status filters (subclasses can override to add custom filter predicates).
     /// </summary>
@@ -177,6 +180,25 @@ public class BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
                 predicate = predicate == null ? contains : Expression.OrElse(predicate, contains);
             }
             if (predicate != null) query = query.Where(Expression.Lambda<Func<TEntity, bool>>(predicate, parameter));
+        }
+        if (filter.From.HasValue || filter.To.HasValue)
+        {
+            // The document date is whichever of these dates the entity has; entities without one are not filtered.
+            var dateProperty = new[] { "OrderDate", "QuotationDate", "ReturnDate", "InvoiceDate", "EffectiveFrom" }
+                .Select(name => typeof(TEntity).GetProperty(name)).FirstOrDefault(p => p?.PropertyType == typeof(DateTime));
+            if (dateProperty != null)
+            {
+                var parameter = Expression.Parameter(typeof(TEntity), "e");
+                var date = Expression.Property(parameter, dateProperty);
+                Expression? range = null;
+                if (filter.From.HasValue) range = Expression.GreaterThanOrEqual(date, Expression.Constant(DateTime.SpecifyKind(filter.From.Value, DateTimeKind.Utc)));
+                if (filter.To.HasValue)
+                {
+                    var upper = Expression.LessThan(date, Expression.Constant(DateTime.SpecifyKind(filter.To.Value.Date.AddDays(1), DateTimeKind.Utc)));
+                    range = range == null ? upper : Expression.AndAlso(range, upper);
+                }
+                query = query.Where(Expression.Lambda<Func<TEntity, bool>>(range!, parameter));
+            }
         }
         if (filter.IsActive.HasValue)
         {

@@ -20,6 +20,8 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
     // An order whose total reaches this share of the credit limit is flagged with a warning.
     private static readonly string[] CommittedStatuses = [SalesOrderStatus.Confirmed, SalesOrderStatus.Processing];
 
+    // A list row needs no lines: they are what makes the order list heavy, so a summary request does not load them.
+    protected override IQueryable<SalesOrder> PrepareSummaryQuery(IQueryable<SalesOrder> query) => query.Include(o => o.Salesperson).Include(o => o.Quotation);
     protected override IQueryable<SalesOrder> PrepareQuery(IQueryable<SalesOrder> query) => query.Include(o => o.Items).Include(o => o.Salesperson).Include(o => o.Quotation);
     protected override Task<SalesOrder?> FindEntityAsync(int id, CancellationToken ct) => Context.Set<SalesOrder>().Include(o => o.Items).Include(o => o.Salesperson).Include(o => o.Quotation).SingleOrDefaultAsync(o => o.Id == id, ct);
     protected override IQueryable<SalesOrder> ApplyFilters(IQueryable<SalesOrder> query, BaseFilterQuery filter)
