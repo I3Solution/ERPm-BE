@@ -501,6 +501,31 @@ try
     await Reject(async () => await orders.UpdateAsync(shipped.Id, new UpdateSalesOrderRequest { BranchId = branch.Id, CustomerId = rich.Id, DeliveryAddressId = pickable.Id, Items = [new() { ItemId = rsv.Id, Quantity = 1, UnitPrice = 100 }] }), "error.sd.order_delivery_address_invalid");
     var cleared = await orders.UpdateAsync(shipped.Id, new UpdateSalesOrderRequest { BranchId = branch.Id, CustomerId = addressee.Id, DeliveryAddress = "Typed by hand", Items = [new() { ItemId = rsv.Id, Quantity = 1, UnitPrice = 100 }] });
     Check(cleared!.DeliveryAddressId == null && cleared.DeliveryRecipientName == null && cleared.DeliveryAddressText == null && cleared.DeliveryAddress == "Typed by hand", "dropping the address choice clears the copy");
+
+    // Light lists: a summary request returns the same rows without their lines, filtered and sorted on the server.
+    var manyLines = await orders.CreateAsync(new CreateSalesOrderRequest { BranchId = branch.Id, CustomerId = rich.Id, Items = Enumerable.Range(0, 40).Select(n => new CreateSalesOrderItemRequest { ItemId = rsv.Id, Quantity = 1, UnitPrice = 100 + n }).ToList() });
+    var fullList = await orders.GetPagedAsync(new BaseFilterQuery { PageSize = 200 });
+    var summaryList = await orders.GetPagedAsync(new BaseFilterQuery { PageSize = 200, Summary = true });
+    var fullRow = fullList.Items.Single(o => o.Id == manyLines.Id);
+    var summaryRow = summaryList.Items.Single(o => o.Id == manyLines.Id);
+    Check(fullRow.Items.Count == 40 && summaryRow.Items.Count == 0 && summaryRow.OrderNumber == fullRow.OrderNumber && summaryRow.TotalAmount == fullRow.TotalAmount && summaryRow.CustomerName == fullRow.CustomerName && summaryList.TotalCount == fullList.TotalCount,
+        "an order list asked for as a summary keeps every column but carries no lines");
+    var fullBytes = JsonSerializer.SerializeToUtf8Bytes(fullList).Length; var summaryBytes = JsonSerializer.SerializeToUtf8Bytes(summaryList).Length;
+    Check(summaryBytes < fullBytes / 2, $"the summary list is much smaller than the full list ({summaryBytes} against {fullBytes} bytes)");
+    Console.WriteLine($"MEASURE order list payload: full {fullBytes} bytes, summary {summaryBytes} bytes, {fullList.Items.Count} rows");
+    var today = DateTime.UtcNow.Date;
+    var inRange = await orders.GetPagedAsync(new BaseFilterQuery { PageSize = 200, Summary = true, From = today, To = today });
+    var outOfRange = await orders.GetPagedAsync(new BaseFilterQuery { PageSize = 200, Summary = true, From = today.AddDays(-30), To = today.AddDays(-10) });
+    Check(inRange.Items.Any(o => o.Id == manyLines.Id) && outOfRange.TotalCount == 0, "orders can be filtered by date range on the server");
+    var byKeyword = await orders.GetPagedAsync(new BaseFilterQuery { Q = manyLines.OrderNumber, Summary = true });
+    Check(byKeyword.Items.Count == 1 && byKeyword.Items[0].Id == manyLines.Id, "the q shortcut searches like the keyword");
+    var descending = await orders.GetPagedAsync(new BaseFilterQuery { Sort = "-OrderNumber", PageSize = 5, Summary = true });
+    var ascending = await orders.GetPagedAsync(new BaseFilterQuery { Sort = "OrderNumber", PageSize = 5, Summary = true });
+    Check(descending.Items.Select(o => o.OrderNumber).SequenceEqual(descending.Items.Select(o => o.OrderNumber).OrderByDescending(n => n)) && ascending.Items.Select(o => o.OrderNumber).SequenceEqual(ascending.Items.Select(o => o.OrderNumber).OrderBy(n => n)) && descending.Items[0].Id != ascending.Items[0].Id, "a leading minus in sort reverses the order");
+    var listPage2 = await orders.GetPagedAsync(new BaseFilterQuery { PageIndex = 2, PageSize = 3, Summary = true });
+    Check(listPage2.PageIndex == 2 && listPage2.Items.Count <= 3 && listPage2.TotalCount == summaryList.TotalCount, "a list is paged on the server");
+    var quoteSummary = await quotes.GetPagedAsync(new BaseFilterQuery { Summary = true, From = today, To = today });
+    Check(quoteSummary.TotalCount > 0 && quoteSummary.Items.All(q => q.Items.Count == 0), "quotations accept the same date filter and carry no lines in a list");
     await db.SalesOrderItems.Where(i => i.SalesOrderId == warned.Id).ExecuteUpdateAsync(i => i.SetProperty(x => x.InvoicedQuantity, 1m));
     await Reject(async () => await orders.CancelAsync(warned.Id, "too late", default), "error.sd.cannot_cancel_invoiced_order");
     // Tester findings: F1 pricing outside the data scope, F2 deleting a list used by an order, F3 order state errors.
