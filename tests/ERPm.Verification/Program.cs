@@ -522,8 +522,8 @@ try
     var descending = await orders.GetPagedAsync(new BaseFilterQuery { Sort = "-OrderNumber", PageSize = 5, Summary = true });
     var ascending = await orders.GetPagedAsync(new BaseFilterQuery { Sort = "OrderNumber", PageSize = 5, Summary = true });
     Check(descending.Items.Select(o => o.OrderNumber).SequenceEqual(descending.Items.Select(o => o.OrderNumber).OrderByDescending(n => n)) && ascending.Items.Select(o => o.OrderNumber).SequenceEqual(ascending.Items.Select(o => o.OrderNumber).OrderBy(n => n)) && descending.Items[0].Id != ascending.Items[0].Id, "a leading minus in sort reverses the order");
-    var second = await orders.GetPagedAsync(new BaseFilterQuery { PageIndex = 2, PageSize = 3, Summary = true });
-    Check(second.PageIndex == 2 && second.Items.Count <= 3 && second.TotalCount == summaryList.TotalCount, "a list is paged on the server");
+    var listPage2 = await orders.GetPagedAsync(new BaseFilterQuery { PageIndex = 2, PageSize = 3, Summary = true });
+    Check(listPage2.PageIndex == 2 && listPage2.Items.Count <= 3 && listPage2.TotalCount == summaryList.TotalCount, "a list is paged on the server");
     var quoteSummary = await quotes.GetPagedAsync(new BaseFilterQuery { Summary = true, From = today, To = today });
     Check(quoteSummary.TotalCount > 0 && quoteSummary.Items.All(q => q.Items.Count == 0), "quotations accept the same date filter and carry no lines in a list");
     await db.SalesOrderItems.Where(i => i.SalesOrderId == warned.Id).ExecuteUpdateAsync(i => i.SetProperty(x => x.InvoicedQuantity, 1m));
