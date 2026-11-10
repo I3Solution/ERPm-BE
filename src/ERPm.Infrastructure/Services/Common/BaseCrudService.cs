@@ -192,12 +192,13 @@ public class BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
                 var date = Expression.Property(parameter, dateProperty);
                 Expression? range = null;
                 if (filter.From.HasValue) range = Expression.GreaterThanOrEqual(date, Expression.Constant(DateTime.SpecifyKind(filter.From.Value, DateTimeKind.Utc)));
-                if (filter.To.HasValue)
+                // The whole day counts; the very last day of the calendar has no next day, so it simply has no upper bound.
+                if (filter.To.HasValue && filter.To.Value.Date < DateTime.MaxValue.Date)
                 {
                     var upper = Expression.LessThan(date, Expression.Constant(DateTime.SpecifyKind(filter.To.Value.Date.AddDays(1), DateTimeKind.Utc)));
                     range = range == null ? upper : Expression.AndAlso(range, upper);
                 }
-                query = query.Where(Expression.Lambda<Func<TEntity, bool>>(range!, parameter));
+                if (range != null) query = query.Where(Expression.Lambda<Func<TEntity, bool>>(range, parameter));
             }
         }
         if (filter.IsActive.HasValue)
@@ -224,13 +225,19 @@ public class BaseCrudService<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
     {
         if (!string.IsNullOrWhiteSpace(filter.SortBy))
         {
-            var property = typeof(TEntity).GetProperty(filter.SortBy);
+            // The name may be written as the JSON field (orderDate) or as the property (OrderDate).
+            var property = typeof(TEntity).GetProperty(filter.SortBy, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
             if (property == null || !(property.PropertyType.IsValueType || property.PropertyType == typeof(string)))
                 throw new ERPm.Application.Common.BusinessException("error.validation.request");
             var argument = Expression.Parameter(typeof(TEntity), "e");
             var selector = Expression.Lambda(Expression.Property(argument, property), argument);
             var call = Expression.Call(typeof(Queryable), filter.IsAscending ? "OrderBy" : "OrderByDescending", [typeof(TEntity), property.PropertyType], query.Expression, Expression.Quote(selector));
-            return query.Provider.CreateQuery<TEntity>(call);
+            var ordered = query.Provider.CreateQuery<TEntity>(call);
+            var idProperty = typeof(TEntity).GetProperty("Id");
+            if (idProperty == null || idProperty == property) return ordered;
+            var idSelector = Expression.Lambda(Expression.Property(argument, idProperty), argument);
+            var thenBy = Expression.Call(typeof(Queryable), filter.IsAscending ? "ThenBy" : "ThenByDescending", [typeof(TEntity), idProperty.PropertyType], ordered.Expression, Expression.Quote(idSelector));
+            return ordered.Provider.CreateQuery<TEntity>(thenBy);
         }
         // Default to sorting by CreatedAtUtc descending if present
         var createdAtProp = typeof(TEntity).GetProperty("CreatedAtUtc");

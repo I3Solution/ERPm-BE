@@ -526,6 +526,13 @@ try
     Check(listPage2.PageIndex == 2 && listPage2.Items.Count <= 3 && listPage2.TotalCount == summaryList.TotalCount, "a list is paged on the server");
     var quoteSummary = await quotes.GetPagedAsync(new BaseFilterQuery { Summary = true, From = today, To = today });
     Check(quoteSummary.TotalCount > 0 && quoteSummary.Items.All(q => q.Items.Count == 0), "quotations accept the same date filter and carry no lines in a list");
+    var farFuture = await orders.GetPagedAsync(new BaseFilterQuery { PageSize = 200, Summary = true, From = DateTime.MinValue, To = DateTime.MaxValue });
+    Check(farFuture.TotalCount == summaryList.TotalCount, "a date range ending on the last day of the calendar does not overflow");
+    var camel = await orders.GetPagedAsync(new BaseFilterQuery { Sort = "-orderNumber", PageSize = 5, Summary = true });
+    Check(camel.Items.Select(o => o.OrderNumber).SequenceEqual(descending.Items.Select(o => o.OrderNumber)), "sort accepts the JSON field name in camel case");
+    var sameKey = await orders.GetPagedAsync(new BaseFilterQuery { Sort = "status", PageSize = 3, Summary = true });
+    var sameKeyNext = await orders.GetPagedAsync(new BaseFilterQuery { Sort = "status", PageIndex = 2, PageSize = 3, Summary = true });
+    Check(sameKey.Items.Select(o => o.Id).Intersect(sameKeyNext.Items.Select(o => o.Id)).Count() == 0, "sorting on a column with equal values never repeats a row across pages");
     await db.SalesOrderItems.Where(i => i.SalesOrderId == warned.Id).ExecuteUpdateAsync(i => i.SetProperty(x => x.InvoicedQuantity, 1m));
     await Reject(async () => await orders.CancelAsync(warned.Id, "too late", default), "error.sd.cannot_cancel_invoiced_order");
     // Tester findings: F1 pricing outside the data scope, F2 deleting a list used by an order, F3 order state errors.
