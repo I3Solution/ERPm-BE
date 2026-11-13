@@ -17,12 +17,14 @@
 - Cần migration nullable để bảo toàn các báo giá hiện hữu.
 
 ## 3. Cách làm
-- Thêm fields, DTO mapping/validation, snapshot address resolution và conversion copy.
-- Thêm EF migration và cập nhật model snapshot.
-- Bổ sung verification cho snapshot, validation khách hàng, convert và bất biến khi địa chỉ nguồn thay đổi/xóa.
+- Bổ sung bốn trường snapshot vào SalesQuotation; DTO create/update/detail nhận/trả DeliveryAddressId và các giá trị snapshot.
+- Service chỉ nhận địa chỉ thuộc đúng khách hàng; khi update giữ nguyên bản snapshot nếu vẫn chọn cùng địa chỉ/khách hàng, kể cả nguồn đã đổi hoặc bị xóa.
+- Convert sao chép bốn trường sang SalesOrder; DeliveryAddress legacy được giới hạn 500 ký tự, DeliveryAddressText giữ đủ tối đa 800 ký tự.
+- Thêm migration nullable và index; không tạo FK để giữ ID nguồn làm provenance, snapshot không phụ thuộc vòng đời bản ghi địa chỉ.
+- Thêm verification cho snapshot, địa chỉ không hợp lệ, update sau khi nguồn thay đổi và convert sau khi nguồn bị xóa.
 
 ## 4. Kiểm tra
-- Chưa chạy; chờ build, verification và CI trên PR.
+- Đã cập nhật ERPm.Verification; chưa chạy build/test trong môi trường hiện tại. Cần GitHub Actions xác nhận trên PR.
 
 ## 5. Việc còn lại
-- Hoàn tất implementation, migration, tests, CI và chờ Phúc review.
+- Mở PR, xác nhận CI; chờ Phúc review trước khi merge.
