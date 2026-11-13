@@ -13,7 +13,8 @@
 ## Nhật ký
 - 2026-11-13: Khảo sát SalesOrder snapshot hiện hữu và luồng SalesQuotation; xác định lỗi hiện tại là convert đọc Partner.Address thay vì snapshot tại báo giá.
 - 2026-11-13: Tạo branch `loipham/s25.3-quotation-address-snapshot` từ `master`.
-- 2026-11-13: CI run #237 build và HRM Verification pass; ERPm.Verification phát hiện test fixture cố tạo thêm default address cho khách hàng đã có default. Đổi fixture sang địa chỉ non-default có sẵn; run #240 đang chạy.
+- 2026-11-13: CI run #237 build và HRM Verification pass; ERPm.Verification phát hiện test fixture cố tạo thêm default address cho khách hàng đã có default. Đổi fixture sang địa chỉ non-default có sẵn.
+- 2026-11-13: CI run #240/#242 tiếp tục phát hiện test dùng `Remove` gây hard-delete địa chỉ, vi phạm FK của SalesOrder. Sửa fixture mô phỏng đúng semantics ứng dụng: soft-delete bằng `IsDeleted` + `DeletedAtUtc`, giữ lại row nguồn và snapshot. CI mới đang chờ.
 
 ## Files
 - `src/ERPm.Domain/Entities/Sales/SalesQuotation.cs`
