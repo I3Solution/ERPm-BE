@@ -255,6 +255,28 @@ public sealed class SalesQuotationService(ApplicationDbContext context, PostingT
     private static string EffectiveStatus(SalesQuotation q) =>
         OpenStatuses.Contains(q.Status) && q.ValidUntil < DateTime.UtcNow ? QuotationStatus.Expired : q.Status;
 
+    private async Task ApplyDeliveryAddressAsync(SalesQuotation entity, int? addressId, int customerId, int? storedAddressId, int storedCustomerId, CancellationToken ct)
+    {
+        // Keep the quotation's original copy when the same address remains selected, even if its source changed or disappeared.
+        if (addressId.HasValue && addressId == storedAddressId && customerId == storedCustomerId && entity.DeliveryAddressText != null)
+            return;
+
+        entity.DeliveryAddressId = null;
+        entity.DeliveryRecipientName = null;
+        entity.DeliveryPhone = null;
+        entity.DeliveryAddressText = null;
+        if (!addressId.HasValue) return;
+
+        var address = await Context.PartnerDeliveryAddresses.AsNoTracking()
+            .SingleOrDefaultAsync(a => a.Id == addressId.Value && a.PartnerId == customerId, ct);
+        Require(address != null, "error.sd.order_delivery_address_invalid");
+        entity.DeliveryAddressId = address!.Id;
+        entity.DeliveryRecipientName = address.RecipientName;
+        entity.DeliveryPhone = address.Phone;
+        entity.DeliveryAddressText = string.Join(", ", new[] { address.Address, address.Ward, address.District, address.City }
+            .Where(part => !string.IsNullOrWhiteSpace(part)));
+    }
+
     private async Task PrepareAsync(SalesQuotation entity, CreateSalesQuotationRequest request, CancellationToken ct)
     {
         var storedAddressId = entity.DeliveryAddressId;
