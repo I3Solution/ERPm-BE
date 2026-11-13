@@ -186,7 +186,7 @@ public sealed class SalesQuotationService(ApplicationDbContext context, PostingT
             DeliveryRecipientName = quotation.DeliveryRecipientName,
             DeliveryPhone = quotation.DeliveryPhone,
             DeliveryAddressText = quotation.DeliveryAddressText,
-            DeliveryAddress = quotation.DeliveryAddressText,
+            DeliveryAddress = quotation.DeliveryAddressText is { Length: > 500 } addressText ? addressText[..500] : quotation.DeliveryAddressText,
             Notes = quotation.QuotationNumber,
             // Orders carry line discounts inside the line total, so the header discount stays empty.
             SubTotal = quotation.Items.Sum(i => i.LineTotal),
