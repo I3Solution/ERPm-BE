@@ -15,10 +15,18 @@
 - 2026-11-13: Tạo branch `loipham/s25.3-quotation-address-snapshot` từ `master`.
 
 ## Files
-- Dự kiến: SalesQuotation entity/DTO/service, ApplicationDbContext, migration + model snapshot, ERPm.Verification, task/status docs.
+- `src/ERPm.Domain/Entities/Sales/SalesQuotation.cs`
+- `src/ERPm.Application/DTOs/Sales/SalesQuotationDtos.cs`
+- `src/ERPm.Infrastructure/Services/SalesQuotationService.cs`
+- `src/ERPm.Infrastructure/Persistence/ApplicationDbContext.cs`
+- `src/ERPm.Infrastructure/Persistence/Migrations/20261113170000_AddQuotationDeliveryAddressSnapshot.cs`
+- `src/ERPm.Infrastructure/Persistence/Migrations/ApplicationDbContextModelSnapshot.cs`
+- `tests/ERPm.Verification/Program.cs`
+- Task/status documents.
 
 ## Verification
-- Chưa chạy. Không ghi nhận build/test pass cho tới khi có CI hoặc lệnh thực thi xác nhận.
+- Added checks for snapshot creation, invalid address/customer association, preserving the selected snapshot after source edits, and carrying it to SalesOrder after source deletion.
+- Build/test not run locally in this session; CI result pending PR.
 
 ## Bước tiếp theo
-- Hoàn thiện schema, service và test; mở PR để Phúc review trước khi merge.
+- Mở PR, theo dõi GitHub Actions; chờ Phúc review trước khi merge.
