@@ -2696,25 +2696,6 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("department_id");
 
-                    b.Property<int?>("DeliveryAddressId")
-                        .HasColumnType("integer")
-                        .HasColumnName("delivery_address_id");
-
-                    b.Property<string>("DeliveryAddressText")
-                        .HasMaxLength(800)
-                        .HasColumnType("character varying(800)")
-                        .HasColumnName("delivery_address_text");
-
-                    b.Property<string>("DeliveryPhone")
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasColumnName("delivery_phone");
-
-                    b.Property<string>("DeliveryRecipientName")
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)")
-                        .HasColumnName("delivery_recipient_name");
-
                     b.Property<decimal>("DiscountAmount")
                         .HasPrecision(18, 4)
                         .HasColumnType("numeric(18,4)")
@@ -3315,6 +3296,25 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     b.Property<int?>("DepartmentId")
                         .HasColumnType("integer")
                         .HasColumnName("department_id");
+
+                    b.Property<int?>("DeliveryAddressId")
+                        .HasColumnType("integer")
+                        .HasColumnName("delivery_address_id");
+
+                    b.Property<string>("DeliveryAddressText")
+                        .HasMaxLength(800)
+                        .HasColumnType("character varying(800)")
+                        .HasColumnName("delivery_address_text");
+
+                    b.Property<string>("DeliveryPhone")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("delivery_phone");
+
+                    b.Property<string>("DeliveryRecipientName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("delivery_recipient_name");
 
                     b.Property<decimal>("DiscountAmount")
                         .HasPrecision(18, 4)
