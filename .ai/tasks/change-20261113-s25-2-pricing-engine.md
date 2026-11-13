@@ -31,7 +31,7 @@ Hoàn thiện nghiệp vụ định giá dựa trên schema versioning đã có:
 - Không có thay đổi schema/migration dự kiến.
 
 ## 4. Kiểm tra
-- Đã thêm kiểm tra tự động vào `tests/ERPm.Verification/Program.cs` cho tax inclusive/exclusive, clone version, bulk percentage/fixed-amount adjustment, rounding increment và chọn version theo ngày chứng từ.
+- Đã thêm kiểm tra tự động vào `tests/ERPm.Verification/Program.cs` cho tax inclusive/exclusive, clone version, bulk percentage/fixed-amount adjustment, rounding increment, chọn version theo ngày chứng từ và route/authorization HTTP của hai API mới.
 - Chưa chạy `dotnet build ERPm.sln` hoặc verification trong phiên này; cần CI xác nhận sau khi push PR.
 
 ## 5. Việc còn lại
