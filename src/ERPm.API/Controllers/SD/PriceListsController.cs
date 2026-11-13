@@ -27,7 +27,7 @@ public class PriceListsController : BaseCrudController<PriceList, PriceListDetai
         return Ok(ApiResponse<CalculatePriceResponse>.Ok(await _pricing.CalculateAsync(request, cancellationToken)));
     }
 
-    [RequirePermission("sd:pricelist:update")]
+    [RequirePermission("sd:pricelist:edit")]
     [HttpPost("{priceListId:int}/versions/clone")]
     public async Task<ActionResult<ApiResponse<PriceListVersionDto>>> CloneVersion(int priceListId, [FromBody] ClonePriceListVersionRequest request, CancellationToken cancellationToken)
     {
@@ -35,7 +35,7 @@ public class PriceListsController : BaseCrudController<PriceList, PriceListDetai
         return Ok(ApiResponse<PriceListVersionDto>.Ok(result));
     }
 
-    [RequirePermission("sd:pricelist:update")]
+    [RequirePermission("sd:pricelist:edit")]
     [HttpPost("{priceListId:int}/versions/{versionId:int}/bulk-adjustment")]
     public async Task<ActionResult<ApiResponse<BulkPriceAdjustmentResponse>>> BulkAdjustment(int priceListId, int versionId, [FromBody] BulkPriceAdjustmentRequest request, CancellationToken cancellationToken)
     {
