@@ -12,6 +12,7 @@ Triển khai định giá theo ngày chứng từ, thuế Inclusive/Exclusive, c
 - `src/ERPm.Infrastructure/Services/PriceListService.cs`
 - `src/ERPm.API/Controllers/SD/PriceListsController.cs`
 - `tests/ERPm.Verification/Program.cs`
+- `src/ERPm.Infrastructure/Persistence/Seeders/system_dictionary.json`
 - `.ai/tasks/change-20261113-s25-2-pricing-engine.md`
 - `.ai/status.md`
 
