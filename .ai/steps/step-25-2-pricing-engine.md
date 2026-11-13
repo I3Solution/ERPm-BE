@@ -27,7 +27,7 @@ Triển khai định giá theo ngày chứng từ, thuế Inclusive/Exclusive, c
 - Chưa chạy lệnh .NET trong phiên này; thao tác sửa file thực hiện qua GitHub API.
 
 ## Verification
-- Đã bổ sung verification cases trong source.
+- Đã bổ sung verification cases trong source, gồm API route và quyền edit cho hai endpoint mới.
 - Chưa chạy build/test; chờ GitHub Actions trên PR.
 
 ## Hướng tiếp theo
