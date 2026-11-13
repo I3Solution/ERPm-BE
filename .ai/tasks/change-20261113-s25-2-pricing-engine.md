@@ -22,6 +22,7 @@ Hoàn thiện nghiệp vụ định giá dựa trên schema versioning đã có:
 
 ## 3. Cách làm
 - Cập nhật DTO/API cho Type, IsTaxInclusive, DocumentDate, kết quả VAT và thông tin version.
+- Bổ sung thông báo lỗi phiên bản bảng giá trong dictionary VI/EN.
 - Cập nhật PricingEngine và PriceListService; chọn version theo ngày chứng từ.
 - Thêm API:
   - `POST /api/v1/sales/price-lists/{priceListId}/versions/clone`
