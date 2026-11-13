@@ -273,8 +273,9 @@ public sealed class SalesQuotationService(ApplicationDbContext context, PostingT
         entity.DeliveryAddressId = address!.Id;
         entity.DeliveryRecipientName = address.RecipientName;
         entity.DeliveryPhone = address.Phone;
-        entity.DeliveryAddressText = string.Join(", ", new[] { address.Address, address.Ward, address.District, address.City }
+        var addressText = string.Join(", ", new[] { address.Address, address.Ward, address.District, address.City }
             .Where(part => !string.IsNullOrWhiteSpace(part)));
+        entity.DeliveryAddressText = addressText.Length <= 800 ? addressText : addressText[..800];
     }
 
     private async Task PrepareAsync(SalesQuotation entity, CreateSalesQuotationRequest request, CancellationToken ct)
