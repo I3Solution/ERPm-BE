@@ -59,6 +59,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<SalesOrder> SalesOrders => Set<SalesOrder>();
     public DbSet<SalesOrderItem> SalesOrderItems => Set<SalesOrderItem>();
     public DbSet<PriceList> PriceLists => Set<PriceList>();
+    public DbSet<PriceListVersion> PriceListVersions => Set<PriceListVersion>();
     public DbSet<PriceListItem> PriceListItems => Set<PriceListItem>();
     public DbSet<SalesQuotation> SalesQuotations => Set<SalesQuotation>();
     public DbSet<SalesQuotationItem> SalesQuotationItems => Set<SalesQuotationItem>();
@@ -744,7 +745,29 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             // Code is unique among live price lists so a deleted code can be reused.
             entity.HasIndex(e => e.Code).IsUnique().HasFilter("is_deleted = false");
             entity.HasIndex(e => new { e.IsActive, e.EffectiveFrom, e.EffectiveTo });
+            entity.ToTable(t => t.HasCheckConstraint("CK_tbl_SD_PriceList_Type", "type IN (1, 2)"));
             entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<PriceListVersion>(entity =>
+        {
+            entity.ToTable("tbl_SD_PriceListVersion");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.VersionCode).HasMaxLength(50).IsRequired();
+
+            entity.HasOne(e => e.PriceList)
+                .WithMany(p => p.Versions)
+                .HasForeignKey(e => e.PriceListId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Version code is unique inside a list among live versions so a deleted code can be reused.
+            entity.HasIndex(e => new { e.PriceListId, e.VersionCode }).IsUnique().HasFilter("is_deleted = false");
+            entity.HasIndex(e => new { e.PriceListId, e.Status });
+            entity.ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_tbl_SD_PriceListVersion_Status", "status BETWEEN 1 AND 4");
+                t.HasCheckConstraint("CK_tbl_SD_PriceListVersion_Range", "effective_to IS NULL OR effective_to >= effective_from");
+            });
         });
 
         modelBuilder.Entity<PriceListItem>(entity =>
@@ -755,10 +778,12 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.Property(e => e.MinQuantity).HasPrecision(18, 4);
             entity.Property(e => e.DiscountPercent).HasPrecision(18, 4);
 
-            entity.HasOne(e => e.PriceList)
-                .WithMany(p => p.Items)
-                .HasForeignKey(e => e.PriceListId)
-                .OnDelete(DeleteBehavior.Cascade);
+            // Explicit constraint name: the generated one exceeds the PostgreSQL 63 character identifier limit.
+            entity.HasOne(e => e.PriceListVersion)
+                .WithMany(v => v.Items)
+                .HasForeignKey(e => e.PriceListVersionId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("fk_tbl_sd_price_list_item_price_list_version_id");
 
             entity.HasOne(e => e.Item)
                 .WithMany()
@@ -770,8 +795,11 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
                 .HasForeignKey(e => e.UomId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            // One price per item, unit and quantity tier within a list.
-            entity.HasIndex(e => new { e.PriceListId, e.ItemId, e.UomId, e.MinQuantity }).IsUnique().AreNullsDistinct(false);
+            // One price per item, unit and quantity tier within a version (explicit name, see the foreign key above).
+            entity.HasIndex(e => new { e.PriceListVersionId, e.ItemId, e.UomId, e.MinQuantity })
+                .IsUnique()
+                .AreNullsDistinct(false)
+                .HasDatabaseName("ix_tbl_sd_price_list_item_version_item_uom_min_quantity");
             entity.ToTable(t => t.HasCheckConstraint("CK_tbl_SD_PriceListItem_Values", "unit_price >= 0 AND min_quantity >= 0 AND discount_percent BETWEEN 0 AND 100"));
         });
 
@@ -1105,7 +1133,8 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<StockIssueItem>().HasQueryFilter(e => !e.StockIssue!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.StockIssue.BranchId)
             || (e.StockIssue.DepartmentId != null && AllowedDepartmentIds.Contains(e.StockIssue.DepartmentId.Value)) || (OwnRecordsUserId != null && e.StockIssue.CreatedBy == OwnRecordsUserId)));
         modelBuilder.Entity<JournalEntryLine>().HasQueryFilter(e => !e.JournalEntry!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.JournalEntry.BranchId)));
-        modelBuilder.Entity<PriceListItem>().HasQueryFilter(e => !e.PriceList!.IsDeleted);
+        modelBuilder.Entity<PriceListVersion>().HasQueryFilter(e => !e.IsDeleted && !e.PriceList!.IsDeleted);
+        modelBuilder.Entity<PriceListItem>().HasQueryFilter(e => !e.PriceListVersion!.IsDeleted && !e.PriceListVersion.PriceList!.IsDeleted);
         modelBuilder.Entity<SalesQuotation>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)
             || (e.DepartmentId != null && AllowedDepartmentIds.Contains(e.DepartmentId.Value)) || (OwnRecordsUserId != null && e.CreatedBy == OwnRecordsUserId)));
         modelBuilder.Entity<SalesReturn>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)

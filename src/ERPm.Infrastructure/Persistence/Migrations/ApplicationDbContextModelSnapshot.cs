@@ -2421,6 +2421,10 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("is_deleted");
 
+                    b.Property<bool>("IsTaxInclusive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_tax_inclusive");
+
                     b.Property<DateTime?>("LastModifiedAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_modified_at_utc");
@@ -2443,6 +2447,10 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("tenant_id");
 
+                    b.Property<int>("Type")
+                        .HasColumnType("integer")
+                        .HasColumnName("type");
+
                     b.HasKey("Id")
                         .HasName("pk_tbl_sd_price_list");
 
@@ -2463,7 +2471,10 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     b.HasIndex("IsActive", "EffectiveFrom", "EffectiveTo")
                         .HasDatabaseName("ix_tbl_sd_price_list_is_active_effective_from_effective_to");
 
-                    b.ToTable("tbl_SD_PriceList", (string)null);
+                    b.ToTable("tbl_SD_PriceList", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_tbl_SD_PriceList_Type", "type IN (1, 2)");
+                        });
                 });
 
             modelBuilder.Entity("ERPm.Domain.Entities.Sales.PriceListItem", b =>
@@ -2493,9 +2504,9 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("numeric(18,4)")
                         .HasColumnName("min_quantity");
 
-                    b.Property<int>("PriceListId")
+                    b.Property<int>("PriceListVersionId")
                         .HasColumnType("integer")
-                        .HasColumnName("price_list_id");
+                        .HasColumnName("price_list_version_id");
 
                     b.Property<decimal>("UnitPrice")
                         .HasPrecision(18, 4)
@@ -2521,15 +2532,107 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     b.HasIndex("UomId")
                         .HasDatabaseName("ix_tbl_sd_price_list_item_uom_id");
 
-                    b.HasIndex("PriceListId", "ItemId", "UomId", "MinQuantity")
+                    b.HasIndex("PriceListVersionId", "ItemId", "UomId", "MinQuantity")
                         .IsUnique()
-                        .HasDatabaseName("ix_tbl_sd_price_list_item_price_list_id_item_id_uom_id_min_quant");
+                        .HasDatabaseName("ix_tbl_sd_price_list_item_version_item_uom_min_quantity");
 
-                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("PriceListId", "ItemId", "UomId", "MinQuantity"), false);
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("PriceListVersionId", "ItemId", "UomId", "MinQuantity"), false);
 
                     b.ToTable("tbl_SD_PriceListItem", null, t =>
                         {
                             t.HasCheckConstraint("CK_tbl_SD_PriceListItem_Values", "unit_price >= 0 AND min_quantity >= 0 AND discount_percent BETWEEN 0 AND 100");
+                        });
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Sales.PriceListVersion", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("created_by");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at_utc");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("deleted_by");
+
+                    b.Property<DateTime>("EffectiveFrom")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("effective_from");
+
+                    b.Property<DateTime?>("EffectiveTo")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("effective_to");
+
+                    b.Property<Guid>("ExternalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("external_id");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
+                    b.Property<DateTime?>("LastModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_modified_at_utc");
+
+                    b.Property<string>("LastModifiedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("last_modified_by");
+
+                    b.Property<int>("PriceListId")
+                        .HasColumnType("integer")
+                        .HasColumnName("price_list_id");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.Property<int?>("TenantId")
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("VersionCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("version_code");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_sd_price_list_version");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_sd_price_list_version_external_id");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id", "IsDeleted" });
+
+                    b.HasIndex("PriceListId", "Status")
+                        .HasDatabaseName("ix_tbl_sd_price_list_version_price_list_id_status");
+
+                    b.HasIndex("PriceListId", "VersionCode")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_sd_price_list_version_price_list_id_version_code")
+                        .HasFilter("is_deleted = false");
+
+                    b.ToTable("tbl_SD_PriceListVersion", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_tbl_SD_PriceListVersion_Range", "effective_to IS NULL OR effective_to >= effective_from");
+
+                            t.HasCheckConstraint("CK_tbl_SD_PriceListVersion_Status", "status BETWEEN 1 AND 4");
                         });
                 });
 
@@ -5238,12 +5341,12 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_tbl_sd_price_list_item_tbl_wms_item_item_id");
 
-                    b.HasOne("ERPm.Domain.Entities.Sales.PriceList", "PriceList")
+                    b.HasOne("ERPm.Domain.Entities.Sales.PriceListVersion", "PriceListVersion")
                         .WithMany("Items")
-                        .HasForeignKey("PriceListId")
+                        .HasForeignKey("PriceListVersionId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fk_tbl_sd_price_list_item_tbl_sd_price_list_price_list_id");
+                        .HasConstraintName("fk_tbl_sd_price_list_item_price_list_version_id");
 
                     b.HasOne("ERPm.Domain.Entities.Catalog.UnitOfMeasure", "Uom")
                         .WithMany()
@@ -5253,9 +5356,21 @@ namespace ERPm.Infrastructure.Persistence.Migrations
 
                     b.Navigation("Item");
 
-                    b.Navigation("PriceList");
+                    b.Navigation("PriceListVersion");
 
                     b.Navigation("Uom");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Sales.PriceListVersion", b =>
+                {
+                    b.HasOne("ERPm.Domain.Entities.Sales.PriceList", "PriceList")
+                        .WithMany("Versions")
+                        .HasForeignKey("PriceListId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_sd_price_list_version_tbl_sd_price_list_price_list_id");
+
+                    b.Navigation("PriceList");
                 });
 
             modelBuilder.Entity("ERPm.Domain.Entities.Sales.SalesInvoice", b =>
@@ -5838,6 +5953,11 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                 });
 
             modelBuilder.Entity("ERPm.Domain.Entities.Sales.PriceList", b =>
+                {
+                    b.Navigation("Versions");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Sales.PriceListVersion", b =>
                 {
                     b.Navigation("Items");
                 });

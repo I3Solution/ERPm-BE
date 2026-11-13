@@ -20,8 +20,25 @@ public sealed class PriceListService(ApplicationDbContext context)
 
     protected override Task<PriceList?> FindEntityAsync(int id, CancellationToken ct) => Context.PriceLists
         .Include(p => p.Branch)
-        .Include(p => p.Items).ThenInclude(i => i.Item).ThenInclude(i => i!.BaseUom)
+        .Include(p => p.Versions).ThenInclude(v => v.Items).ThenInclude(i => i.Item).ThenInclude(i => i!.BaseUom)
         .SingleOrDefaultAsync(p => p.Id == id, ct);
+
+    /// <summary>
+    /// The version the single-list editor reads and writes: the newest Active version.
+    /// Version management (draft, publish, archive) arrives with the versioning API; until then every list has one version.
+    /// </summary>
+    private static PriceListVersion? CurrentVersion(PriceList list) => list.Versions
+        .Where(v => v.Status == PriceListVersionStatus.Active)
+        .OrderByDescending(v => v.EffectiveFrom).ThenByDescending(v => v.Id)
+        .FirstOrDefault();
+
+    private static PriceListVersion NewDefaultVersion(PriceList list) => new()
+    {
+        VersionCode = "V1",
+        Status = PriceListVersionStatus.Active,
+        EffectiveFrom = list.EffectiveFrom,
+        EffectiveTo = list.EffectiveTo
+    };
 
     protected override PriceListDetailDto MapToDto(PriceList entity) => new()
     {
@@ -36,7 +53,7 @@ public sealed class PriceListService(ApplicationDbContext context)
         BranchName = entity.Branch?.Name,
         IsActive = entity.IsActive,
         Notes = entity.Notes,
-        Items = entity.Items
+        Items = (CurrentVersion(entity)?.Items ?? Array.Empty<PriceListItem>())
             .OrderBy(i => i.Item?.Code).ThenBy(i => i.MinQuantity)
             .Select(i => new PriceListItemDto
             {
@@ -53,21 +70,37 @@ public sealed class PriceListService(ApplicationDbContext context)
 
     protected override PriceList MapToEntity(CreatePriceListRequest request) => new()
     {
-        Items = request.Items.Select(l => new PriceListItem { ItemId = l.ItemId, UnitPrice = l.UnitPrice, MinQuantity = l.MinQuantity, DiscountPercent = l.DiscountPercent }).ToList()
+        Versions =
+        {
+            new PriceListVersion
+            {
+                VersionCode = "V1",
+                Status = PriceListVersionStatus.Active,
+                Items = request.Items.Select(l => new PriceListItem { ItemId = l.ItemId, UnitPrice = l.UnitPrice, MinQuantity = l.MinQuantity, DiscountPercent = l.DiscountPercent }).ToList()
+            }
+        }
     };
 
     protected override async Task BeforeCreateAsync(PriceList entity, CreatePriceListRequest request, CancellationToken ct)
     {
         await ValidateAsync(request, null, ct);
         ApplyHeader(request, entity);
+        SyncVersionDates(entity);
     }
 
     protected override async Task BeforeUpdateAsync(PriceList entity, UpdatePriceListRequest request, CancellationToken ct)
     {
         await ValidateAsync(request, entity.Id, ct);
         // Sync lines by (item, tier) instead of replacing them, so a re-saved list never collides with its own unique index.
+        var version = CurrentVersion(entity);
+        if (version == null)
+        {
+            version = NewDefaultVersion(entity);
+            entity.Versions.Add(version);
+        }
+
         var wanted = request.Items.ToDictionary(l => (l.ItemId, l.MinQuantity));
-        foreach (var existing in entity.Items.ToList())
+        foreach (var existing in version.Items.ToList())
         {
             if (wanted.Remove((existing.ItemId, existing.MinQuantity), out var line))
             {
@@ -80,10 +113,23 @@ public sealed class PriceListService(ApplicationDbContext context)
             }
         }
         foreach (var line in wanted.Values)
-            entity.Items.Add(new PriceListItem { ItemId = line.ItemId, UnitPrice = line.UnitPrice, MinQuantity = line.MinQuantity, DiscountPercent = line.DiscountPercent });
+            version.Items.Add(new PriceListItem { ItemId = line.ItemId, UnitPrice = line.UnitPrice, MinQuantity = line.MinQuantity, DiscountPercent = line.DiscountPercent });
     }
 
-    protected override void MapUpdateToEntity(UpdatePriceListRequest request, PriceList entity) => ApplyHeader(request, entity);
+    protected override void MapUpdateToEntity(UpdatePriceListRequest request, PriceList entity)
+    {
+        ApplyHeader(request, entity);
+        SyncVersionDates(entity);
+    }
+
+    /// <summary>Keeps the current version's range equal to the list header while a list has a single version.</summary>
+    private static void SyncVersionDates(PriceList entity)
+    {
+        var version = CurrentVersion(entity);
+        if (version == null) return;
+        version.EffectiveFrom = entity.EffectiveFrom;
+        version.EffectiveTo = entity.EffectiveTo;
+    }
 
     protected override async Task BeforeDeleteAsync(PriceList entity, CancellationToken ct)
     {
@@ -129,14 +175,17 @@ public sealed class PriceListService(ApplicationDbContext context)
 
         var now = DateTime.UtcNow;
         var lists = await Context.PriceLists
-            .Where(p => p.IsActive && p.EffectiveFrom <= now && (p.EffectiveTo == null || p.EffectiveTo >= now) && (p.BranchId == null || p.BranchId == request.BranchId))
+            .Where(p => p.Type == PriceListType.Sales && p.IsActive && p.EffectiveFrom <= now && (p.EffectiveTo == null || p.EffectiveTo >= now) && (p.BranchId == null || p.BranchId == request.BranchId))
             .Select(p => new { p.Id, p.Name, p.BranchId, p.EffectiveFrom })
             .ToListAsync(ct);
         var listIds = lists.Select(p => p.Id).ToArray();
         // Only lines priced in the item's base unit take part until unit conversion is priced (UomId is null then).
+        // Only Active versions whose own range covers today are priced; the list header range was already checked above.
         var lines = await Context.PriceListItems
-            .Where(l => listIds.Contains(l.PriceListId) && itemIds.Contains(l.ItemId) && l.UomId == null)
-            .Select(l => new { l.PriceListId, l.ItemId, Tier = new PriceTier(l.MinQuantity, l.UnitPrice, l.DiscountPercent) })
+            .Where(l => listIds.Contains(l.PriceListVersion!.PriceListId) && itemIds.Contains(l.ItemId) && l.UomId == null
+                && l.PriceListVersion!.Status == PriceListVersionStatus.Active
+                && l.PriceListVersion.EffectiveFrom <= now && (l.PriceListVersion.EffectiveTo == null || l.PriceListVersion.EffectiveTo >= now))
+            .Select(l => new { PriceListId = l.PriceListVersion!.PriceListId, l.ItemId, Tier = new PriceTier(l.MinQuantity, l.UnitPrice, l.DiscountPercent) })
             .ToListAsync(ct);
 
         var response = new CalculatePriceResponse();
