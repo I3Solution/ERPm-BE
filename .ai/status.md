@@ -12,6 +12,8 @@
 
 Nghiệm thu thủ công MVP và đánh giá vận hành. NuGet advisory feed chưa truy cập được trong phiên; restore offline tạm thời không bật audit, cấu hình CI vẫn giữ restore chuẩn.
 
+- [ ] S25.1 Schema Bảng giá (Type, IsTaxInclusive, PriceListVersions): xem [db-20261113-pricelist-type-tax-versioning](tasks/db-20261113-pricelist-type-tax-versioning.md). Chờ `dotnet build` và chạy migration trên DB thật.
+
 ## Next Steps
 
 PUR/PO–nhận hàng–hóa đơn mua, phiếu thu chi/đối chiếu nợ; adoption DB thủ công nếu cần; sổ cái/báo cáo và kiểm thử E2E. Xem [Step 19](steps/step-19-stabilization-and-internal-accounts.md), README và tài liệu root.
