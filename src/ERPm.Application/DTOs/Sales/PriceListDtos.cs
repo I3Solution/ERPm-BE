@@ -1,3 +1,5 @@
+using ERPm.Domain.Entities.Sales;
+
 namespace ERPm.Application.DTOs.Sales;
 
 public class PriceListItemDto
