@@ -8,9 +8,6 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace ERPm.API.Controllers.SALES;
 
-/// <summary>
-/// Selling price lists (SD module) and the automatic price calculation used when lines are added to quotations and orders.
-/// </summary>
 [PermissionResource("sd:pricelist")]
 [Route("api/v1/sales/price-lists")]
 public class PriceListsController : BaseCrudController<PriceList, PriceListDetailDto, CreatePriceListRequest, UpdatePriceListRequest>
@@ -23,14 +20,26 @@ public class PriceListsController : BaseCrudController<PriceList, PriceListDetai
         _pricing = pricing;
     }
 
-    /// <summary>
-    /// Works out the best unit price, discount and line total of each requested item for a customer and branch.
-    /// Needs only order-view rights because every seller must be able to price a line.
-    /// </summary>
     [RequirePermission("sd:order:view")]
     [HttpPost("calculate-price")]
     public async Task<ActionResult<ApiResponse<CalculatePriceResponse>>> CalculatePrice([FromBody] CalculatePriceRequest request, CancellationToken cancellationToken)
     {
         return Ok(ApiResponse<CalculatePriceResponse>.Ok(await _pricing.CalculateAsync(request, cancellationToken)));
+    }
+
+    [RequirePermission("sd:pricelist:update")]
+    [HttpPost("{priceListId:int}/versions/clone")]
+    public async Task<ActionResult<ApiResponse<PriceListVersionDto>>> CloneVersion(int priceListId, [FromBody] ClonePriceListVersionRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _pricing.CloneVersionAsync(priceListId, request, cancellationToken);
+        return Ok(ApiResponse<PriceListVersionDto>.Ok(result));
+    }
+
+    [RequirePermission("sd:pricelist:update")]
+    [HttpPost("{priceListId:int}/versions/{versionId:int}/bulk-adjustment")]
+    public async Task<ActionResult<ApiResponse<BulkPriceAdjustmentResponse>>> BulkAdjustment(int priceListId, int versionId, [FromBody] BulkPriceAdjustmentRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _pricing.BulkAdjustVersionAsync(priceListId, versionId, request, cancellationToken);
+        return Ok(ApiResponse<BulkPriceAdjustmentResponse>.Ok(result));
     }
 }
