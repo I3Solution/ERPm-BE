@@ -252,12 +252,13 @@ try
     // Quotations: lifecycle, validity, conversion into a Draft order.
     var quotes = new SalesQuotationService(db, new PostingTransaction(db));
     var quoteDate = DateTime.UtcNow;
-    var quoteAddress = new ERPm.Domain.Entities.Partner.PartnerDeliveryAddress
-    {
-        PartnerId = customer.Id, RecipientName = "Quotation Receiver", Phone = "0900000000",
-        Address = "10 Original Street", Ward = "Original Ward", District = "Original District", City = "Original City"
-    };
-    db.PartnerDeliveryAddresses.Add(quoteAddress);
+    var quoteAddress = await db.PartnerDeliveryAddresses.SingleAsync(a => a.PartnerId == customer.Id && !a.IsDefault);
+    quoteAddress.RecipientName = "Quotation Receiver";
+    quoteAddress.Phone = "0900000000";
+    quoteAddress.Address = "10 Original Street";
+    quoteAddress.Ward = "Original Ward";
+    quoteAddress.District = "Original District";
+    quoteAddress.City = "Original City";
     await db.SaveChangesAsync();
     CreateSalesQuotationRequest QuoteRequest(decimal quantity = 2, decimal discount = 20, DateTime? date = null, DateTime? until = null, int? deliveryAddressId = null) => new()
     {
