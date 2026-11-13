@@ -297,7 +297,8 @@ try
     await Reject(async () => await quotes.DeleteAsync(quote.Id), "error.sd.quotation_invalid_status");
 
     var addressToDelete = await db.PartnerDeliveryAddresses.SingleAsync(a => a.Id == quoteAddress.Id);
-    db.PartnerDeliveryAddresses.Remove(addressToDelete);
+    addressToDelete.IsDeleted = true;
+    addressToDelete.DeletedAtUtc = DateTime.UtcNow;
     await db.SaveChangesAsync();
     var converted = await quotes.ConvertToOrderAsync(quote.Id);
     var convertedOrder = await db.SalesOrders.Include(o => o.Items).SingleAsync(o => o.Id == converted.SalesOrderId);
