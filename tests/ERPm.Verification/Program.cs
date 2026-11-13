@@ -264,11 +264,18 @@ try
         RoundingIncrement = 0.01m
     });
     Check(adjusted.AdjustedLineCount == 1 && (await db.PriceListVersions.Include(v => v.Items).SingleAsync(v => v.Id == clonedVersion.Id)).Items.Single().UnitPrice == 71.5m, "bulk percentage adjustment updates and rounds all Draft version prices");
+    var fixedAdjusted = await lists.BulkAdjustVersionAsync(wholesale.Id, clonedVersion.Id, new BulkPriceAdjustmentRequest
+    {
+        AdjustmentType = PriceAdjustmentType.FixedAmount,
+        Value = 0.25m,
+        RoundingIncrement = 0.5m
+    });
+    Check(fixedAdjusted.AdjustedLineCount == 1 && (await db.PriceListVersions.Include(v => v.Items).SingleAsync(v => v.Id == clonedVersion.Id)).Items.Single().UnitPrice == 72m, "bulk fixed-amount adjustment rounds to the configured increment");
     await db.PriceListVersions.Where(v => v.Id == sourceVersion.Id).ExecuteUpdateAsync(v => v.SetProperty(x => x.EffectiveTo, from.AddDays(4)));
     await db.PriceListVersions.Where(v => v.Id == clonedVersion.Id).ExecuteUpdateAsync(v => v.SetProperty(x => x.Status, PriceListVersionStatus.Active));
     var beforeVersion = (await lists.CalculateAsync(new CalculatePriceRequest { CustomerId = customer.Id, BranchId = branch.Id, DocumentDate = from.AddDays(2), Items = [new() { ItemId = item.Id, Quantity = 1 }] })).Items.Single();
     var afterVersion = (await lists.CalculateAsync(new CalculatePriceRequest { CustomerId = customer.Id, BranchId = branch.Id, DocumentDate = from.AddDays(6), Items = [new() { ItemId = item.Id, Quantity = 1 }] })).Items.Single();
-    Check(beforeVersion.AppliedVersionCode == "V1" && afterVersion.AppliedVersionCode == "V2" && afterVersion.UnitPrice == 71.5m, "pricing selects the Active version effective on the document date");
+    Check(beforeVersion.AppliedVersionCode == "V1" && afterVersion.AppliedVersionCode == "V2" && afterVersion.UnitPrice == 72m, "pricing selects the Active version effective on the document date");
     await Reject(async () => await lists.BulkAdjustVersionAsync(wholesale.Id, sourceVersion.Id, new BulkPriceAdjustmentRequest { AdjustmentType = PriceAdjustmentType.FixedAmount, Value = 1 }), "error.sd.pricelist_version_not_draft");
     Check(await lists.UpdateAsync(999999, new UpdatePriceListRequest { Code = "X", Name = "X", Currency = "VND", EffectiveFrom = from }) == null, "updating a missing price list returns nothing");
     await Reject(async () => await lists.DeleteAsync(wholesale.Id), "error.sd.pricelist_in_use");
