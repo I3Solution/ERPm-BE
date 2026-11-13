@@ -56,6 +56,10 @@ public sealed class SalesQuotationService(ApplicationDbContext context, PostingT
         BranchId = entity.BranchId,
         DepartmentId = entity.DepartmentId,
         PriceListId = entity.PriceListId,
+        DeliveryAddressId = entity.DeliveryAddressId,
+        DeliveryRecipientName = entity.DeliveryRecipientName,
+        DeliveryPhone = entity.DeliveryPhone,
+        DeliveryAddressText = entity.DeliveryAddressText,
         Status = EffectiveStatus(entity),
         SubTotal = entity.SubTotal,
         DiscountAmount = entity.DiscountAmount,
@@ -178,7 +182,11 @@ public sealed class SalesQuotationService(ApplicationDbContext context, PostingT
             QuotationId = quotation.Id,
             SalespersonId = quotation.SalespersonId,
             PriceListId = quotation.PriceListId,
-            DeliveryAddress = await Context.Partners.Where(p => p.Id == quotation.CustomerId).Select(p => p.Address).SingleOrDefaultAsync(ct),
+            DeliveryAddressId = quotation.DeliveryAddressId,
+            DeliveryRecipientName = quotation.DeliveryRecipientName,
+            DeliveryPhone = quotation.DeliveryPhone,
+            DeliveryAddressText = quotation.DeliveryAddressText,
+            DeliveryAddress = quotation.DeliveryAddressText,
             Notes = quotation.QuotationNumber,
             // Orders carry line discounts inside the line total, so the header discount stays empty.
             SubTotal = quotation.Items.Sum(i => i.LineTotal),
@@ -249,6 +257,8 @@ public sealed class SalesQuotationService(ApplicationDbContext context, PostingT
 
     private async Task PrepareAsync(SalesQuotation entity, CreateSalesQuotationRequest request, CancellationToken ct)
     {
+        var storedAddressId = entity.DeliveryAddressId;
+        var storedCustomerId = entity.CustomerId;
         Require(request.Items is { Count: > 0 and <= MaxLines }, "error.validation.request");
         Require(request.QuotationDate.Kind == DateTimeKind.Utc && request.ValidUntil.Kind == DateTimeKind.Utc && request.ValidUntil >= request.QuotationDate, "error.validation.request");
         // A seller limited to their own records has no branch in their data scope, so the branch is checked outside it.
@@ -282,6 +292,7 @@ public sealed class SalesQuotationService(ApplicationDbContext context, PostingT
         entity.CustomerName = customer.Name;
         entity.CustomerPhone = customer.Phone;
         entity.CustomerEmail = customer.Email;
+        await ApplyDeliveryAddressAsync(entity, request.DeliveryAddressId, customer.Id, storedAddressId, storedCustomerId, ct);
         entity.SalespersonId = request.SalespersonId;
         entity.BranchId = request.BranchId;
         entity.DepartmentId = request.DepartmentId;
