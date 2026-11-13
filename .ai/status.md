@@ -13,6 +13,7 @@
 Nghiệm thu thủ công MVP và đánh giá vận hành. NuGet advisory feed chưa truy cập được trong phiên; restore offline tạm thời không bật audit, cấu hình CI vẫn giữ restore chuẩn.
 
 - [ ] S25.1 Schema Bảng giá (Type, IsTaxInclusive, PriceListVersions): xem [db-20261113-pricelist-type-tax-versioning](tasks/db-20261113-pricelist-type-tax-versioning.md). Chờ `dotnet build` và chạy migration trên DB thật.
+- [ ] S25.2 PricingEngine & version bảng giá: xem [change-20261113-s25-2-pricing-engine](tasks/change-20261113-s25-2-pricing-engine.md). Đã triển khai trên branch; chờ build/test CI và review.
 
 ## Next Steps
 
