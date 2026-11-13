@@ -280,8 +280,9 @@ try
     var found = await quotes.GetPagedAsync(new BaseFilterQuery { Keyword = quote.QuotationNumber, Status = "Draft" });
     Check(found.TotalCount == 1 && found.Items.Single().Items.Count == 0 && found.Items.Single().BranchName == branch.Name, "quotation page filters by number and status and returns headers only");
 
-    quoteAddress.Address = "Changed Source Street";
-    quoteAddress.Ward = "Changed Ward";
+    var sourceAddress = await db.PartnerDeliveryAddresses.SingleAsync(a => a.Id == quoteAddress.Id);
+    sourceAddress.Address = "Changed Source Street";
+    sourceAddress.Ward = "Changed Ward";
     await db.SaveChangesAsync();
     Check((await quotes.SendAsync(quote.Id)).Status == "Sent", "a draft quotation can be sent");
     await Reject(async () => await quotes.SendAsync(quote.Id), "error.sd.quotation_invalid_status");
@@ -294,7 +295,8 @@ try
     await Reject(async () => await quotes.UpdateAsync(quote.Id, new UpdateSalesQuotationRequest { QuotationDate = quoteDate, ValidUntil = quoteDate.AddDays(7), CustomerId = customer.Id, BranchId = branch.Id, Items = [new() { ItemId = item.Id, Quantity = 1, UnitPrice = 1 }] }), "error.sd.quotation_invalid_status");
     await Reject(async () => await quotes.DeleteAsync(quote.Id), "error.sd.quotation_invalid_status");
 
-    db.PartnerDeliveryAddresses.Remove(quoteAddress);
+    var addressToDelete = await db.PartnerDeliveryAddresses.SingleAsync(a => a.Id == quoteAddress.Id);
+    db.PartnerDeliveryAddresses.Remove(addressToDelete);
     await db.SaveChangesAsync();
     var converted = await quotes.ConvertToOrderAsync(quote.Id);
     var convertedOrder = await db.SalesOrders.Include(o => o.Items).SingleAsync(o => o.Id == converted.SalesOrderId);
