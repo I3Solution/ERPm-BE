@@ -28,7 +28,7 @@ Triển khai định giá theo ngày chứng từ, thuế Inclusive/Exclusive, c
 
 ## Verification
 - Đã bổ sung verification cases trong source, gồm API route và quyền edit cho hai endpoint mới.
-- Chưa chạy build/test; chờ GitHub Actions trên PR.
+- CI trên commit `cbf141beb5c81caae7119c41dfe16754362fcc28` được xác nhận xanh; chờ review PR.
 
 ## Hướng tiếp theo
 - Chạy CI, sửa lỗi compile/test nếu có.
