@@ -212,7 +212,7 @@ try
     Check(inclusive.UnitPrice == 100 && inclusive.TaxAmount == 10 && inclusive.TotalWithTax == 110 && inclusive.IsTaxInclusive, "tax-inclusive prices are decomposed into net and VAT");
     var exclusive = PricingEngine.Price(100, 1, [L(4, false, false, T(0, 100))], 10);
     Check(exclusive.UnitPrice == 100 && exclusive.TaxAmount == 10 && exclusive.TotalWithTax == 110 && !exclusive.IsTaxInclusive, "tax-exclusive prices add VAT to the net amount");
-    Check(PermissionCatalog.Contains("sd:pricelist:view") && PermissionCatalog.Contains("sd:pricelist:delete"), "price list permissions are in the catalog");
+    Check(PermissionCatalog.Contains("sd:pricelist:view") && PermissionCatalog.Contains("sd:pricelist:edit") && PermissionCatalog.Contains("sd:pricelist:delete"), "price list permissions are in the catalog");
 
     var lists = new PriceListService(db);
     var from = DateTime.UtcNow.AddDays(-1);
