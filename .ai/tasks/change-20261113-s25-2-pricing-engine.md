@@ -2,7 +2,7 @@
 
 > **Loại:** change
 > **Ngày tạo:** 2026-11-13 · **Người làm:** Lợi (Dev chính Backend) · **Người yêu cầu:** Lợi
-> **Trạng thái:** Doing
+> **Trạng thái:** Review
 > **Liên quan:** Trello card [S25.2][BE] Động cơ định giá (PricingEngine) & Dịch vụ Phiên bản Bảng giá · S25.1 migration `20261113030000_AddPriceListTypeTaxAndVersioning`
 
 ## 1. Mô tả
@@ -32,9 +32,8 @@ Hoàn thiện nghiệp vụ định giá dựa trên schema versioning đã có:
 
 ## 4. Kiểm tra
 - Đã thêm kiểm tra tự động vào `tests/ERPm.Verification/Program.cs` cho tax inclusive/exclusive, clone version, bulk percentage/fixed-amount adjustment, rounding increment, chọn version theo ngày chứng từ và route/authorization HTTP của hai API mới.
-- Chưa chạy `dotnet build ERPm.sln` hoặc verification trong phiên này; cần CI xác nhận sau khi push PR.
+- GitHub Actions trên commit `cbf141beb5c81caae7119c41dfe16754362fcc28`: người phụ trách xác nhận toàn bộ CI xanh.
 
 ## 5. Việc còn lại
-- Rà soát compile/EF translation và chạy `dotnet build ERPm.sln`, `ERPm.Hrm.Verification`, `ERPm.Verification` trên CI.
 - Kiểm tra API contract, phân quyền `sd:pricelist:edit`, và dữ liệu thực trên DB test.
-- Phúc review; xử lý mọi feedback trước khi merge.
+- Chờ Phúc review PR; xử lý feedback trước khi merge.
