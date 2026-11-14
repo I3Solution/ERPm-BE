@@ -58,6 +58,10 @@ public class EmployeeFilterQuery : BaseFilterQuery
     public bool? WithoutAccount { get; set; }
     /// <summary>Keeps employees working at this org tree node or any node below it (company, branch, store).</summary>
     public int? BranchId { get; set; }
+    /// <summary>Keeps employees in this department or any department below it.</summary>
+    public int? DepartmentId { get; set; }
+    /// <summary>Keeps employees holding this job position.</summary>
+    public int? JobPositionId { get; set; }
 }
 
 /// <summary>Work-history list filter: the timeline of one employee.</summary>
