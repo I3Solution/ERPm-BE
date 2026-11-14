@@ -27,6 +27,30 @@ public class PriceListsController : BaseCrudController<PriceList, PriceListDetai
         return Ok(ApiResponse<CalculatePriceResponse>.Ok(await _pricing.CalculateAsync(request, cancellationToken)));
     }
 
+    [RequirePermission("sd:pricelist:view")]
+    [HttpGet("{priceListId:int}/versions")]
+    public async Task<ActionResult<ApiResponse<List<PriceListVersionDto>>>> GetVersions(int priceListId, CancellationToken cancellationToken)
+    {
+        var result = await _pricing.GetVersionsAsync(priceListId, cancellationToken);
+        return Ok(ApiResponse<List<PriceListVersionDto>>.Ok(result));
+    }
+
+    [RequirePermission("sd:pricelist:view")]
+    [HttpGet("{priceListId:int}/versions/{versionId:int}")]
+    public async Task<ActionResult<ApiResponse<PriceListVersionDto>>> GetVersion(int priceListId, int versionId, CancellationToken cancellationToken)
+    {
+        var result = await _pricing.GetVersionAsync(priceListId, versionId, cancellationToken);
+        return Ok(ApiResponse<PriceListVersionDto>.Ok(result));
+    }
+
+    [RequirePermission("sd:pricelist:view")]
+    [HttpGet("{priceListId:int}/versions/{versionId:int}/items")]
+    public async Task<ActionResult<ApiResponse<List<PriceListItemDto>>>> GetVersionItems(int priceListId, int versionId, CancellationToken cancellationToken)
+    {
+        var result = await _pricing.GetVersionAsync(priceListId, versionId, cancellationToken);
+        return Ok(ApiResponse<List<PriceListItemDto>>.Ok(result.Items));
+    }
+
     [RequirePermission("sd:pricelist:edit")]
     [HttpPost("{priceListId:int}/versions/clone")]
     public async Task<ActionResult<ApiResponse<PriceListVersionDto>>> CloneVersion(int priceListId, [FromBody] ClonePriceListVersionRequest request, CancellationToken cancellationToken)

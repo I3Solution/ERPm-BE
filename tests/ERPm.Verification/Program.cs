@@ -271,6 +271,14 @@ try
         RoundingIncrement = 0.5m
     });
     Check(fixedAdjusted.AdjustedLineCount == 1 && (await db.PriceListVersions.Include(v => v.Items).SingleAsync(v => v.Id == clonedVersion.Id)).Items.Single().UnitPrice == 72m, "bulk fixed-amount adjustment rounds to the configured increment");
+    var listedVersions = await lists.GetVersionsAsync(wholesale.Id);
+    Check(listedVersions.Count == 2 && listedVersions[0].Id == clonedVersion.Id && listedVersions[0].VersionCode == "V2" && listedVersions[0].ItemCount == 1 && listedVersions[0].Items.Count == 0
+        && listedVersions[1].Id == sourceVersion.Id && listedVersions[1].VersionCode == "V1", "listing price list versions returns lightweight version headers without loading items");
+    var fetchedDraftVersion = await lists.GetVersionAsync(wholesale.Id, clonedVersion.Id);
+    Check(fetchedDraftVersion.Id == clonedVersion.Id && fetchedDraftVersion.Status == PriceListVersionStatus.Draft && fetchedDraftVersion.Items.Count == 1
+        && fetchedDraftVersion.Items.Single().UnitPrice == 72m && fetchedDraftVersion.Items.Single().ItemCode == "ITEM", "reading a specific price list version returns its items after cloning and adjustment");
+    await Reject(async () => await lists.GetVersionsAsync(999999), "error.validation.reference");
+    await Reject(async () => await lists.GetVersionAsync(wholesale.Id, 999999), "error.validation.reference");
     await db.PriceListVersions.Where(v => v.Id == sourceVersion.Id).ExecuteUpdateAsync(v => v.SetProperty(x => x.EffectiveTo, from.AddDays(4)));
     await db.PriceListVersions.Where(v => v.Id == clonedVersion.Id).ExecuteUpdateAsync(v => v.SetProperty(x => x.Status, PriceListVersionStatus.Active));
     var beforeVersion = (await lists.CalculateAsync(new CalculatePriceRequest { CustomerId = customer.Id, BranchId = branch.Id, DocumentDate = from.AddDays(2), Items = [new() { ItemId = item.Id, Quantity = 1 }] })).Items.Single();
@@ -959,6 +967,18 @@ try
         Check(listPage.RootElement.GetProperty("data").GetProperty("totalCount").GetInt32() >= 1, "admin reads the price list page over HTTP");
         using var priced = await http.PostAsJsonAsync("/api/v1/sales/price-lists/calculate-price", new { branchId = allowedBranch.Id, items = new[] { new { itemId = 1, quantity = 1 } } });
         Check(priced.StatusCode != HttpStatusCode.NotFound && priced.StatusCode != HttpStatusCode.MethodNotAllowed && priced.StatusCode != HttpStatusCode.Forbidden, "calculate-price is routed and allowed for the administrator");
+        using var vipVersionsPayload = JsonDocument.Parse(await http.GetStringAsync($"/api/v1/sales/price-lists/{vip.Id}/versions"));
+        var vipVersionsData = vipVersionsPayload.RootElement.GetProperty("data");
+        var vipVersionId = vipVersionsData[0].GetProperty("id").GetInt32();
+        Check(vipVersionsData.GetArrayLength() == 1 && vipVersionsData[0].GetProperty("versionCode").GetString() == "V1" && vipVersionsData[0].GetProperty("itemCount").GetInt32() == 1,
+            "admin reads price list versions over HTTP");
+        using var vipVersionDetailPayload = JsonDocument.Parse(await http.GetStringAsync($"/api/v1/sales/price-lists/{vip.Id}/versions/{vipVersionId}"));
+        Check(vipVersionDetailPayload.RootElement.GetProperty("data").GetProperty("items").GetArrayLength() == 1, "admin reads a price list version with its items over HTTP");
+        using var vipVersionItemsPayload = JsonDocument.Parse(await http.GetStringAsync($"/api/v1/sales/price-lists/{vip.Id}/versions/{vipVersionId}/items"));
+        Check(vipVersionItemsPayload.RootElement.GetProperty("data").GetArrayLength() == 1, "admin reads a price list version's items endpoint over HTTP");
+        Check((await http.GetAsync("/api/v1/sales/price-lists/999999/versions")).StatusCode == HttpStatusCode.NotFound
+            && (await http.GetAsync($"/api/v1/sales/price-lists/{vip.Id}/versions/999999")).StatusCode == HttpStatusCode.NotFound,
+            "reading versions of a missing price list or version answers not found");
         using var missingClone = await http.PostAsJsonAsync("/api/v1/sales/price-lists/1/versions/clone", new { sourceVersionId = 999999, versionCode = "API-CLONE", effectiveFrom = DateTime.UtcNow });
         Check(missingClone.StatusCode == HttpStatusCode.NotFound, "clone-version API route validates the source version");
         using var missingAdjustment = await http.PostAsJsonAsync("/api/v1/sales/price-lists/1/versions/999999/bulk-adjustment", new { adjustmentType = 1, value = 1, roundingIncrement = 0.01m });
@@ -980,6 +1000,9 @@ try
         http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
         http.DefaultRequestHeaders.Authorization = new("Bearer", viewerToken);
         Check((await http.PostAsJsonAsync("/api/v1/sales/price-lists", new { code = "X", name = "X", currency = "VND", effectiveFrom = DateTime.UtcNow })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without sd:pricelist:create cannot create a price list");
+        Check((await http.GetAsync($"/api/v1/sales/price-lists/{vip.Id}/versions")).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden
+            && (await http.GetAsync($"/api/v1/sales/price-lists/{vip.Id}/versions/{vipVersionId}")).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden,
+            "a user without sd:pricelist:view cannot read price list versions");
         Check((await http.PostAsJsonAsync("/api/v1/sales/price-lists/1/versions/clone", new { sourceVersionId = 1, versionCode = "NO-ACCESS", effectiveFrom = DateTime.UtcNow })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without sd:pricelist:edit cannot clone a version");
         Check((await http.PostAsJsonAsync("/api/v1/sales/price-lists/1/versions/1/bulk-adjustment", new { adjustmentType = 1, value = 1, roundingIncrement = 0.01m })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without sd:pricelist:edit cannot bulk-adjust a version");
         http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);

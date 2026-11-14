@@ -256,6 +256,37 @@ public sealed class PriceListService(ApplicationDbContext context)
         return response;
     }
 
+    public async Task<List<PriceListVersionDto>> GetVersionsAsync(int priceListId, CancellationToken ct = default)
+    {
+        Require(await Context.PriceLists.AnyAsync(p => p.Id == priceListId, ct), "error.validation.reference", 404);
+        return await Context.PriceListVersions
+            .AsNoTracking()
+            .Where(v => v.PriceListId == priceListId)
+            .OrderByDescending(v => v.EffectiveFrom)
+            .ThenByDescending(v => v.Id)
+            .Select(v => new PriceListVersionDto
+            {
+                Id = v.Id,
+                PriceListId = v.PriceListId,
+                VersionCode = v.VersionCode,
+                EffectiveFrom = v.EffectiveFrom,
+                EffectiveTo = v.EffectiveTo,
+                Status = v.Status,
+                ItemCount = v.Items.Count
+            })
+            .ToListAsync(ct);
+    }
+
+    public async Task<PriceListVersionDto> GetVersionAsync(int priceListId, int versionId, CancellationToken ct = default)
+    {
+        var version = await Context.PriceListVersions
+            .AsNoTracking()
+            .Include(v => v.Items).ThenInclude(i => i.Item).ThenInclude(i => i!.BaseUom)
+            .SingleOrDefaultAsync(v => v.Id == versionId && v.PriceListId == priceListId, ct);
+        Require(version != null, "error.validation.reference", 404);
+        return MapVersion(version!);
+    }
+
     public async Task<PriceListVersionDto> CloneVersionAsync(int priceListId, ClonePriceListVersionRequest request, CancellationToken ct = default)
     {
         var code = request.VersionCode?.Trim().ToUpperInvariant() ?? string.Empty;
