@@ -1,10 +1,11 @@
 # ERPm-BE — Backend Status
 
 ## In-Progress
-- [ ] S25.2b Vòng đời phiên bản bảng giá (`activate`/`close`/CRUD items `Draft`) & lọc `Type` — Trello `https://trello.com/c/W1QLkld1` (`Todo`).
+- [ ] S25.2b Vòng đời phiên bản bảng giá (`activate`/`close`/CRUD items `Draft`) & lọc `Type` — [task](tasks/change-20261114-s25-2b-version-lifecycle-and-filter.md) · [step log](steps/step-25-2b-version-lifecycle-and-filter.md) · Trello `https://trello.com/c/W1QLkld1` (`Doing`). Branch: `loipham/s25.2b-version-lifecycle-and-filter`, đã triển khai code + verification, chờ push chạy CI & PR review.
 
 ## Next Steps
-- Triển khai S25.2b trên nhánh `loipham/s25.2b-version-lifecycle-and-filter` sau khi đồng bộ `master` (`d5cb077`).
+- Push nhánh `loipham/s25.2b-version-lifecycle-and-filter` để GitHub Actions CI chạy `ERPm.Hrm.Verification` và `ERPm.Verification`.
+- Đồng bộ `ERPm-FE/src/assets/i18n/system.json` cho 2 key lỗi mới trước khi cập nhật gitlink `ERPm-BE` ở repo cha.
 
 ---
 
