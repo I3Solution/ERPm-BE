@@ -208,7 +208,11 @@ try
     Check(PricingEngine.Price(100, 1, [L(1, false, false, T(0, 70)), L(2, false, false, T(0, 80, 20))]).AppliedPriceListId == 2, "pricing without own list picks the lowest net price");
     Check(PricingEngine.Price(100, 1, [L(1, false, false, T(0, 60)), L(2, true, false, T(0, 90))]).AppliedPriceListId == 2, "the customer's own list wins over a cheaper one");
     Check(PricingEngine.Price(100, 1, [L(1, false, false, T(0, 70)), L(2, false, true, T(0, 70))]).AppliedPriceListId == 2, "equal prices prefer the branch-specific list");
-    Check(PermissionCatalog.Contains("sd:pricelist:view") && PermissionCatalog.Contains("sd:pricelist:delete"), "price list permissions are in the catalog");
+    var inclusive = PricingEngine.Price(100, 1, [new PriceCandidate(3, "Inclusive", false, false, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), [T(0, 110)], IsTaxInclusive: true)], 10);
+    Check(inclusive.UnitPrice == 100 && inclusive.TaxAmount == 10 && inclusive.TotalWithTax == 110 && inclusive.IsTaxInclusive, "tax-inclusive prices are decomposed into net and VAT");
+    var exclusive = PricingEngine.Price(100, 1, [L(4, false, false, T(0, 100))], 10);
+    Check(exclusive.UnitPrice == 100 && exclusive.TaxAmount == 10 && exclusive.TotalWithTax == 110 && !exclusive.IsTaxInclusive, "tax-exclusive prices add VAT to the net amount");
+    Check(PermissionCatalog.Contains("sd:pricelist:view") && PermissionCatalog.Contains("sd:pricelist:edit") && PermissionCatalog.Contains("sd:pricelist:delete"), "price list permissions are in the catalog");
 
     var lists = new PriceListService(db);
     var from = DateTime.UtcNow.AddDays(-1);
@@ -245,6 +249,42 @@ try
     Check(edited!.Name == "Wholesale 2" && edited.Items.Count == 2 && edited.Items.Any(i => i.Id == keptLine && i.UnitPrice == 65), "updating a price list keeps unchanged lines and adds new tiers");
     var shrunk = await lists.UpdateAsync(wholesale.Id, new UpdatePriceListRequest { Code = "WHOLESALE", Name = "Wholesale 2", Currency = "VND", EffectiveFrom = from, IsActive = true, Items = [new() { ItemId = item.Id, UnitPrice = 65 }] });
     Check(shrunk!.Items.Count == 1, "updating a price list removes dropped tiers");
+    var sourceVersion = await db.PriceListVersions.SingleAsync(v => v.PriceListId == wholesale.Id);
+    var clonedVersion = await lists.CloneVersionAsync(wholesale.Id, new ClonePriceListVersionRequest
+    {
+        SourceVersionId = sourceVersion.Id,
+        VersionCode = "V2",
+        EffectiveFrom = from.AddDays(5)
+    });
+    Check(clonedVersion.Status == PriceListVersionStatus.Draft && clonedVersion.ItemCount == 1 && clonedVersion.Items.Single().UnitPrice == 65, "cloning a price list version copies its price tiers into a Draft version");
+    var adjusted = await lists.BulkAdjustVersionAsync(wholesale.Id, clonedVersion.Id, new BulkPriceAdjustmentRequest
+    {
+        AdjustmentType = PriceAdjustmentType.Percentage,
+        Value = 10,
+        RoundingIncrement = 0.01m
+    });
+    Check(adjusted.AdjustedLineCount == 1 && (await db.PriceListVersions.Include(v => v.Items).SingleAsync(v => v.Id == clonedVersion.Id)).Items.Single().UnitPrice == 71.5m, "bulk percentage adjustment updates and rounds all Draft version prices");
+    var fixedAdjusted = await lists.BulkAdjustVersionAsync(wholesale.Id, clonedVersion.Id, new BulkPriceAdjustmentRequest
+    {
+        AdjustmentType = PriceAdjustmentType.FixedAmount,
+        Value = 0.25m,
+        RoundingIncrement = 0.5m
+    });
+    Check(fixedAdjusted.AdjustedLineCount == 1 && (await db.PriceListVersions.Include(v => v.Items).SingleAsync(v => v.Id == clonedVersion.Id)).Items.Single().UnitPrice == 72m, "bulk fixed-amount adjustment rounds to the configured increment");
+    var listedVersions = await lists.GetVersionsAsync(wholesale.Id);
+    Check(listedVersions.Count == 2 && listedVersions[0].Id == clonedVersion.Id && listedVersions[0].VersionCode == "V2" && listedVersions[0].ItemCount == 1 && listedVersions[0].Items.Count == 0
+        && listedVersions[1].Id == sourceVersion.Id && listedVersions[1].VersionCode == "V1", "listing price list versions returns lightweight version headers without loading items");
+    var fetchedDraftVersion = await lists.GetVersionAsync(wholesale.Id, clonedVersion.Id);
+    Check(fetchedDraftVersion.Id == clonedVersion.Id && fetchedDraftVersion.Status == PriceListVersionStatus.Draft && fetchedDraftVersion.Items.Count == 1
+        && fetchedDraftVersion.Items.Single().UnitPrice == 72m && fetchedDraftVersion.Items.Single().ItemCode == "ITEM", "reading a specific price list version returns its items after cloning and adjustment");
+    await Reject(async () => await lists.GetVersionsAsync(999999), "error.validation.reference");
+    await Reject(async () => await lists.GetVersionAsync(wholesale.Id, 999999), "error.validation.reference");
+    await db.PriceListVersions.Where(v => v.Id == sourceVersion.Id).ExecuteUpdateAsync(v => v.SetProperty(x => x.EffectiveTo, from.AddDays(4)));
+    await db.PriceListVersions.Where(v => v.Id == clonedVersion.Id).ExecuteUpdateAsync(v => v.SetProperty(x => x.Status, PriceListVersionStatus.Active));
+    var beforeVersion = (await lists.CalculateAsync(new CalculatePriceRequest { CustomerId = customer.Id, BranchId = branch.Id, DocumentDate = from.AddDays(2), Items = [new() { ItemId = item.Id, Quantity = 1 }] })).Items.Single();
+    var afterVersion = (await lists.CalculateAsync(new CalculatePriceRequest { CustomerId = customer.Id, BranchId = branch.Id, DocumentDate = from.AddDays(6), Items = [new() { ItemId = item.Id, Quantity = 1 }] })).Items.Single();
+    Check(beforeVersion.AppliedVersionCode == "V1" && afterVersion.AppliedVersionCode == "V2" && afterVersion.UnitPrice == 72m, "pricing selects the Active version effective on the document date");
+    await Reject(async () => await lists.BulkAdjustVersionAsync(wholesale.Id, sourceVersion.Id, new BulkPriceAdjustmentRequest { AdjustmentType = PriceAdjustmentType.FixedAmount, Value = 1 }), "error.sd.pricelist_version_not_draft");
     Check(await lists.UpdateAsync(999999, new UpdatePriceListRequest { Code = "X", Name = "X", Currency = "VND", EffectiveFrom = from }) == null, "updating a missing price list returns nothing");
     await Reject(async () => await lists.DeleteAsync(wholesale.Id), "error.sd.pricelist_in_use");
     await db.Partners.Where(p => p.Id == customer.Id).ExecuteUpdateAsync(p => p.SetProperty(c => c.PriceListId, (int?)null));
@@ -967,6 +1007,22 @@ try
         Check(listPage.RootElement.GetProperty("data").GetProperty("totalCount").GetInt32() >= 1, "admin reads the price list page over HTTP");
         using var priced = await http.PostAsJsonAsync("/api/v1/sales/price-lists/calculate-price", new { branchId = allowedBranch.Id, items = new[] { new { itemId = 1, quantity = 1 } } });
         Check(priced.StatusCode != HttpStatusCode.NotFound && priced.StatusCode != HttpStatusCode.MethodNotAllowed && priced.StatusCode != HttpStatusCode.Forbidden, "calculate-price is routed and allowed for the administrator");
+        using var vipVersionsPayload = JsonDocument.Parse(await http.GetStringAsync($"/api/v1/sales/price-lists/{vip.Id}/versions"));
+        var vipVersionsData = vipVersionsPayload.RootElement.GetProperty("data");
+        var vipVersionId = vipVersionsData[0].GetProperty("id").GetInt32();
+        Check(vipVersionsData.GetArrayLength() == 1 && vipVersionsData[0].GetProperty("versionCode").GetString() == "V1" && vipVersionsData[0].GetProperty("itemCount").GetInt32() == 1,
+            "admin reads price list versions over HTTP");
+        using var vipVersionDetailPayload = JsonDocument.Parse(await http.GetStringAsync($"/api/v1/sales/price-lists/{vip.Id}/versions/{vipVersionId}"));
+        Check(vipVersionDetailPayload.RootElement.GetProperty("data").GetProperty("items").GetArrayLength() == 1, "admin reads a price list version with its items over HTTP");
+        using var vipVersionItemsPayload = JsonDocument.Parse(await http.GetStringAsync($"/api/v1/sales/price-lists/{vip.Id}/versions/{vipVersionId}/items"));
+        Check(vipVersionItemsPayload.RootElement.GetProperty("data").GetArrayLength() == 1, "admin reads a price list version's items endpoint over HTTP");
+        Check((await http.GetAsync("/api/v1/sales/price-lists/999999/versions")).StatusCode == HttpStatusCode.NotFound
+            && (await http.GetAsync($"/api/v1/sales/price-lists/{vip.Id}/versions/999999")).StatusCode == HttpStatusCode.NotFound,
+            "reading versions of a missing price list or version answers not found");
+        using var missingClone = await http.PostAsJsonAsync("/api/v1/sales/price-lists/1/versions/clone", new { sourceVersionId = 999999, versionCode = "API-CLONE", effectiveFrom = DateTime.UtcNow });
+        Check(missingClone.StatusCode == HttpStatusCode.NotFound, "clone-version API route validates the source version");
+        using var missingAdjustment = await http.PostAsJsonAsync("/api/v1/sales/price-lists/1/versions/999999/bulk-adjustment", new { adjustmentType = 1, value = 1, roundingIncrement = 0.01m });
+        Check(missingAdjustment.StatusCode == HttpStatusCode.NotFound, "bulk-adjustment API route validates the target version");
         Check((await http.GetAsync("/api/v1/sales/quotations")).IsSuccessStatusCode, "admin reads the quotation page over HTTP");
         Check((await http.PostAsync("/api/v1/sales/quotations/999999/convert-to-order", null)).StatusCode == HttpStatusCode.NotFound, "converting a missing quotation answers not found");
         Check((await http.PostAsJsonAsync("/api/v1/sales/orders/999999/cancel", new { reason = "x" })).StatusCode == HttpStatusCode.NotFound, "cancelling a missing order answers not found");
@@ -984,6 +1040,11 @@ try
         http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
         http.DefaultRequestHeaders.Authorization = new("Bearer", viewerToken);
         Check((await http.PostAsJsonAsync("/api/v1/sales/price-lists", new { code = "X", name = "X", currency = "VND", effectiveFrom = DateTime.UtcNow })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without sd:pricelist:create cannot create a price list");
+        Check((await http.GetAsync($"/api/v1/sales/price-lists/{vip.Id}/versions")).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden
+            && (await http.GetAsync($"/api/v1/sales/price-lists/{vip.Id}/versions/{vipVersionId}")).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden,
+            "a user without sd:pricelist:view cannot read price list versions");
+        Check((await http.PostAsJsonAsync("/api/v1/sales/price-lists/1/versions/clone", new { sourceVersionId = 1, versionCode = "NO-ACCESS", effectiveFrom = DateTime.UtcNow })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without sd:pricelist:edit cannot clone a version");
+        Check((await http.PostAsJsonAsync("/api/v1/sales/price-lists/1/versions/1/bulk-adjustment", new { adjustmentType = 1, value = 1, roundingIncrement = 0.01m })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without sd:pricelist:edit cannot bulk-adjust a version");
         http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
         Check((await http.GetAsync("/api/v1/sys/notifications/preferences")).IsSuccessStatusCode, "admin reads preferences over HTTP");
         using var broadcastResp = await http.PostAsJsonAsync("/api/v1/sys/notifications/broadcast", new { title = "Broadcast", body = "System announcement", category = "SYS", severity = "INFO", targetType = "ALL" });

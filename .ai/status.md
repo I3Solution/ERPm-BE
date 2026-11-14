@@ -1,10 +1,10 @@
 # ERPm-BE — Backend Status
 
 ## In-Progress
-- [ ] S25.3 Quotation Delivery Address Snapshot — [task](tasks/change-20261113-s25-3-quotation-address-snapshot.md) · [step log](steps/step-25-3-quotation-address-snapshot.md). Branch: `loipham/s25.3-quotation-address-snapshot`; PR #45 CI đã pass, chờ Phúc review.
+- [ ] S25.2 PricingEngine & version bảng giá — [task](tasks/change-20261113-s25-2-pricing-engine.md) · [step log](steps/step-25-2-pricing-engine.md). Branch: `loipham/s25.2-pricing-engine`; PR #44 đã bổ sung GET version APIs và đồng bộ `master`, chờ CI & Phúc review.
 
 ## Next Steps
-- Chờ Phúc review PR #45 trước khi merge.
+- Chờ CI & Phúc review PR #44 trước khi merge.
 
 ---
 
@@ -18,6 +18,7 @@
 - [x] Đơn bán/mua có validation, tính tổng server-side, Draft/Confirmed và khóa chống sửa đồng thời.
 - [x] Build solution 0 warning/0 error; 44 kiểm tra PostgreSQL/API đạt. Thêm CI, chưa chạy từ remote.
 - [x] S25.1 Schema Bảng giá (Type, IsTaxInclusive, PriceListVersions): xem [db-20261113-pricelist-type-tax-versioning](tasks/db-20261113-pricelist-type-tax-versioning.md) · [step log](steps/step-25-1-pricelist-schema-versioning.md). PR #43 đã merge (54217df), CI & Neon migration pass, dotnet build & EF model snapshot khớp 100%.
+- [x] S25.3 Quotation Delivery Address Snapshot: xem [change-20261113-s25-3-quotation-address-snapshot](tasks/change-20261113-s25-3-quotation-address-snapshot.md) · [step log](steps/step-25-3-quotation-address-snapshot.md). PR #45 đã merge (`299da62`).
 
 ## In-Progress
 
