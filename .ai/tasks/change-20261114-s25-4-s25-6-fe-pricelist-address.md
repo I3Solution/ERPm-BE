@@ -12,7 +12,7 @@
 ## 2. Phân tích
 - Contract BE sau BE #44: GET price-lists/{id}/versions, GET .../versions/{vid}(/items), POST .../versions/clone, POST .../versions/{vid}/bulk-adjustment.
 - AddressType chưa có ở BE (thẻ riêng của Phúc), nên S25.6 chỉ làm phần không đụng contract.
-- Chưa làm: chuyển màn Price Lists sang app-list-page + list query state (vẫn lọc phía client).
+- Làm sau (BA chốt): chuyển Price Lists sang app-list-page + list query state, PR riêng từ master sau khi chuỗi S25 merge.
 
 ## 3. Cách làm
 - BE: chỉ khóa từ điển (system_dictionary.json) cho S25.4/S25.6.
