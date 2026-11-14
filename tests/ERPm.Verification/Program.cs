@@ -252,15 +252,28 @@ try
     // Quotations: lifecycle, validity, conversion into a Draft order.
     var quotes = new SalesQuotationService(db, new PostingTransaction(db));
     var quoteDate = DateTime.UtcNow;
-    CreateSalesQuotationRequest QuoteRequest(decimal quantity = 2, decimal discount = 20, DateTime? date = null, DateTime? until = null) => new()
+    var quoteAddress = await db.PartnerDeliveryAddresses.SingleAsync(a => a.PartnerId == customer.Id && !a.IsDefault);
+    quoteAddress.RecipientName = "Quotation Receiver";
+    quoteAddress.Phone = "0900000000";
+    quoteAddress.Address = "10 Original Street";
+    quoteAddress.Ward = "Original Ward";
+    quoteAddress.District = "Original District";
+    quoteAddress.City = "Original City";
+    await db.SaveChangesAsync();
+    CreateSalesQuotationRequest QuoteRequest(decimal quantity = 2, decimal discount = 20, DateTime? date = null, DateTime? until = null, int? deliveryAddressId = null) => new()
     {
-        QuotationDate = date ?? quoteDate, ValidUntil = until ?? quoteDate.AddDays(7), CustomerId = customer.Id, BranchId = branch.Id, TermsAndConditions = "Net 30",
+        QuotationDate = date ?? quoteDate, ValidUntil = until ?? quoteDate.AddDays(7), CustomerId = customer.Id, BranchId = branch.Id,
+        DeliveryAddressId = deliveryAddressId, TermsAndConditions = "Net 30",
         Items = [new() { ItemId = item.Id, Quantity = quantity, UnitPrice = 100, DiscountAmount = discount, Notes = "line" }]
     };
-    var quote = await quotes.CreateAsync(QuoteRequest());
+    var quote = await quotes.CreateAsync(QuoteRequest(deliveryAddressId: quoteAddress.Id));
     Check(System.Text.RegularExpressions.Regex.IsMatch(quote.QuotationNumber, @"^BG-\d{6}-\d{4,}$") && quote.Status == "Draft" && quote.SubTotal == 200 && quote.DiscountAmount == 20 && quote.TotalAmount == 180
-        && quote.CustomerName == "Customer" && quote.Items.Single().ItemCode == "ITEM" && quote.Items.Single().LineTotal == 180, "quotation is numbered, priced and snapshots customer and lines");
+        && quote.CustomerName == "Customer" && quote.Items.Single().ItemCode == "ITEM" && quote.Items.Single().LineTotal == 180
+        && quote.DeliveryAddressId == quoteAddress.Id && quote.DeliveryRecipientName == "Quotation Receiver" && quote.DeliveryPhone == "0900000000"
+        && quote.DeliveryAddressText == "10 Original Street, Original Ward, Original District, Original City",
+        "quotation is numbered, priced and snapshots customer, lines and delivery address");
     await Reject(async () => await quotes.CreateAsync(new CreateSalesQuotationRequest { QuotationDate = quoteDate, ValidUntil = quoteDate, CustomerId = customer.Id, BranchId = branch.Id }), "error.validation.request");
+    await Reject(async () => await quotes.CreateAsync(QuoteRequest(deliveryAddressId: int.MaxValue)), "error.sd.order_delivery_address_invalid");
     var toSupplier = QuoteRequest(); toSupplier.CustomerId = supplier.Id;
     await Reject(async () => await quotes.CreateAsync(toSupplier), "error.sales.customer");
     await Reject(async () => await quotes.CreateAsync(QuoteRequest(discount: 500)), "error.sales.discount");
@@ -268,18 +281,34 @@ try
     var found = await quotes.GetPagedAsync(new BaseFilterQuery { Keyword = quote.QuotationNumber, Status = "Draft" });
     Check(found.TotalCount == 1 && found.Items.Single().Items.Count == 0 && found.Items.Single().BranchName == branch.Name, "quotation page filters by number and status and returns headers only");
 
+    var sourceAddress = await db.PartnerDeliveryAddresses.SingleAsync(a => a.Id == quoteAddress.Id);
+    sourceAddress.Address = "Changed Source Street";
+    sourceAddress.Ward = "Changed Ward";
+    await db.SaveChangesAsync();
     Check((await quotes.SendAsync(quote.Id)).Status == "Sent", "a draft quotation can be sent");
     await Reject(async () => await quotes.SendAsync(quote.Id), "error.sd.quotation_invalid_status");
-    var revised = await quotes.UpdateAsync(quote.Id, new UpdateSalesQuotationRequest { QuotationDate = quoteDate, ValidUntil = quoteDate.AddDays(7), CustomerId = customer.Id, BranchId = branch.Id, Items = [new() { ItemId = item.Id, Quantity = 3, UnitPrice = 100 }] });
-    Check(revised!.TotalAmount == 300 && revised.Items.Count == 1 && revised.Status == "Sent", "a sent quotation can be revised and its lines are replaced");
+    var revised = await quotes.UpdateAsync(quote.Id, new UpdateSalesQuotationRequest { QuotationDate = quoteDate, ValidUntil = quoteDate.AddDays(7), CustomerId = customer.Id, BranchId = branch.Id,
+        DeliveryAddressId = quoteAddress.Id, Items = [new() { ItemId = item.Id, Quantity = 3, UnitPrice = 100 }] });
+    Check(revised!.TotalAmount == 300 && revised.Items.Count == 1 && revised.Status == "Sent"
+        && revised.DeliveryAddressText == "10 Original Street, Original Ward, Original District, Original City",
+        "a sent quotation can be revised without refreshing its saved delivery address");
     Check((await quotes.AcceptAsync(quote.Id)).Status == "Accepted", "a sent quotation can be accepted");
     await Reject(async () => await quotes.UpdateAsync(quote.Id, new UpdateSalesQuotationRequest { QuotationDate = quoteDate, ValidUntil = quoteDate.AddDays(7), CustomerId = customer.Id, BranchId = branch.Id, Items = [new() { ItemId = item.Id, Quantity = 1, UnitPrice = 1 }] }), "error.sd.quotation_invalid_status");
     await Reject(async () => await quotes.DeleteAsync(quote.Id), "error.sd.quotation_invalid_status");
 
+    var addressToDelete = await db.PartnerDeliveryAddresses.SingleAsync(a => a.Id == quoteAddress.Id);
+    addressToDelete.IsDeleted = true;
+    addressToDelete.DeletedAtUtc = DateTime.UtcNow;
+    await db.SaveChangesAsync();
     var converted = await quotes.ConvertToOrderAsync(quote.Id);
     var convertedOrder = await db.SalesOrders.Include(o => o.Items).SingleAsync(o => o.Id == converted.SalesOrderId);
     Check(convertedOrder.Status == "Draft" && convertedOrder.TotalAmount == 300 && convertedOrder.Items.Single().Quantity == 3 && convertedOrder.CustomerId == customer.Id && convertedOrder.OrderNumber == converted.OrderNumber && convertedOrder.Notes == quote.QuotationNumber,
         "conversion creates a Draft order with the quotation lines");
+    Check(convertedOrder.DeliveryAddressId == quoteAddress.Id && convertedOrder.DeliveryRecipientName == "Quotation Receiver"
+        && convertedOrder.DeliveryPhone == "0900000000"
+        && convertedOrder.DeliveryAddressText == "10 Original Street, Original Ward, Original District, Original City"
+        && convertedOrder.DeliveryAddress == convertedOrder.DeliveryAddressText,
+        "conversion carries the quotation address snapshot unchanged after the source address is deleted");
     var after = await quotes.GetByIdAsync(quote.Id);
     Check(after!.Status == "Converted" && after.ConvertedSalesOrderId == converted.SalesOrderId, "the converted quotation points at its order");
     await Reject(async () => await quotes.ConvertToOrderAsync(quote.Id), "error.sd.quotation_already_converted");
