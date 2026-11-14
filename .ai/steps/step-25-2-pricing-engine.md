@@ -20,16 +20,17 @@ Triển khai định giá theo ngày chứng từ, thuế Inclusive/Exclusive, c
 - Lọc version Active theo ngày chứng từ và ngày hiệu lực của price list header.
 - Chọn version có EffectiveFrom mới nhất nếu các version Active bị chồng khoảng ngày.
 - Tính VAT từ Item.VatRate; trả UnitPrice/LineTotal trước thuế, TaxAmount và TotalWithTax.
+- Bổ sung `GET /api/v1/sales/price-lists/{priceListId}/versions` (danh sách version nhẹ kèm `ItemCount`, `Items` rỗng), `GET /api/v1/sales/price-lists/{priceListId}/versions/{versionId}` (chi tiết version kèm `Items`) và `GET /api/v1/sales/price-lists/{priceListId}/versions/{versionId}/items` (quyền `sd:pricelist:view`) để FE dựng danh sách phiên bản, lấy `SourceVersionId` / `{versionId}` và xem items của từng version.
 - Clone version tạo Draft và copy toàn bộ dòng giá; bulk adjustment chỉ nhận Draft.
 - Không thay đổi database schema.
 
 ## Lệnh đã chạy
-- Chưa chạy lệnh .NET trong phiên này; thao tác sửa file thực hiện qua GitHub API.
+- `dotnet build ERPm.sln --nologo` (sau khi bổ sung các endpoint GET version): Build succeeded, 0 Warning(s), 0 Error(s).
 
 ## Verification
-- Đã bổ sung verification cases trong source, gồm API route và quyền edit cho hai endpoint mới.
-- CI trên commit `cbf141beb5c81caae7119c41dfe16754362fcc28` được xác nhận xanh; chờ review PR.
+- Đã bổ sung verification cases trong `tests/ERPm.Verification/Program.cs` cho service + HTTP route + phân quyền của `GET .../versions`, `GET .../versions/{versionId}`, `GET .../versions/{versionId}/items`, `POST .../versions/clone` và `POST .../versions/{versionId}/bulk-adjustment`.
+- Chưa chạy `ERPm.Verification` cục bộ do chưa có PostgreSQL/Docker cục bộ; cần push để GitHub Actions CI chạy kiểm tra đầy đủ.
 
 ## Hướng tiếp theo
-- Chạy CI, sửa lỗi compile/test nếu có.
-- Phúc review; sau đó mới merge và cập nhật Trello Done.
+- Push lên `loipham/s25.2-pricing-engine` và theo dõi CI (`verify.yml`).
+- Phúc review PR #44 và FE (S25.4) tích hợp; sau đó mới merge và cập nhật Trello Done.

@@ -25,15 +25,20 @@ Hoàn thiện nghiệp vụ định giá dựa trên schema versioning đã có:
 - Bổ sung thông báo lỗi phiên bản bảng giá trong dictionary VI/EN.
 - Cập nhật PricingEngine và PriceListService; chọn version theo ngày chứng từ.
 - Thêm API:
+  - `GET /api/v1/sales/price-lists/{priceListId}/versions` (danh sách phiên bản nhẹ kèm `itemCount`, chưa load `items`)
+  - `GET /api/v1/sales/price-lists/{priceListId}/versions/{versionId}` (chi tiết phiên bản kèm `items`)
+  - `GET /api/v1/sales/price-lists/{priceListId}/versions/{versionId}/items` (danh sách `items` của phiên bản)
   - `POST /api/v1/sales/price-lists/{priceListId}/versions/clone`
   - `POST /api/v1/sales/price-lists/{priceListId}/versions/{versionId}/bulk-adjustment`
-- Thêm verification cho Tax Inclusive/Exclusive, clone, adjustment, chọn version theo ngày.
+- Thêm verification cho Tax Inclusive/Exclusive, clone, adjustment, chọn version theo ngày và các endpoint GET/POST version.
 - Không có thay đổi schema/migration dự kiến.
 
 ## 4. Kiểm tra
-- Đã thêm kiểm tra tự động vào `tests/ERPm.Verification/Program.cs` cho tax inclusive/exclusive, clone version, bulk percentage/fixed-amount adjustment, rounding increment, chọn version theo ngày chứng từ và route/authorization HTTP của hai API mới.
-- GitHub Actions trên commit `cbf141beb5c81caae7119c41dfe16754362fcc28`: người phụ trách xác nhận toàn bộ CI xanh.
+- Đã thêm kiểm tra tự động vào `tests/ERPm.Verification/Program.cs` cho tax inclusive/exclusive, clone version, bulk percentage/fixed-amount adjustment, rounding increment, chọn version theo ngày chứng từ, `GetVersionsAsync`/`GetVersionAsync` và route/authorization HTTP của các API version mới (`GET .../versions`, `GET .../versions/{versionId}`, `GET .../versions/{versionId}/items`, `POST .../versions/clone`, `POST .../versions/{versionId}/bulk-adjustment`).
+- Đã chạy `dotnet build ERPm.sln --nologo` sau khi bổ sung các endpoint GET: **0 Warning, 0 Error**.
+- `ERPm.Verification` chưa chạy cục bộ do máy không có PostgreSQL/Docker daemon cục bộ; cần push để GitHub Actions CI (`verify.yml`) chạy lại toàn bộ suite.
 
 ## 5. Việc còn lại
-- Kiểm tra API contract, phân quyền `sd:pricelist:edit`, và dữ liệu thực trên DB test.
+- Push branch `loipham/s25.2-pricing-engine` để CI chạy lại và kiểm tra kết quả xanh.
+- Kiểm tra API contract với FE (S25.4), phân quyền `sd:pricelist:view` / `sd:pricelist:edit`, và dữ liệu thực trên DB test.
 - Chờ Phúc review PR; xử lý feedback trước khi merge.
