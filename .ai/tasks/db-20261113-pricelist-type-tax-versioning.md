@@ -2,8 +2,10 @@
 
 > **Loại:** db
 > **Ngày tạo:** 2026-11-13 · **Người làm:** Lợi (Dev chính Backend) · **Người yêu cầu:** Phúc (Kiến trúc & Review)
-> **Trạng thái:** Doing (chờ `dotnet build` và chạy migration trên DB thật; xem mục 5)
-> **Liên quan:** Trello card `[S25.1][BE] Schema Database & Entity Bảng giá (Type, Thuế, Versioning)` · migration `20261113030000_AddPriceListTypeTaxAndVersioning`
+> **Trạng thái:** Done
+> **Progress aggregation:** v1
+> **Liên quan:** Trello card `[S25.1][BE] Schema Database & Entity Bảng giá (Type, Thuế, Versioning)` (`https://trello.com/c/U54wkZHg`) · PR [#43](https://github.com/I3Solution/ERPm-BE/pull/43) · merge commit `54217df0b04cf5fb4be654ade7d6b57ddb6b1d07` · migration `20261113030000_AddPriceListTypeTaxAndVersioning` · [step log](../steps/step-25-1-pricelist-schema-versioning.md)
+> **Phạm vi:** ERPm-BE (Domain, Application, Infrastructure, Migrations, Verification)
 
 ## 1. Mô tả
 Thiết kế Entity và Migration cho Bảng giá chuẩn ERP:
@@ -30,10 +32,18 @@ Thay đổi code đi kèm để build không vỡ (không đổi hợp đồng A
 - `PriceListService`: đọc/ghi dòng giá qua "version hiện hành" (Active mới nhất; bảng giá cũ chưa có thì tạo `V1`), đồng bộ ngày của version theo header, chỉ tính giá từ bảng giá `Type = Sales` và từ dòng của version Active còn trong hiệu lực.
 - `ApplicationDbContext` / `IApplicationDbContext`: thêm `DbSet<PriceListVersion>`, cập nhật query filter của `PriceListItem` và `PriceListVersion`.
 
-## 3. Cách làm
+## 3. Features / Milestones
+- [x] Feature 1 — Bổ sung `PriceListType` (`Sales`/`Purchase`) và `IsTaxInclusive` vào `PriceList` entity & `DbContext`.
+- [x] Feature 2 — Thiết kế `PriceListVersion` entity, bảng `tbl_SD_PriceListVersion` và chuyển `PriceListItem` liên kết sang `PriceListVersionId`.
+- [x] Feature 3 — Xây dựng migration `20261113030000_AddPriceListTypeTaxAndVersioning` kèm backfill `V1` an toàn và rollback `Down`.
+- [x] Feature 4 — Cập nhật `PriceListService` tương thích ngược và bổ sung kiểm thử trong `ERPm.Verification`.
+- [x] Feature 5 — Xác minh `dotnet build`, `dotnet ef migrations has-pending-model-changes`, CI GitHub Actions và migration trên Neon test branch.
+
+## 4. Cách làm
 File tạo mới:
 - `src/ERPm.Infrastructure/Persistence/Migrations/20261113030000_AddPriceListTypeTaxAndVersioning.cs`
 - `src/ERPm.Infrastructure/Persistence/Migrations/20261113030000_AddPriceListTypeTaxAndVersioning.Designer.cs`
+- `.ai/steps/step-25-1-pricelist-schema-versioning.md`
 
 File sửa:
 - `src/ERPm.Domain/Entities/Sales/PriceList.cs`
@@ -41,22 +51,30 @@ File sửa:
 - `src/ERPm.Infrastructure/Persistence/ApplicationDbContext.cs`
 - `src/ERPm.Infrastructure/Persistence/ApplicationDbContextModelSnapshot.cs`
 - `src/ERPm.Infrastructure/Services/PriceListService.cs`
+- `tests/ERPm.Verification/Program.cs`
 
-Lưu ý quy trình: phiên làm việc này **không có .NET SDK** (không tải được SDK/NuGet) nên không chạy được `dotnet ef migrations add`. Migration và Snapshot được viết/vá bằng tay theo đúng pattern migration hiện có; file Designer sinh từ Snapshot bằng script (đã kiểm chứng script trên Snapshot cũ: chỉ lệch đúng một hunk `credit_approved_*` đã tồn tại sẵn trong repo giữa Snapshot và Designer của `20261108033546`, không liên quan task này).
+Lưu ý quy trình: ở phiên làm việc ban đầu không có .NET SDK nên migration và Snapshot được viết/vá theo pattern hiện có; sau đó đã được kiểm chứng đầy đủ bằng `.NET 10 SDK` (`10.0.403`) và CI.
 
-## 4. Kiểm tra
-Đã chạy (PostgreSQL 16 tạm, schema cũ lấy từ migration `AddSalesPriceList`, dữ liệu mẫu gồm bảng giá còn hạn, hết hạn, đã xoá mềm, không có dòng; các khối SQL được trích nguyên văn từ file migration): **28/28 kiểm tra đạt**:
-- Backfill: 1 version `V1` cho mỗi bảng giá, trạng thái đúng, ngày/tenant/xoá mềm được chép, 100% dòng giá được gán đúng bảng giá, mặc định Sales/không gồm thuế.
-- Ràng buộc: CHECK `type`, `status`, khoảng ngày; unique `version_code` (cho dùng lại sau khi xoá mềm); unique dòng giá với `uom_id` NULL; cùng dòng ở version khác được phép; xoá bảng giá cascade xuống version và dòng.
-- `Down`: giữ dòng của version Active mới nhất mỗi bảng giá, khôi phục index/FK cũ, xoá bảng và cột mới; vòng Up→Down→Up giữ đủ dòng; guard dừng migration khi dữ liệu sai; Up chạy được trên bảng rỗng.
-- Cú pháp C# của 7 file đã sửa/tạo được parse sạch bằng tree-sitter.
-
-**Chưa chạy được:** `dotnet build ERPm.sln` và `dotnet ef` (không có SDK). Cần chạy trên máy dev/CI trước khi merge.
+## 5. Kiểm tra
+- **PostgreSQL 16 tạm (migration & constraints):** **28/28 kiểm tra đạt** (backfill `V1`, CHECK `type`/`status`/khoảng ngày, unique `version_code`, unique dòng giá `NULLS NOT DISTINCT`, cascade delete, `Down` rollback, guard chặn dữ liệu sai).
+- **CI GitHub Actions (run `#43394426337`):** `dotnet build ERPm.sln`, `ERPm.Hrm.Verification` và `ERPm.Verification` đều **PASS**.
+- **Neon test branch (migration & backfill):** Tạo `V1` cho 2/2 `PriceList` (`Active = 2`, `Expired = 3`), liên kết 4/4 `PriceListItem`; `missing_v1 = 0`, `orphan_items = 0` — **PASS**.
+- **Kiểm tra trực tiếp trên `ERPm-BE/master` (`54217df0b04cf5fb4be654ade7d6b57ddb6b1d07`) với .NET SDK `10.0.403`:**
+  - `dotnet build ERPm-BE/ERPm.sln --nologo -v q` → **PASS** (`0 Warning(s), 0 Error(s)`).
+  - `dotnet ef migrations has-pending-model-changes --project ERPm-BE/src/ERPm.Infrastructure --startup-project ERPm-BE/src/ERPm.Api --no-build` → **PASS** (`No changes have been made to the model since the last migration.`).
 
 Rollback: `dotnet ef database update 20261108033546_AddWarehouseOrgUnitAndItemVatRate`. `Down` mất dữ liệu có chủ đích: schema cũ chỉ chứa một tập dòng giá cho mỗi bảng giá nên chỉ giữ dòng của version Active mới nhất (hoặc version mới nhất nếu không có Active); dòng của version khác bị xoá. Sao lưu trước khi rollback nếu đã tạo nhiều version.
 
-## 5. Việc còn lại
-- Chạy `dotnet build ERPm.sln` (kỳ vọng 0 warning/0 error) và `dotnet ef migrations has-pending-model-changes` để chắc Snapshot khớp model; nếu EF báo lệch thì sinh lại migration bằng `dotnet ef migrations add` rồi giữ lại phần backfill SQL.
-- Áp migration lên bản sao DB dev có dữ liệu bảng giá thật và kiểm tra số dòng trước/sau.
-- Chưa làm (thuộc các card S25 sau): DTO/API cho `Type`, `IsTaxInclusive` và quản lý version (tạo Draft, publish, archive), tự chuyển Active→Expired theo ngày, ràng buộc không chồng lấn hiệu lực giữa các version Active, và lọc bảng giá Purchase theo nhà cung cấp.
-- Chờ Phúc review.
+## 6. Việc còn lại
+Không. Các phần DTO/API quản lý version, `PricingEngine` theo ngày chứng từ, tính thuế Inclusive/Exclusive, Clone & Bulk Adjustment được thực hiện ở S25.2.
+
+## 7. Evidence và cập nhật
+- Commit đã merge vào `ERPm-BE/master` qua PR [#43](https://github.com/I3Solution/ERPm-BE/pull/43):
+  - `4550a0d` (`[db](SD) S25.1 price list Type, IsTaxInclusive and PriceListVersions`)
+  - `2c6f47c` (`[docs] S25.1 log db task for price list versioning schema`)
+  - `9197f0c` (`test: update price list verification for versioned schema`)
+  - Merge commit: `54217df0b04cf5fb4be654ade7d6b57ddb6b1d07`
+- CI / workflow run: GitHub Actions run `#43394426337` — PASS (`dotnet build ERPm.sln`, `ERPm.Hrm.Verification`, `ERPm.Verification`).
+- Neon test branch: backfill 2/2 `PriceList` (`V1`), 4/4 `PriceListItem`, `missing_v1 = 0`, `orphan_items = 0` — PASS.
+- Ngày cập nhật cuối: 2026-11-14
+- Đã xác minh: build 0 warning/0 error, EF model snapshot khớp 100% với model hiện tại, CI verification và migration/backfill Neon đều đã pass.
