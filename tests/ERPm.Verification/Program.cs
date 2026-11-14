@@ -778,11 +778,12 @@ try
 
     // Order and return notices reach the same kind of people: viewers whose scope reaches the document, never the actor.
     IamPrincipal DocPrincipal(IamDataScope scope, string userKey, params string[] actions) => new([SystemRoles.Allow("Doc", actions, scope)], new OrgContext { CompanyId = 1, UserKey = userKey, Branches = new OrgTree([(branch.Id, (int?)null), (999999, (int?)null)]) }, false);
-    string[] docRights = ["sd:order:view", "sd:return:view"];
+    string[] docRights = ["sd:order:view", "sd:return:view", "sd:invoice:view", "wms:stock:view"];
+    string[] approverRights = [.. docRights, "sd:order:approve_credit"];
     var docIam = new IamStub(new()
     {
         [quoteActor.Id] = DocPrincipal(inBranch, "nobody", docRights),
-        [quoteViewer.Id] = DocPrincipal(inBranch, "nobody", docRights),
+        [quoteViewer.Id] = DocPrincipal(inBranch, "nobody", approverRights),
         [quoteBoss.Id] = DocPrincipal(new IamDataScope { Mode = DataScopeModes.Group }, "nobody", docRights),
         [quoteOwner.Id] = DocPrincipal(new IamDataScope { Mode = DataScopeModes.Self }, "verification", docRights),
         [quoteStranger.Id] = DocPrincipal(new IamDataScope { Mode = DataScopeModes.Self }, "someone-else", docRights),
@@ -800,7 +801,7 @@ try
     await docOrders.CancelAsync(noticeOrder.Id, "notice test", default);
     Check(DocTold("SD_ORDER_CANCELLED").SequenceEqual(Expected()), "a cancelled order tells the same people");
     var heldNotice = await docOrders.ConfirmAsync((await docOrders.CreateAsync(new CreateSalesOrderRequest { BranchId = branch.Id, CustomerId = poor.Id, Items = [new() { ItemId = creditItem.Id, Quantity = 1, UnitPrice = 100 }] })).Id, default);
-    Check(heldNotice.Status == "PendingApproval" && DocTold("SD_ORDER_CREDIT_PENDING").SequenceEqual(Expected()), "an order waiting for credit approval tells the same people");
+    Check(heldNotice.Status == "PendingApproval" && DocTold("SD_ORDER_CREDIT_PENDING").SequenceEqual(new int?[] { quoteViewer.Id }), "an order waiting for credit approval tells only the accounts that may approve credit in a scope reaching it, not other viewers");
     await docOrders.ApproveCreditAsync(heldNotice.Id, "notice test", default);
     Check(DocTold("SD_ORDER_CREDIT_APPROVED").SequenceEqual(Expected()), "an approved credit tells the same people");
     var docReturns = new SalesReturnService(db, new PostingTransaction(db), docEngine, docIam, new ActorUser(quoteActor.Id));
@@ -810,6 +811,16 @@ try
     var invoicer = new SalesInvoiceService(db, new BranchService(db), new PostingTransaction(db), new ActorUser(quoteActor.Id), docEngine, docIam);
     var toInvoice = await docOrders.ConfirmAsync((await docOrders.CreateAsync(new CreateSalesOrderRequest { BranchId = branch.Id, CustomerId = rich.Id, Items = [new() { ItemId = creditItem.Id, Quantity = 1, UnitPrice = 100 }] })).Id, default);
     await invoicer.CreateInvoiceFromOrderAsync(toInvoice.Id, FromOrder(PaymentMethod.Cash, 100));
+    // A sale that leaves stock at or under the item's alert level, then its cancellation, tell stock/invoice viewers only after the commit.
+    await db.Items.Where(i => i.Id == item.Id).ExecuteUpdateAsync(s => s.SetProperty(i => i.MinStockAlert, 1_000_000_000m)); db.ChangeTracker.Clear();
+    var alertSale = await invoicer.CreateInvoiceAsync(Sale());
+    await db.Items.Where(i => i.Id == item.Id).ExecuteUpdateAsync(s => s.SetProperty(i => i.MinStockAlert, 0m));
+    Check(DocTold("WMS_LOW_STOCK").SequenceEqual(new int?[] { quoteViewer.Id, quoteBoss.Id }.OrderBy(id => id)), "low stock tells accounts that may view stock in the warehouse branch (stock has no owner, so seller-only scopes get nothing), not the actor, other branches or people without the right");
+    await invoicer.CancelInvoiceAsync(alertSale.Id, "notice test");
+    Check(DocTold("SD_INVOICE_CANCELLED").SequenceEqual(Expected()), "a cancelled invoice tells viewers of invoices in a scope reaching it, not the actor");
+    var eventsBefore = docEngine.Events.Count;
+    await Reject(async () => await invoicer.CancelInvoiceAsync(alertSale.Id, " "), "error.validation.request");
+    Check(docEngine.Events.Count == eventsBefore, "a refused action notifies nobody");
     (await db.Accounts.SingleAsync(a => a.Code == "511")).IsActive = false; await db.SaveChangesAsync();   // restore the state the next checks expect
     Check(DocTold("SD_ORDER_INVOICED").SequenceEqual(Expected()), "an order turned into an invoice tells viewers of the order, not the person who invoiced it");
     Check(docEngine.Events.OfType<ERPm.Domain.Events.NotificationEvent>().All(e => e.TargetId != quoteActor.Id && e.TargetId != quoteNoRight.Id && e.TargetId != quoteOtherBranch.Id && e.TargetId != quoteStranger.Id), "nobody outside the right scope or the actor received any order or return notice");
