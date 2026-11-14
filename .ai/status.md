@@ -1,10 +1,10 @@
 # ERPm-BE — Backend Status
 
 ## In-Progress
-- [ ] S25.3 Quotation Delivery Address Snapshot — [task](tasks/change-20261113-s25-3-quotation-address-snapshot.md) · [step log](steps/step-25-3-quotation-address-snapshot.md). Branch: `loipham/s25.3-quotation-address-snapshot`; đang triển khai.
+- [ ] S25.3 Quotation Delivery Address Snapshot — [task](tasks/change-20261113-s25-3-quotation-address-snapshot.md) · [step log](steps/step-25-3-quotation-address-snapshot.md). Branch: `loipham/s25.3-quotation-address-snapshot`; PR #45 CI đã pass, chờ Phúc review.
 
 ## Next Steps
-- Hoàn tất migration, verification, CI; chờ Phúc review PR trước khi merge.
+- Chờ Phúc review PR #45 trước khi merge.
 
 ---
 

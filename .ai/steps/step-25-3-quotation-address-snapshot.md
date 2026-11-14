@@ -14,7 +14,8 @@
 - 2026-11-13: Khảo sát SalesOrder snapshot hiện hữu và luồng SalesQuotation; xác định lỗi hiện tại là convert đọc Partner.Address thay vì snapshot tại báo giá.
 - 2026-11-13: Tạo branch `loipham/s25.3-quotation-address-snapshot` từ `master`.
 - 2026-11-13: CI run #237 build và HRM Verification pass; ERPm.Verification phát hiện test fixture cố tạo thêm default address cho khách hàng đã có default. Đổi fixture sang địa chỉ non-default có sẵn.
-- 2026-11-13: CI run #240/#242 tiếp tục phát hiện test dùng `Remove` gây hard-delete địa chỉ, vi phạm FK của SalesOrder. Sửa fixture mô phỏng đúng semantics ứng dụng: soft-delete bằng `IsDeleted` + `DeletedAtUtc`, giữ lại row nguồn và snapshot. CI mới đang chờ.
+- 2026-11-13: CI run #240/#242 tiếp tục phát hiện test dùng `Remove` gây hard-delete địa chỉ, vi phạm FK của SalesOrder. Sửa fixture mô phỏng đúng semantics ứng dụng: soft-delete bằng `IsDeleted` + `DeletedAtUtc`, giữ lại row nguồn và snapshot.
+- 2026-11-14: Xác nhận GitHub Actions trên PR #45 (`bd2ced5`) đã PASS cả hai job (`verify` trên CI và `ERPm.Verification`).
 
 ## Files
 - `src/ERPm.Domain/Entities/Sales/SalesQuotation.cs`
@@ -28,7 +29,7 @@
 
 ## Verification
 - Added checks for snapshot creation, invalid address/customer association, preserving the selected snapshot after source edits, and carrying it to SalesOrder after source deletion.
-- Build/test not run locally in this session; CI result pending PR.
+- GitHub Actions PR #45 (`bd2ced5`) passed: `dotnet build`, `ERPm.Hrm.Verification`, and `ERPm.Verification`.
 
 ## Bước tiếp theo
-- Mở PR, theo dõi GitHub Actions; chờ Phúc review trước khi merge.
+- Chờ Phúc review PR #45 trước khi merge.

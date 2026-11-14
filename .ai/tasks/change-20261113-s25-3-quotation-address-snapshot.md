@@ -24,7 +24,7 @@
 - Thêm verification cho snapshot, địa chỉ không hợp lệ, update sau khi nguồn thay đổi và convert sau khi nguồn bị xóa.
 
 ## 4. Kiểm tra
-- Đã cập nhật ERPm.Verification; chưa chạy build/test trong môi trường hiện tại. Cần GitHub Actions xác nhận trên PR.
+- Đã cập nhật ERPm.Verification; GitHub Actions trên PR #45 (commit `bd2ced5`, run #245) đã PASS toàn bộ (`dotnet build`, `ERPm.Hrm.Verification`, `ERPm.Verification`).
 
 ## 5. Việc còn lại
-- Mở PR, xác nhận CI; chờ Phúc review trước khi merge.
+- Chờ Phúc review PR #45 trước khi merge.
