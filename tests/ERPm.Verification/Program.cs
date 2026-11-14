@@ -1262,7 +1262,7 @@ try
         using var plViewGrant = await http.PutAsJsonAsync($"/api/v1/sys/roles/users/{plViewUserId}", new
         {
             roles = Array.Empty<object>(),
-            inlinePolicy = new { statements = new[] { new { sid = "PriceListViewOnly", effect = "Allow", actions = new[] { "sd:pricelist:view" }, dataScope = new { mode = "ALL" } } } }
+            inlinePolicy = new { statements = new[] { new { sid = "PriceListViewOnly", effect = "Allow", actions = new[] { "sd:pricelist:view" }, dataScope = new { mode = "GROUP" } } } }
         });
         Check(plViewGrant.IsSuccessStatusCode, "super administrator grants sd:pricelist:view only");
         http.DefaultRequestHeaders.Authorization = new("Bearer", await Login("pl_viewer"));
