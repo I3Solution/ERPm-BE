@@ -48,6 +48,8 @@ public class DepartmentDto
 public class DepartmentFilterQuery : BaseFilterQuery
 {
     public int? CompanyId { get; set; }
+    /// <summary>Keeps only the departments that belong to this branch itself (not its sub-branches), so a tree can load one branch at a time.</summary>
+    public int? BranchId { get; set; }
     public string? LevelCode { get; set; }
     public int? UnderId { get; set; }
 }

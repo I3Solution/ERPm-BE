@@ -266,6 +266,11 @@ static class IamChecks
         t.Check(movedTeam.Path == $"/{divisionB.Id}/{departmentA.Id}/{sectionA.Id}/{teamA.Id}/"
             && under.Items.Select(d => d.Id).ToHashSet().SetEquals([divisionB.Id, departmentA.Id, sectionA.Id, teamA.Id]),
             "moving a department re-roots the Path of its whole subtree (underId filter follows)");
+        var hcmDivision = await Unit("DIV_HCM", "DIVISION", null, org.CompanyId, org.HcmBranchId);
+        var inHanoi = await departments.GetPagedAsync(new DepartmentFilterQuery { BranchId = org.HanoiBranchId, PageSize = 50 });
+        var inHcm = await departments.GetPagedAsync(new DepartmentFilterQuery { BranchId = org.HcmBranchId, PageSize = 50 });
+        t.Check(inHcm.Items.Select(d => d.Id).SequenceEqual([hcmDivision.Id]) && inHanoi.Items.Count > 0 && inHanoi.Items.All(d => d.BranchId == org.HanoiBranchId) && inHanoi.Items.All(d => d.Id != hcmDivision.Id),
+            "the branchId filter keeps only the departments of that branch, so a tree can load one branch at a time");
 
         // Employees in the department and in its section; WAREHOUSE_ACCOUNTANT is granted to the department only.
         async Task<int> Staff(string code, int departmentId)
