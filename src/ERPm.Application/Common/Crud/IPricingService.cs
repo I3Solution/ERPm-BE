@@ -7,6 +7,13 @@ public interface IPricingService
     Task<CalculatePriceResponse> CalculateAsync(CalculatePriceRequest request, CancellationToken cancellationToken = default);
     Task<List<PriceListVersionDto>> GetVersionsAsync(int priceListId, CancellationToken cancellationToken = default);
     Task<PriceListVersionDto> GetVersionAsync(int priceListId, int versionId, CancellationToken cancellationToken = default);
+    Task<PriceListVersionDto> CreateVersionAsync(int priceListId, CreatePriceListVersionRequest request, CancellationToken cancellationToken = default);
+    Task<PriceListVersionDto> UpdateVersionAsync(int priceListId, int versionId, UpdatePriceListVersionRequest request, CancellationToken cancellationToken = default);
+    Task<PriceListVersionDto> ActivateVersionAsync(int priceListId, int versionId, CancellationToken cancellationToken = default);
+    Task<PriceListVersionDto> CloseVersionAsync(int priceListId, int versionId, CancellationToken cancellationToken = default);
+    Task<PriceListItemDto> AddVersionItemAsync(int priceListId, int versionId, CreatePriceListItemRequest request, CancellationToken cancellationToken = default);
+    Task<PriceListItemDto> UpdateVersionItemAsync(int priceListId, int versionId, int itemId, UpdatePriceListItemRequest request, CancellationToken cancellationToken = default);
+    Task DeleteVersionItemAsync(int priceListId, int versionId, int itemId, CancellationToken cancellationToken = default);
     Task<PriceListVersionDto> CloneVersionAsync(int priceListId, ClonePriceListVersionRequest request, CancellationToken cancellationToken = default);
     Task<BulkPriceAdjustmentResponse> BulkAdjustVersionAsync(int priceListId, int versionId, BulkPriceAdjustmentRequest request, CancellationToken cancellationToken = default);
 }

@@ -20,6 +20,17 @@ public class PriceListsController : BaseCrudController<PriceList, PriceListDetai
         _pricing = pricing;
     }
 
+    /// <summary>Hidden: replaced by <see cref="Search"/>, which binds the extended filter.</summary>
+    [NonAction]
+    public override Task<ActionResult<ApiResponse<PagedResult<PriceListDetailDto>>>> GetPaged(BaseFilterQuery query, CancellationToken cancellationToken) =>
+        base.GetPaged(query, cancellationToken);
+
+    /// <summary>Paged list with standard filters plus optional ?type=Sales|Purchase (or 1|2).</summary>
+    [RequirePermission(":view")]
+    [HttpGet]
+    public Task<ActionResult<ApiResponse<PagedResult<PriceListDetailDto>>>> Search([FromQuery] PriceListFilterQuery query, CancellationToken cancellationToken) =>
+        base.GetPaged(query, cancellationToken);
+
     [RequirePermission("sd:order:view")]
     [HttpPost("calculate-price")]
     public async Task<ActionResult<ApiResponse<CalculatePriceResponse>>> CalculatePrice([FromBody] CalculatePriceRequest request, CancellationToken cancellationToken)
@@ -49,6 +60,62 @@ public class PriceListsController : BaseCrudController<PriceList, PriceListDetai
     {
         var result = await _pricing.GetVersionAsync(priceListId, versionId, cancellationToken);
         return Ok(ApiResponse<List<PriceListItemDto>>.Ok(result.Items));
+    }
+
+    [RequirePermission("sd:pricelist:edit")]
+    [HttpPost("{priceListId:int}/versions")]
+    public async Task<ActionResult<ApiResponse<PriceListVersionDto>>> CreateVersion(int priceListId, [FromBody] CreatePriceListVersionRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _pricing.CreateVersionAsync(priceListId, request, cancellationToken);
+        return StatusCode(StatusCodes.Status201Created, ApiResponse<PriceListVersionDto>.Ok(result, "common.saved"));
+    }
+
+    [RequirePermission("sd:pricelist:edit")]
+    [HttpPut("{priceListId:int}/versions/{versionId:int}")]
+    public async Task<ActionResult<ApiResponse<PriceListVersionDto>>> UpdateVersion(int priceListId, int versionId, [FromBody] UpdatePriceListVersionRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _pricing.UpdateVersionAsync(priceListId, versionId, request, cancellationToken);
+        return Ok(ApiResponse<PriceListVersionDto>.Ok(result, "common.saved"));
+    }
+
+    [RequirePermission("sd:pricelist:edit")]
+    [HttpPost("{priceListId:int}/versions/{versionId:int}/activate")]
+    public async Task<ActionResult<ApiResponse<PriceListVersionDto>>> ActivateVersion(int priceListId, int versionId, CancellationToken cancellationToken)
+    {
+        var result = await _pricing.ActivateVersionAsync(priceListId, versionId, cancellationToken);
+        return Ok(ApiResponse<PriceListVersionDto>.Ok(result, "common.saved"));
+    }
+
+    [RequirePermission("sd:pricelist:edit")]
+    [HttpPost("{priceListId:int}/versions/{versionId:int}/close")]
+    public async Task<ActionResult<ApiResponse<PriceListVersionDto>>> CloseVersion(int priceListId, int versionId, CancellationToken cancellationToken)
+    {
+        var result = await _pricing.CloseVersionAsync(priceListId, versionId, cancellationToken);
+        return Ok(ApiResponse<PriceListVersionDto>.Ok(result, "common.saved"));
+    }
+
+    [RequirePermission("sd:pricelist:edit")]
+    [HttpPost("{priceListId:int}/versions/{versionId:int}/items")]
+    public async Task<ActionResult<ApiResponse<PriceListItemDto>>> AddVersionItem(int priceListId, int versionId, [FromBody] CreatePriceListItemRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _pricing.AddVersionItemAsync(priceListId, versionId, request, cancellationToken);
+        return StatusCode(StatusCodes.Status201Created, ApiResponse<PriceListItemDto>.Ok(result, "common.saved"));
+    }
+
+    [RequirePermission("sd:pricelist:edit")]
+    [HttpPut("{priceListId:int}/versions/{versionId:int}/items/{itemId:int}")]
+    public async Task<ActionResult<ApiResponse<PriceListItemDto>>> UpdateVersionItem(int priceListId, int versionId, int itemId, [FromBody] UpdatePriceListItemRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _pricing.UpdateVersionItemAsync(priceListId, versionId, itemId, request, cancellationToken);
+        return Ok(ApiResponse<PriceListItemDto>.Ok(result, "common.saved"));
+    }
+
+    [RequirePermission("sd:pricelist:edit")]
+    [HttpDelete("{priceListId:int}/versions/{versionId:int}/items/{itemId:int}")]
+    public async Task<IActionResult> DeleteVersionItem(int priceListId, int versionId, int itemId, CancellationToken cancellationToken)
+    {
+        await _pricing.DeleteVersionItemAsync(priceListId, versionId, itemId, cancellationToken);
+        return NoContent();
     }
 
     [RequirePermission("sd:pricelist:edit")]
