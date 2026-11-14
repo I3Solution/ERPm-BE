@@ -366,6 +366,14 @@ static class IamChecks
         t.Check(storeDepartmentBranch == org.HanoiBranchId && inStore.DepartmentId == org.AccountingDepartmentId && inStore.BranchId == org.HanoiSubBranchId,
             "a store below the department's branch can use the department");
 
+        // Employee list filter by department (with sub-departments) and job position.
+        var inDepartment = (await branchStaff.GetPagedAsync(new EmployeeFilterQuery { DepartmentId = org.AccountingDepartmentId, PageSize = 200 })).Items.Select(e => e.Code).ToArray();
+        var inPosition = (await branchStaff.GetPagedAsync(new EmployeeFilterQuery { JobPositionId = org.JobPositions["SALES_ACC"], PageSize = 200 })).Items.Select(e => e.Code).ToArray();
+        var inBoth = (await branchStaff.GetPagedAsync(new EmployeeFilterQuery { DepartmentId = org.AccountingDepartmentId, JobPositionId = org.JobPositions["SALES_ACC"], PageSize = 200 })).Items.Select(e => e.Code).ToArray();
+        t.Check(inDepartment.Contains("E-BR-DEPT") && !inDepartment.Contains("E-BR-SUB") && inPosition.Contains("E-BR-SUB") && inPosition.Contains("E-BR-DEPT")
+            && inBoth.Contains("E-BR-DEPT") && !inBoth.Contains("E-BR-SUB"),
+            "employee list filters by department and job position");
+
         // Daily catch-up: a row whose date has arrived but was never applied (saved straight to the table, like a
         // row that was future-dated when written) reaches the employee cache; a row still in the future does not.
         var scheduled = await branchStaff.CreateAsync(new CreateEmployeeRequest
