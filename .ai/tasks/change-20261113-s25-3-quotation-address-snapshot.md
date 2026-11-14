@@ -2,8 +2,8 @@
 
 > **Loại:** change
 > **Ngày tạo:** 2026-11-13 · **Người làm:** Lợi · **Người yêu cầu:** Trello S25.3
-> **Trạng thái:** Doing
-> **Liên quan:** Trello [S25.3][BE] Tích hợp Địa chỉ Snapshot vào Báo giá & Convert to Order
+> **Trạng thái:** Done
+> **Liên quan:** Trello [S25.3][BE] Tích hợp Địa chỉ Snapshot vào Báo giá & Convert to Order (`https://trello.com/c/xscVHtTF`) · PR [#45](https://github.com/I3Solution/ERPm-BE/pull/45) (merge `299da6239a59f42c52ff6047f5a29f694e77e302`)
 
 ## 1. Mô tả
 - Bổ sung DeliveryAddressId, DeliveryRecipientName, DeliveryPhone và DeliveryAddressText vào SalesQuotation.
@@ -27,4 +27,4 @@
 - Đã cập nhật ERPm.Verification; GitHub Actions trên PR #45 (commit `bd2ced5`, run #245) đã PASS toàn bộ (`dotnet build`, `ERPm.Hrm.Verification`, `ERPm.Verification`).
 
 ## 5. Việc còn lại
-- Chờ Phúc review PR #45 trước khi merge.
+Không. PR #45 đã được merge vào `master` tại commit `299da6239a59f42c52ff6047f5a29f694e77e302`.

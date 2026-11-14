@@ -29,8 +29,7 @@ Triển khai định giá theo ngày chứng từ, thuế Inclusive/Exclusive, c
 
 ## Verification
 - Đã bổ sung verification cases trong `tests/ERPm.Verification/Program.cs` cho service + HTTP route + phân quyền của `GET .../versions`, `GET .../versions/{versionId}`, `GET .../versions/{versionId}/items`, `POST .../versions/clone` và `POST .../versions/{versionId}/bulk-adjustment`.
-- Chưa chạy `ERPm.Verification` cục bộ do chưa có PostgreSQL/Docker cục bộ; cần push để GitHub Actions CI chạy kiểm tra đầy đủ.
+- PR #44 đã merge vào `master` (`d5cb0771a32e0407cc714e20a45ec751ea800f4a`); `dotnet build ERPm.sln --nologo -v q` trên `master` đạt `0 Warning(s), 0 Error(s)`.
 
 ## Hướng tiếp theo
-- Push lên `loipham/s25.2-pricing-engine` và theo dõi CI (`verify.yml`).
-- Phúc review PR #44 và FE (S25.4) tích hợp; sau đó mới merge và cập nhật Trello Done.
+- Triển khai task nối tiếp `S25.2b` (vòng đời version `activate`/`close`/CRUD items `Draft` & lọc `?type=Sales|Purchase`).
