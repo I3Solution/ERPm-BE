@@ -17,12 +17,11 @@
 - [x] Posting kho/bán hàng nguyên tử, concurrency/idempotency, giá vốn theo InventoryValue, thanh toán/công nợ, reversal và bất biến Posted.
 - [x] Đơn bán/mua có validation, tính tổng server-side, Draft/Confirmed và khóa chống sửa đồng thời.
 - [x] Build solution 0 warning/0 error; 44 kiểm tra PostgreSQL/API đạt. Thêm CI, chưa chạy từ remote.
+- [x] S25.1 Schema Bảng giá (Type, IsTaxInclusive, PriceListVersions): xem [db-20261113-pricelist-type-tax-versioning](tasks/db-20261113-pricelist-type-tax-versioning.md) · [step log](steps/step-25-1-pricelist-schema-versioning.md). PR #43 đã merge (54217df), CI & Neon migration pass, dotnet build & EF model snapshot khớp 100%.
 
 ## In-Progress
 
 Nghiệm thu thủ công MVP và đánh giá vận hành. NuGet advisory feed chưa truy cập được trong phiên; restore offline tạm thời không bật audit, cấu hình CI vẫn giữ restore chuẩn.
-
-- [ ] S25.1 Schema Bảng giá (Type, IsTaxInclusive, PriceListVersions): xem [db-20261113-pricelist-type-tax-versioning](tasks/db-20261113-pricelist-type-tax-versioning.md). Chờ `dotnet build` và chạy migration trên DB thật.
 
 ## Next Steps
 
