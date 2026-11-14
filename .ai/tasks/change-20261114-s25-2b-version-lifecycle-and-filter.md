@@ -2,7 +2,7 @@
 
 > **Loại:** change
 > **Ngày tạo:** 2026-11-14 · **Người làm:** Lợi (Dev chính Backend) · **Người yêu cầu:** Lợi
-> **Trạng thái:** Todo
+> **Trạng thái:** Doing
 > **Liên quan:** Step 25 (`plan-step-25-enterprise-pricing-and-partner-address.md`) · Nối tiếp PR #44 (`loipham/s25.2-pricing-engine`) · Trello card `https://trello.com/c/W1QLkld1`
 
 ## 1. Mô tả
@@ -31,8 +31,12 @@ Bổ sung phần API còn lại so với hợp đồng Step 25 để hoàn thi�
 - Thêm verification cases (unit + HTTP route + phân quyền) trong `tests/ERPm.Verification/Program.cs`.
 
 ## 4. Kiểm tra
-- Chưa triển khai (Todo).
+- `dotnet build ERPm-BE/ERPm.sln --nologo`: **Build succeeded, 0 Warning(s), 0 Error(s)**.
+- Kiểm tra cú pháp và đối xứng khóa VI/EN `system_dictionary.json`: đạt.
+- Đã bổ sung kiểm tra tự động (service + HTTP route + validation + i18n + phân quyền `sd:pricelist:view` / `sd:pricelist:edit`) trong `tests/ERPm.Verification/Program.cs`.
+- `ERPm.Hrm.Verification` & `ERPm.Verification`: chưa chạy cục bộ do không có PostgreSQL/Docker đang chạy cục bộ; chờ chạy trên GitHub Actions CI (`verify.yml`) sau khi push.
 
 ## 5. Việc còn lại
-- Chốt chi tiết chuyển trạng thái khi `activate` (có tự động đóng bản `Active` cũ chồng ngày hay cho phép nhiều `Active` cùng chọn bản mới nhất theo `PricingEngine` như S25.2).
-- Triển khai code, test trên `tests/ERPm.Verification/Program.cs`, chạy `dotnet build` và CI.
+- Push nhánh `loipham/s25.2b-version-lifecycle-and-filter` lên `ERPm-BE` và theo dõi GitHub Actions CI (`dotnet build`, `ERPm.Hrm.Verification`, `ERPm.Verification`) PASS.
+- Mở PR về `ERPm-BE/master`, đồng bộ `ERPm-FE/src/assets/i18n/system.json` với 2 mã lỗi mới (`error.sd.pricelist_version_invalid_status`, `error.sd.pricelist_item_duplicate`) trước khi bump gitlink ở repo cha `ERPm`.
+- Chuyển trạng thái sang `Done` sau khi CI xanh và PR được duyệt.

@@ -17,8 +17,20 @@ public sealed class PriceListService(ApplicationDbContext context)
 
     protected override IQueryable<PriceList> PrepareQuery(IQueryable<PriceList> query) => query.Include(p => p.Branch);
 
+    protected override IQueryable<PriceList> ApplyFilters(IQueryable<PriceList> query, BaseFilterQuery filter)
+    {
+        query = base.ApplyFilters(query, filter);
+        if (filter is PriceListFilterQuery { Type: { } type })
+        {
+            Require(Enum.IsDefined(type), "error.validation.request");
+            query = query.Where(p => p.Type == type);
+        }
+        return query;
+    }
+
     protected override Task<PriceList?> FindEntityAsync(int id, CancellationToken ct) => Context.PriceLists
         .Include(p => p.Branch)
+        .Include(p => p.Versions).ThenInclude(v => v.Items).ThenInclude(i => i.Uom)
         .Include(p => p.Versions).ThenInclude(v => v.Items).ThenInclude(i => i.Item).ThenInclude(i => i!.BaseUom)
         .SingleOrDefaultAsync(p => p.Id == id, ct);
 
@@ -60,9 +72,10 @@ public sealed class PriceListService(ApplicationDbContext context)
     {
         Id = item.Id,
         ItemId = item.ItemId,
+        UomId = item.UomId,
         ItemCode = item.Item?.Code ?? string.Empty,
         ItemName = item.Item?.Name ?? string.Empty,
-        UnitName = item.Item?.BaseUom?.Name,
+        UnitName = item.Uom?.Name ?? item.Item?.BaseUom?.Name,
         UnitPrice = item.UnitPrice,
         MinQuantity = item.MinQuantity,
         DiscountPercent = item.DiscountPercent
@@ -281,25 +294,146 @@ public sealed class PriceListService(ApplicationDbContext context)
     {
         var version = await Context.PriceListVersions
             .AsNoTracking()
+            .Include(v => v.Items).ThenInclude(i => i.Uom)
             .Include(v => v.Items).ThenInclude(i => i.Item).ThenInclude(i => i!.BaseUom)
             .SingleOrDefaultAsync(v => v.Id == versionId && v.PriceListId == priceListId, ct);
         Require(version != null, "error.validation.reference", 404);
         return MapVersion(version!);
     }
 
+    public async Task<PriceListVersionDto> CreateVersionAsync(int priceListId, CreatePriceListVersionRequest request, CancellationToken ct = default)
+    {
+        var code = NormalizeAndValidateVersionMetadata(request.VersionCode, request.EffectiveFrom, request.EffectiveTo);
+        var lines = request.Items ?? [];
+        await ValidateLinesAsync(lines, ct);
+        Require(await Context.PriceLists.AnyAsync(p => p.Id == priceListId, ct), "error.validation.reference", 404);
+        await EnsureVersionCodeUniqueAsync(priceListId, code, null, ct);
+
+        var version = new PriceListVersion
+        {
+            PriceListId = priceListId,
+            VersionCode = code,
+            EffectiveFrom = request.EffectiveFrom,
+            EffectiveTo = request.EffectiveTo,
+            Status = PriceListVersionStatus.Draft,
+            Items = lines.Select(l => new PriceListItem
+            {
+                ItemId = l.ItemId,
+                UnitPrice = l.UnitPrice,
+                MinQuantity = l.MinQuantity,
+                DiscountPercent = l.DiscountPercent
+            }).ToList()
+        };
+
+        Context.PriceListVersions.Add(version);
+        await Context.SaveChangesAsync(ct);
+        Context.ChangeTracker.Clear();
+        return await GetVersionAsync(priceListId, version.Id, ct);
+    }
+
+    public async Task<PriceListVersionDto> UpdateVersionAsync(int priceListId, int versionId, UpdatePriceListVersionRequest request, CancellationToken ct = default)
+    {
+        var code = NormalizeAndValidateVersionMetadata(request.VersionCode, request.EffectiveFrom, request.EffectiveTo);
+        var version = await FindVersionForDraftEditAsync(priceListId, versionId, ct);
+        await EnsureVersionCodeUniqueAsync(priceListId, code, versionId, ct);
+
+        version.VersionCode = code;
+        version.EffectiveFrom = request.EffectiveFrom;
+        version.EffectiveTo = request.EffectiveTo;
+        version.LastModifiedAtUtc = DateTime.UtcNow;
+
+        await Context.SaveChangesAsync(ct);
+        Context.ChangeTracker.Clear();
+        return await GetVersionAsync(priceListId, versionId, ct);
+    }
+
+    public async Task<PriceListVersionDto> ActivateVersionAsync(int priceListId, int versionId, CancellationToken ct = default)
+    {
+        var version = await FindVersionForTransitionAsync(priceListId, versionId, PriceListVersionStatus.Draft, ct);
+        version.Status = PriceListVersionStatus.Active;
+        version.LastModifiedAtUtc = DateTime.UtcNow;
+        await Context.SaveChangesAsync(ct);
+        Context.ChangeTracker.Clear();
+        return await GetVersionAsync(priceListId, versionId, ct);
+    }
+
+    public async Task<PriceListVersionDto> CloseVersionAsync(int priceListId, int versionId, CancellationToken ct = default)
+    {
+        var version = await FindVersionForTransitionAsync(priceListId, versionId, PriceListVersionStatus.Active, ct);
+        version.Status = PriceListVersionStatus.Expired;
+        version.LastModifiedAtUtc = DateTime.UtcNow;
+        await Context.SaveChangesAsync(ct);
+        Context.ChangeTracker.Clear();
+        return await GetVersionAsync(priceListId, versionId, ct);
+    }
+
+    public async Task<PriceListItemDto> AddVersionItemAsync(int priceListId, int versionId, CreatePriceListItemRequest request, CancellationToken ct = default)
+    {
+        ValidateLineValues(request.UnitPrice, request.MinQuantity, request.DiscountPercent);
+        var version = await FindVersionForDraftEditAsync(priceListId, versionId, ct);
+        Require(await Context.PriceListItems.CountAsync(i => i.PriceListVersionId == versionId, ct) < MaxLines, "error.validation.request");
+        await EnsureItemAndUomValidAsync(request.ItemId, request.UomId, ct);
+        await EnsureNoDuplicateVersionLineAsync(versionId, request.ItemId, request.UomId, request.MinQuantity, null, ct);
+
+        var line = new PriceListItem
+        {
+            PriceListVersionId = versionId,
+            ItemId = request.ItemId,
+            UomId = request.UomId,
+            UnitPrice = request.UnitPrice,
+            MinQuantity = request.MinQuantity,
+            DiscountPercent = request.DiscountPercent
+        };
+
+        Context.PriceListItems.Add(line);
+        version.LastModifiedAtUtc = DateTime.UtcNow;
+        await Context.SaveChangesAsync(ct);
+        Context.ChangeTracker.Clear();
+        return await LoadVersionItemDtoAsync(line.Id, ct);
+    }
+
+    public async Task<PriceListItemDto> UpdateVersionItemAsync(int priceListId, int versionId, int itemId, UpdatePriceListItemRequest request, CancellationToken ct = default)
+    {
+        ValidateLineValues(request.UnitPrice, request.MinQuantity, request.DiscountPercent);
+        var version = await FindVersionForDraftEditAsync(priceListId, versionId, ct);
+        var line = await Context.PriceListItems.SingleOrDefaultAsync(i => i.Id == itemId && i.PriceListVersionId == versionId, ct);
+        Require(line != null, "error.validation.reference", 404);
+
+        var targetItemId = request.ItemId ?? line!.ItemId;
+        await EnsureItemAndUomValidAsync(targetItemId, request.UomId, ct);
+        await EnsureNoDuplicateVersionLineAsync(versionId, targetItemId, request.UomId, request.MinQuantity, line!.Id, ct);
+
+        line.ItemId = targetItemId;
+        line.UomId = request.UomId;
+        line.UnitPrice = request.UnitPrice;
+        line.MinQuantity = request.MinQuantity;
+        line.DiscountPercent = request.DiscountPercent;
+        version.LastModifiedAtUtc = DateTime.UtcNow;
+
+        await Context.SaveChangesAsync(ct);
+        Context.ChangeTracker.Clear();
+        return await LoadVersionItemDtoAsync(line.Id, ct);
+    }
+
+    public async Task DeleteVersionItemAsync(int priceListId, int versionId, int itemId, CancellationToken ct = default)
+    {
+        var version = await FindVersionForDraftEditAsync(priceListId, versionId, ct);
+        var line = await Context.PriceListItems.SingleOrDefaultAsync(i => i.Id == itemId && i.PriceListVersionId == versionId, ct);
+        Require(line != null, "error.validation.reference", 404);
+
+        Context.PriceListItems.Remove(line!);
+        version.LastModifiedAtUtc = DateTime.UtcNow;
+        await Context.SaveChangesAsync(ct);
+    }
+
     public async Task<PriceListVersionDto> CloneVersionAsync(int priceListId, ClonePriceListVersionRequest request, CancellationToken ct = default)
     {
-        var code = request.VersionCode?.Trim().ToUpperInvariant() ?? string.Empty;
-        Require(code.Length is > 0 and <= 50
-            && request.EffectiveFrom.Kind == DateTimeKind.Utc
-            && (request.EffectiveTo == null || request.EffectiveTo.Value.Kind == DateTimeKind.Utc && request.EffectiveTo >= request.EffectiveFrom),
-            "error.validation.request");
+        var code = NormalizeAndValidateVersionMetadata(request.VersionCode, request.EffectiveFrom, request.EffectiveTo);
         var source = await Context.PriceListVersions
             .Include(v => v.Items)
             .SingleOrDefaultAsync(v => v.Id == request.SourceVersionId && v.PriceListId == priceListId, ct);
         Require(source != null && source.Status != PriceListVersionStatus.Archived, "error.validation.reference", 404);
-        Require(!await Context.PriceListVersions.AnyAsync(v => v.PriceListId == priceListId && v.VersionCode == code, ct),
-            "error.sd.pricelist_duplicate_version", 409);
+        await EnsureVersionCodeUniqueAsync(priceListId, code, null, ct);
 
         var clone = new PriceListVersion
         {
@@ -320,10 +454,7 @@ public sealed class PriceListService(ApplicationDbContext context)
         Context.PriceListVersions.Add(clone);
         await Context.SaveChangesAsync(ct);
         Context.ChangeTracker.Clear();
-        var created = await Context.PriceListVersions
-            .Include(v => v.Items).ThenInclude(i => i.Item).ThenInclude(i => i!.BaseUom)
-            .SingleAsync(v => v.Id == clone.Id, ct);
-        return MapVersion(created);
+        return await GetVersionAsync(priceListId, clone.Id, ct);
     }
 
     public async Task<BulkPriceAdjustmentResponse> BulkAdjustVersionAsync(int priceListId, int versionId, BulkPriceAdjustmentRequest request, CancellationToken ct = default)
@@ -386,14 +517,87 @@ public sealed class PriceListService(ApplicationDbContext context)
         var normalized = code.ToUpperInvariant();
         Require(!await Context.PriceLists.AnyAsync(p => p.Code == normalized && p.Id != selfId, ct), "error.sd.pricelist_duplicate_code", 409);
 
-        Require(request.Items is { Count: <= MaxLines }, "error.validation.request");
-        foreach (var line in request.Items)
-        {
-            ValidateNumber(line.UnitPrice); ValidateNumber(line.MinQuantity); ValidateNumber(line.DiscountPercent);
-            Require(line.DiscountPercent <= 100, "error.validation.number");
-        }
-        Require(request.Items.Select(l => (l.ItemId, l.MinQuantity)).Distinct().Count() == request.Items.Count, "error.validation.request");
-        var itemIds = request.Items.Select(l => l.ItemId).Distinct().ToArray();
-        Require(await Context.Items.CountAsync(i => itemIds.Contains(i.Id) && i.IsActive, ct) == itemIds.Length, "error.inventory.item");
+        await ValidateLinesAsync(request.Items, ct);
+    }
+
+    private static string NormalizeAndValidateVersionMetadata(string? versionCode, DateTime effectiveFrom, DateTime? effectiveTo)
+    {
+        var code = versionCode?.Trim().ToUpperInvariant() ?? string.Empty;
+        Require(code.Length is > 0 and <= 50
+            && effectiveFrom.Kind == DateTimeKind.Utc
+            && (effectiveTo == null || effectiveTo.Value.Kind == DateTimeKind.Utc && effectiveTo >= effectiveFrom),
+            "error.validation.request");
+        return code;
+    }
+
+    private async Task EnsureVersionCodeUniqueAsync(int priceListId, string code, int? excludeVersionId, CancellationToken ct)
+    {
+        var exists = await Context.PriceListVersions.AnyAsync(
+            v => v.PriceListId == priceListId && v.VersionCode == code && (excludeVersionId == null || v.Id != excludeVersionId.Value),
+            ct);
+        Require(!exists, "error.sd.pricelist_duplicate_version", 409);
+    }
+
+    private async Task<PriceListVersion> FindVersionForDraftEditAsync(int priceListId, int versionId, CancellationToken ct)
+    {
+        var version = await Context.PriceListVersions.SingleOrDefaultAsync(v => v.Id == versionId && v.PriceListId == priceListId, ct);
+        Require(version != null, "error.validation.reference", 404);
+        Require(version!.Status == PriceListVersionStatus.Draft, "error.sd.pricelist_version_not_draft", 409);
+        return version;
+    }
+
+    private async Task<PriceListVersion> FindVersionForTransitionAsync(int priceListId, int versionId, PriceListVersionStatus requiredStatus, CancellationToken ct)
+    {
+        var version = await Context.PriceListVersions.SingleOrDefaultAsync(v => v.Id == versionId && v.PriceListId == priceListId, ct);
+        Require(version != null, "error.validation.reference", 404);
+        Require(version!.Status == requiredStatus, "error.sd.pricelist_version_invalid_status", 409);
+        return version;
+    }
+
+    private static void ValidateLineValues(decimal unitPrice, decimal minQuantity, decimal discountPercent)
+    {
+        ValidateNumber(unitPrice);
+        ValidateNumber(minQuantity);
+        ValidateNumber(discountPercent);
+        Require(discountPercent <= 100, "error.validation.number");
+    }
+
+    private async Task ValidateLinesAsync(IReadOnlyCollection<PriceListLineRequest> lines, CancellationToken ct)
+    {
+        Require(lines.Count <= MaxLines, "error.validation.request");
+        foreach (var line in lines) ValidateLineValues(line.UnitPrice, line.MinQuantity, line.DiscountPercent);
+        Require(lines.Select(l => (l.ItemId, l.MinQuantity)).Distinct().Count() == lines.Count, "error.validation.request");
+        var itemIds = lines.Select(l => l.ItemId).Distinct().ToArray();
+        if (itemIds.Length > 0)
+            Require(await Context.Items.CountAsync(i => itemIds.Contains(i.Id) && i.IsActive, ct) == itemIds.Length, "error.inventory.item");
+    }
+
+    private async Task EnsureItemAndUomValidAsync(int itemId, int? uomId, CancellationToken ct)
+    {
+        Require(await Context.Items.AnyAsync(i => i.Id == itemId && i.IsActive, ct), "error.inventory.item");
+        if (uomId.HasValue)
+            Require(await Context.UnitsOfMeasure.AnyAsync(u => u.Id == uomId.Value && u.IsActive, ct), "error.validation.reference");
+    }
+
+    private async Task EnsureNoDuplicateVersionLineAsync(int versionId, int itemId, int? uomId, decimal minQuantity, int? excludeLineId, CancellationToken ct)
+    {
+        var duplicate = await Context.PriceListItems.AnyAsync(
+            i => i.PriceListVersionId == versionId
+                && i.ItemId == itemId
+                && i.UomId == uomId
+                && i.MinQuantity == minQuantity
+                && (excludeLineId == null || i.Id != excludeLineId.Value),
+            ct);
+        Require(!duplicate, "error.sd.pricelist_item_duplicate", 409);
+    }
+
+    private async Task<PriceListItemDto> LoadVersionItemDtoAsync(int lineId, CancellationToken ct)
+    {
+        var line = await Context.PriceListItems
+            .AsNoTracking()
+            .Include(i => i.Uom)
+            .Include(i => i.Item).ThenInclude(i => i!.BaseUom)
+            .SingleAsync(i => i.Id == lineId, ct);
+        return MapLine(line);
     }
 }

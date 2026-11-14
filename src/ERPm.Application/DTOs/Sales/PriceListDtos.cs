@@ -1,11 +1,19 @@
+using ERPm.Application.Common.Crud;
 using ERPm.Domain.Entities.Sales;
 
 namespace ERPm.Application.DTOs.Sales;
+
+/// <summary>Price list page filter supporting optional server-side <see cref="PriceListType"/> filtering.</summary>
+public class PriceListFilterQuery : BaseFilterQuery
+{
+    public PriceListType? Type { get; set; }
+}
 
 public class PriceListItemDto
 {
     public int? Id { get; set; }
     public int ItemId { get; set; }
+    public int? UomId { get; set; }
     public string ItemCode { get; set; } = string.Empty;
     public string ItemName { get; set; } = string.Empty;
     public string? UnitName { get; set; }
@@ -107,6 +115,39 @@ public class PriceListVersionDto
     public PriceListVersionStatus Status { get; set; }
     public int ItemCount { get; set; }
     public List<PriceListItemDto> Items { get; set; } = new();
+}
+
+public class CreatePriceListVersionRequest
+{
+    public string VersionCode { get; set; } = string.Empty;
+    public DateTime EffectiveFrom { get; set; }
+    public DateTime? EffectiveTo { get; set; }
+    public List<PriceListLineRequest> Items { get; set; } = new();
+}
+
+public class UpdatePriceListVersionRequest
+{
+    public string VersionCode { get; set; } = string.Empty;
+    public DateTime EffectiveFrom { get; set; }
+    public DateTime? EffectiveTo { get; set; }
+}
+
+public class CreatePriceListItemRequest
+{
+    public int ItemId { get; set; }
+    public int? UomId { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal MinQuantity { get; set; }
+    public decimal DiscountPercent { get; set; }
+}
+
+public class UpdatePriceListItemRequest
+{
+    public int? ItemId { get; set; }
+    public int? UomId { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal MinQuantity { get; set; }
+    public decimal DiscountPercent { get; set; }
 }
 
 public class ClonePriceListVersionRequest
