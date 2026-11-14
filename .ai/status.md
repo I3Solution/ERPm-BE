@@ -1,11 +1,10 @@
 # ERPm-BE — Backend Status
 
 ## In-Progress
-- [ ] S25.2b Vòng đời phiên bản bảng giá (`activate`/`close`/CRUD items `Draft`) & lọc `Type` — [task](tasks/change-20261114-s25-2b-version-lifecycle-and-filter.md) · [step log](steps/step-25-2b-version-lifecycle-and-filter.md) · Trello `https://trello.com/c/W1QLkld1` (`Doing`). Branch: `loipham/s25.2b-version-lifecycle-and-filter`, đã triển khai code + verification, chờ push chạy CI & PR review.
+- Không có task BE mở; chờ chạy `--migrate` trên DB thực tế khi deploy các migration S25.
 
 ## Next Steps
-- Push nhánh `loipham/s25.2b-version-lifecycle-and-filter` để GitHub Actions CI chạy `ERPm.Hrm.Verification` và `ERPm.Verification`.
-- Đồng bộ `ERPm-FE/src/assets/i18n/system.json` cho 2 key lỗi mới trước khi cập nhật gitlink `ERPm-BE` ở repo cha.
+- Hỗ trợ FE bật `addressTypeEnabled` cho card `S25.6` (`sIPU3Vqb`) sau khi PR `AddressType` hợp nhất vào `master`.
 
 ---
 
@@ -21,6 +20,8 @@
 - [x] S25.1 Schema Bảng giá (Type, IsTaxInclusive, PriceListVersions): xem [db-20261113-pricelist-type-tax-versioning](tasks/db-20261113-pricelist-type-tax-versioning.md) · [step log](steps/step-25-1-pricelist-schema-versioning.md). PR #43 đã merge (54217df), CI & Neon migration pass, dotnet build & EF model snapshot khớp 100%.
 - [x] S25.2 PricingEngine & version bảng giá: xem [change-20261113-s25-2-pricing-engine](tasks/change-20261113-s25-2-pricing-engine.md) · [step log](steps/step-25-2-pricing-engine.md). PR #44 đã merge (`d5cb077`).
 - [x] S25.3 Quotation Delivery Address Snapshot: xem [change-20261113-s25-3-quotation-address-snapshot](tasks/change-20261113-s25-3-quotation-address-snapshot.md) · [step log](steps/step-25-3-quotation-address-snapshot.md). PR #45 đã merge (`299da62`).
+- [x] S25.2b Vòng đời phiên bản bảng giá & lọc Type: xem [change-20261114-s25-2b-version-lifecycle-and-filter](tasks/change-20261114-s25-2b-version-lifecycle-and-filter.md) · [step log](steps/step-25-2b-version-lifecycle-and-filter.md). PR #56 đã merge (`9fdfe62`).
+- [x] S25 Partner `AddressType` & mặc định theo từng loại: xem [change-20261114-s25-partner-address-type](tasks/change-20261114-s25-partner-address-type.md) · [step log](steps/step-25-partner-address-type.md) · Trello `https://trello.com/c/a9fIJoeG`. Build 0 warning/0 error, 28 HRM + 495 Verification checks PASS.
 
 ## In-Progress
 

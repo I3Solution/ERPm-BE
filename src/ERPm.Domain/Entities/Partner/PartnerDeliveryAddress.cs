@@ -1,13 +1,24 @@
+using System.Text.Json.Serialization;
 using ERPm.Domain.Common;
 
 namespace ERPm.Domain.Entities.Partner;
 
+/// <summary>Purpose of a partner address. Stored as integer (1 = Shipping, 2 = Billing, 3 = Office).</summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum AddressType
+{
+    Shipping = 1,
+    Billing = 2,
+    Office = 3
+}
+
 /// <summary>
-/// One delivery address of a partner. A partner can have many; at most one is the default.
+/// One address of a partner. A partner can keep many addresses, with at most one live default per <see cref="AddressType"/>.
 /// </summary>
 public class PartnerDeliveryAddress : BaseAuditableEntity
 {
     public int PartnerId { get; set; }
+    public AddressType AddressType { get; set; } = AddressType.Shipping;
     public string RecipientName { get; set; } = string.Empty;   // Person or site receiving the goods
     public string? Phone { get; set; }
     public string Address { get; set; } = string.Empty;         // Street line

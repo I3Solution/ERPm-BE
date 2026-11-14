@@ -23,7 +23,10 @@ public sealed class PartnerDeliveryAddressService(ApplicationDbContext context, 
         await EnsurePartnerAsync(partnerId, cancellationToken);
         var rows = await context.PartnerDeliveryAddresses.AsNoTracking()
             .Where(a => a.PartnerId == partnerId)
-            .OrderByDescending(a => a.IsDefault).ThenBy(a => a.CreatedAtUtc).ThenBy(a => a.Id)
+            .OrderByDescending(a => a.IsDefault)
+            .ThenBy(a => a.AddressType)
+            .ThenBy(a => a.CreatedAtUtc)
+            .ThenBy(a => a.Id)
             .ToListAsync(cancellationToken);
         return rows.Select(Map).ToList();
     }
@@ -43,10 +46,16 @@ public sealed class PartnerDeliveryAddressService(ApplicationDbContext context, 
             var live = await context.PartnerDeliveryAddresses.Where(a => a.PartnerId == partnerId).ToListAsync(cancellationToken);
             Require(live.Count < MaxAddressesPerPartner, "error.crm.delivery_address_limit", 422);
 
-            // The first address is always the default; later ones only when asked.
-            var makeDefault = live.Count == 0 || request.IsDefault;
-            if (makeDefault) await ClearDefaultAsync(live, cancellationToken);
-            var entity = new PartnerDeliveryAddress { PartnerId = partnerId, IsDefault = makeDefault };
+            var sameType = live.Where(a => a.AddressType == request.AddressType).ToList();
+            // The first live address of a type is always that type's default; later ones only when asked.
+            var makeDefault = sameType.Count == 0 || request.IsDefault;
+            if (makeDefault) await ClearDefaultAsync(sameType, cancellationToken);
+            var entity = new PartnerDeliveryAddress
+            {
+                PartnerId = partnerId,
+                AddressType = request.AddressType,
+                IsDefault = makeDefault
+            };
             Apply(entity, request, phone);
             context.PartnerDeliveryAddresses.Add(entity);
             await context.SaveChangesAsync(cancellationToken);
@@ -60,14 +69,42 @@ public sealed class PartnerDeliveryAddressService(ApplicationDbContext context, 
             await posting.LockAsync($"partner-addresses:{partnerId}", cancellationToken);
             var phone = Validate(request);
             var entity = await FindAsync(partnerId, id, track: true, cancellationToken);
+            var previousType = entity.AddressType;
             Apply(entity, request, phone);
-            // A default address can only be replaced by choosing another one, never lowered.
-            if (request.IsDefault && !entity.IsDefault)
+
+            if (previousType == request.AddressType)
             {
-                var live = await context.PartnerDeliveryAddresses.Where(a => a.PartnerId == partnerId && a.Id != id).ToListAsync(cancellationToken);
-                await ClearDefaultAsync(live, cancellationToken);
-                entity.IsDefault = true;
+                // A default address can only be replaced by choosing another of the same type, never lowered.
+                if (request.IsDefault && !entity.IsDefault)
+                {
+                    var peers = await PeersAsync(partnerId, entity.AddressType, excludeId: id, cancellationToken);
+                    await ClearDefaultAsync(peers, cancellationToken);
+                    entity.IsDefault = true;
+                }
             }
+            else
+            {
+                // Save off the old default flag before switching types so neither type violates the unique default index.
+                var wasDefault = entity.IsDefault;
+                if (wasDefault)
+                {
+                    entity.IsDefault = false;
+                    await context.SaveChangesAsync(cancellationToken);
+                    await PromoteOldestDefaultAsync(partnerId, previousType, excludeId: id, cancellationToken);
+                }
+
+                var targetPeers = await PeersAsync(partnerId, request.AddressType, excludeId: id, cancellationToken);
+                if (targetPeers.Count == 0 || request.IsDefault)
+                {
+                    await ClearDefaultAsync(targetPeers, cancellationToken);
+                    entity.IsDefault = true;
+                }
+                else
+                {
+                    entity.IsDefault = false;
+                }
+            }
+
             await context.SaveChangesAsync(cancellationToken);
             return Map(entity);
         }, cancellationToken);
@@ -79,16 +116,12 @@ public sealed class PartnerDeliveryAddressService(ApplicationDbContext context, 
             await posting.LockAsync($"partner-addresses:{partnerId}", cancellationToken);
             var entity = await FindAsync(partnerId, id, track: true, cancellationToken);
             var wasDefault = entity.IsDefault;
+            var deletedType = entity.AddressType;
             // Orders keep their own copy of the address, so deleting never blocks on past documents.
             entity.IsDeleted = true;
             entity.DeletedAtUtc = DateTime.UtcNow;
             await context.SaveChangesAsync(cancellationToken);
-            if (wasDefault)
-            {
-                var next = await context.PartnerDeliveryAddresses.Where(a => a.PartnerId == partnerId && a.Id != id)
-                    .OrderBy(a => a.CreatedAtUtc).ThenBy(a => a.Id).FirstOrDefaultAsync(cancellationToken);
-                if (next != null) next.IsDefault = true;
-            }
+            if (wasDefault) await PromoteOldestDefaultAsync(partnerId, deletedType, excludeId: id, cancellationToken);
             return true;
         }, cancellationToken);
 
@@ -100,15 +133,32 @@ public sealed class PartnerDeliveryAddressService(ApplicationDbContext context, 
             var entity = await FindAsync(partnerId, id, track: true, cancellationToken);
             if (!entity.IsDefault)
             {
-                var live = await context.PartnerDeliveryAddresses.Where(a => a.PartnerId == partnerId && a.Id != id).ToListAsync(cancellationToken);
-                await ClearDefaultAsync(live, cancellationToken);
+                var peers = await PeersAsync(partnerId, entity.AddressType, excludeId: id, cancellationToken);
+                await ClearDefaultAsync(peers, cancellationToken);
                 entity.IsDefault = true;
                 await context.SaveChangesAsync(cancellationToken);
             }
             return Map(entity);
         }, cancellationToken);
 
-    // The partial unique index allows one live default, so the old flag must be saved off before the new one is set.
+    private Task<List<PartnerDeliveryAddress>> PeersAsync(int partnerId, AddressType addressType, int excludeId, CancellationToken ct) =>
+        context.PartnerDeliveryAddresses
+            .Where(a => a.PartnerId == partnerId && a.AddressType == addressType && a.Id != excludeId)
+            .ToListAsync(ct);
+
+    private async Task PromoteOldestDefaultAsync(int partnerId, AddressType addressType, int excludeId, CancellationToken ct)
+    {
+        var next = await context.PartnerDeliveryAddresses
+            .Where(a => a.PartnerId == partnerId && a.AddressType == addressType && a.Id != excludeId)
+            .OrderBy(a => a.CreatedAtUtc)
+            .ThenBy(a => a.Id)
+            .FirstOrDefaultAsync(ct);
+        if (next == null) return;
+        next.IsDefault = true;
+        await context.SaveChangesAsync(ct);
+    }
+
+    // The partial unique index allows one live default per type, so the old flag must be saved off before the new one is set.
     private async Task ClearDefaultAsync(IEnumerable<PartnerDeliveryAddress> addresses, CancellationToken ct)
     {
         var previous = addresses.Where(a => a.IsDefault).ToList();
@@ -131,6 +181,7 @@ public sealed class PartnerDeliveryAddressService(ApplicationDbContext context, 
     /// <summary>Checks the request and returns the phone number in its normalized form.</summary>
     private static string? Validate(SaveDeliveryAddressRequest request)
     {
+        Require(Enum.IsDefined(request.AddressType), "error.validation.request");
         Require(!string.IsNullOrWhiteSpace(request.RecipientName), "error.crm.delivery_address_recipient_required");
         Require(request.RecipientName.Trim().Length <= 255, "error.crm.delivery_address_recipient_too_long");
         Require(!string.IsNullOrWhiteSpace(request.Address), "error.crm.delivery_address_address_required");
@@ -146,6 +197,7 @@ public sealed class PartnerDeliveryAddressService(ApplicationDbContext context, 
 
     private static void Apply(PartnerDeliveryAddress entity, SaveDeliveryAddressRequest request, string? phone)
     {
+        entity.AddressType = request.AddressType;
         entity.RecipientName = request.RecipientName.Trim();
         entity.Phone = phone;
         entity.Address = request.Address.Trim();
@@ -160,6 +212,7 @@ public sealed class PartnerDeliveryAddressService(ApplicationDbContext context, 
     {
         Id = a.Id,
         PartnerId = a.PartnerId,
+        AddressType = a.AddressType,
         RecipientName = a.RecipientName,
         Phone = a.Phone,
         Address = a.Address,

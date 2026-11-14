@@ -1,9 +1,12 @@
+using ERPm.Domain.Entities.Partner;
+
 namespace ERPm.Application.DTOs.Partner;
 
 public class DeliveryAddressDto
 {
     public int Id { get; set; }
     public int PartnerId { get; set; }
+    public AddressType AddressType { get; set; } = AddressType.Shipping;
     public string RecipientName { get; set; } = string.Empty;
     public string? Phone { get; set; }
     public string Address { get; set; } = string.Empty;
@@ -16,6 +19,7 @@ public class DeliveryAddressDto
 
 public class SaveDeliveryAddressRequest
 {
+    public AddressType AddressType { get; set; } = AddressType.Shipping;
     public string RecipientName { get; set; } = string.Empty;
     public string? Phone { get; set; }
     public string Address { get; set; } = string.Empty;

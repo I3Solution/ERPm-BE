@@ -497,6 +497,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         {
             entity.ToTable("tbl_CRM_PartnerDeliveryAddress");
             ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.AddressType).HasDefaultValue(AddressType.Shipping).HasSentinel((AddressType)(-1));
             entity.Property(e => e.RecipientName).HasMaxLength(255).IsRequired();
             entity.Property(e => e.Phone).HasMaxLength(50);
             entity.Property(e => e.Address).HasMaxLength(500).IsRequired();
@@ -507,9 +508,10 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.HasOne(e => e.Partner).WithMany().HasForeignKey(e => e.PartnerId).OnDelete(DeleteBehavior.Cascade);
 
             entity.HasIndex(e => e.PartnerId);
-            // At most one live default address per partner.
-            entity.HasIndex(e => e.PartnerId).IsUnique().HasFilter("is_default = true AND is_deleted = false")
+            // At most one live default address per partner and address type.
+            entity.HasIndex(e => new { e.PartnerId, e.AddressType }).IsUnique().HasFilter("is_default = true AND is_deleted = false")
                 .HasDatabaseName("ux_partner_delivery_address_default");
+            entity.ToTable(t => t.HasCheckConstraint("CK_tbl_CRM_PartnerDeliveryAddress_AddressType", "address_type IN (1, 2, 3)"));
             entity.HasQueryFilter(e => !e.IsDeleted && !e.Partner!.IsDeleted);
         });
 

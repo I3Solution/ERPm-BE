@@ -2074,6 +2074,12 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(500)")
                         .HasColumnName("address");
 
+                    b.Property<int>("AddressType")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1)
+                        .HasColumnName("address_type");
+
                     b.Property<string>("City")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
@@ -2154,11 +2160,17 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id", "IsDeleted" });
 
                     b.HasIndex("PartnerId")
+                        .HasDatabaseName("ix_tbl_crm_partner_delivery_address_partner_id");
+
+                    b.HasIndex("PartnerId", "AddressType")
                         .IsUnique()
                         .HasDatabaseName("ux_partner_delivery_address_default")
                         .HasFilter("is_default = true AND is_deleted = false");
 
-                    b.ToTable("tbl_CRM_PartnerDeliveryAddress", (string)null);
+                    b.ToTable("tbl_CRM_PartnerDeliveryAddress", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_tbl_CRM_PartnerDeliveryAddress_AddressType", "address_type IN (1, 2, 3)");
+                        });
                 });
 
             modelBuilder.Entity("ERPm.Domain.Entities.Purchase.PurchaseOrder", b =>
@@ -3293,10 +3305,6 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("deleted_by");
 
-                    b.Property<int?>("DepartmentId")
-                        .HasColumnType("integer")
-                        .HasColumnName("department_id");
-
                     b.Property<int?>("DeliveryAddressId")
                         .HasColumnType("integer")
                         .HasColumnName("delivery_address_id");
@@ -3315,6 +3323,10 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
                         .HasColumnName("delivery_recipient_name");
+
+                    b.Property<int?>("DepartmentId")
+                        .HasColumnType("integer")
+                        .HasColumnName("department_id");
 
                     b.Property<decimal>("DiscountAmount")
                         .HasPrecision(18, 4)
@@ -3402,11 +3414,11 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     b.HasIndex("CustomerId")
                         .HasDatabaseName("ix_tbl_sd_sales_quotation_customer_id");
 
-                    b.HasIndex("DepartmentId")
-                        .HasDatabaseName("ix_tbl_sd_sales_quotation_department_id");
-
                     b.HasIndex("DeliveryAddressId")
                         .HasDatabaseName("ix_tbl_sd_sales_quotation_delivery_address_id");
+
+                    b.HasIndex("DepartmentId")
+                        .HasDatabaseName("ix_tbl_sd_sales_quotation_department_id");
 
                     b.HasIndex("ExternalId")
                         .IsUnique()
