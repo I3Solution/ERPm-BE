@@ -330,11 +330,19 @@ public class EmployeeService(ApplicationDbContext context, IIamService iam, ICur
         await PrepareQuery(DbSet).FirstOrDefaultAsync(e => e.Id == id, cancellationToken);
 
     private int[]? _branchSubtree;
+    private int[]? _departmentSubtree;
 
     /// <summary>Resolves the branch filter's subtree once (the tree is not queryable recursively), then pages as usual.</summary>
     public override async Task<PagedResult<EmployeeDto>> GetPagedAsync(BaseFilterQuery query, CancellationToken cancellationToken = default)
     {
         _branchSubtree = null;
+        _departmentSubtree = null;
+        if (query is EmployeeFilterQuery { DepartmentId: { } departmentId })
+        {
+            var departments = await Context.Departments.IgnoreQueryFilters().AsNoTracking().Where(d => !d.IsDeleted)
+                .Select(d => new { d.Id, d.ParentId }).ToListAsync(cancellationToken);
+            _departmentSubtree = new ERPm.Domain.Services.Iam.OrgTree(departments.Select(d => (d.Id, d.ParentId))).Subtree(departmentId).ToArray();
+        }
         if (query is EmployeeFilterQuery { BranchId: { } branchId })
         {
             var nodes = await Context.Branches.IgnoreQueryFilters().AsNoTracking().Where(b => !b.IsDeleted)
@@ -351,6 +359,8 @@ public class EmployeeService(ApplicationDbContext context, IIamService iam, ICur
         if (filter is not EmployeeFilterQuery employeeFilter) return query;
         if (employeeFilter.WithoutAccount is { } withoutAccount) query = query.Where(e => (e.UserId == null) == withoutAccount);
         if (_branchSubtree is { } subtree) query = query.Where(e => subtree.Contains(e.BranchId));
+        if (_departmentSubtree is { } departmentSubtree) query = query.Where(e => e.DepartmentId != null && departmentSubtree.Contains(e.DepartmentId.Value));
+        if (employeeFilter.JobPositionId is { } jobPositionId) query = query.Where(e => e.JobPositionId == jobPositionId);
         return query;
     }
 
