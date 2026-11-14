@@ -608,6 +608,56 @@ try
     await Reject(async () => await addresses.CreateAsync(addressee.Id, Address("One too many")), "error.crm.delivery_address_limit");
     await addresses.DeleteAsync(addressee.Id, (await addresses.GetAsync(addressee.Id)).Last().Id);
     Check((await addresses.CreateAsync(addressee.Id, Address("Fits again"))).PartnerId == addressee.Id, "deleting an address frees a slot under the limit");
+
+    // AddressType: per-(PartnerId, AddressType) default rules, cross-type updates and validation.
+    var typedPartner = new Partner { Code = "ADDRT", Name = "Typed Addressee", PartnerType = PartnerType.Customer };
+    db.Partners.Add(typedPartner); await db.SaveChangesAsync();
+    SaveDeliveryAddressRequest TypedAddress(string name, AddressType type, bool isDefault = false) => new() { AddressType = type, RecipientName = name, Address = name + " Street", IsDefault = isDefault };
+    var ship1 = await addresses.CreateAsync(typedPartner.Id, TypedAddress("Ship 1", AddressType.Shipping));
+    var bill1 = await addresses.CreateAsync(typedPartner.Id, TypedAddress("Bill 1", AddressType.Billing));
+    var office1 = await addresses.CreateAsync(typedPartner.Id, TypedAddress("Office 1", AddressType.Office));
+    Check(ship1.AddressType == AddressType.Shipping && ship1.IsDefault
+        && bill1.AddressType == AddressType.Billing && bill1.IsDefault
+        && office1.AddressType == AddressType.Office && office1.IsDefault,
+        "each address type starts with its own independent default address");
+
+    var duplicateSameTypeDefault = false;
+    try
+    {
+        await using var dupDb = Db(user);
+        dupDb.PartnerDeliveryAddresses.Add(new PartnerDeliveryAddress { PartnerId = typedPartner.Id, AddressType = AddressType.Billing, RecipientName = "Bill Dup", Address = "Dup St", IsDefault = true });
+        await dupDb.SaveChangesAsync();
+    }
+    catch (DbUpdateException) { duplicateSameTypeDefault = true; }
+    Check(duplicateSameTypeDefault, "the database blocks two live defaults of the same address type for one partner");
+
+    var ship2 = await addresses.CreateAsync(typedPartner.Id, TypedAddress("Ship 2", AddressType.Shipping, isDefault: false));
+    var bill2 = await addresses.CreateAsync(typedPartner.Id, TypedAddress("Bill 2", AddressType.Billing, isDefault: true));
+    var typedList = await addresses.GetAsync(typedPartner.Id);
+    Check(typedList.Count(a => a.IsDefault) == 3
+        && typedList[0].AddressType == AddressType.Shipping && typedList[0].IsDefault
+        && (await addresses.GetByIdAsync(typedPartner.Id, ship1.Id)).IsDefault
+        && !(await addresses.GetByIdAsync(typedPartner.Id, bill1.Id)).IsDefault
+        && (await addresses.GetByIdAsync(typedPartner.Id, bill2.Id)).IsDefault,
+        "changing the default of one address type leaves other types untouched and keeps Shipping default first");
+
+    var bill1Again = await addresses.SetDefaultAsync(typedPartner.Id, bill1.Id);
+    Check(bill1Again.IsDefault && !(await addresses.GetByIdAsync(typedPartner.Id, bill2.Id)).IsDefault && (await addresses.GetByIdAsync(typedPartner.Id, ship1.Id)).IsDefault,
+        "set-default only switches the default within the same address type");
+
+    await addresses.DeleteAsync(typedPartner.Id, bill1.Id);
+    Check((await addresses.GetByIdAsync(typedPartner.Id, bill2.Id)).IsDefault && (await addresses.GetByIdAsync(typedPartner.Id, ship1.Id)).IsDefault,
+        "deleting a default Billing address promotes the oldest remaining Billing address");
+
+    // Moving default ship1 -> Billing keeps ship2 as Shipping default and obeys Billing default rules.
+    var movedShip1 = await addresses.UpdateAsync(typedPartner.Id, ship1.Id, TypedAddress("Ship1 -> Bill", AddressType.Billing, isDefault: false));
+    Check(movedShip1.AddressType == AddressType.Billing && !movedShip1.IsDefault
+        && (await addresses.GetByIdAsync(typedPartner.Id, ship2.Id)).IsDefault
+        && (await addresses.GetByIdAsync(typedPartner.Id, bill2.Id)).IsDefault,
+        "moving a default Shipping address to Billing promotes the oldest remaining Shipping address");
+
+    await Reject(async () => await addresses.CreateAsync(typedPartner.Id, TypedAddress("Invalid", (AddressType)99)), "error.validation.request");
+    await Reject(async () => await addresses.UpdateAsync(typedPartner.Id, office1.Id, TypedAddress("Invalid", (AddressType)0)), "error.validation.request");
     // Order VAT per line, delivery time and the copied delivery address.
     SalesOrderItemDto Line(SalesOrderDto order, int itemId) => order.Items.Single(i => i.ItemId == itemId);
     CreateSalesOrderRequest VatOrder(int customerId, decimal vatA, decimal vatB, decimal headerDiscount = 20, decimal headerTax = 0) => new()
@@ -1275,6 +1325,43 @@ try
             && (await http.PutAsJsonAsync($"/api/v1/sales/price-lists/{vip.Id}/versions/{vipVersionId}/items/1", new { unitPrice = 1, minQuantity = 1 })).StatusCode == HttpStatusCode.Forbidden
             && (await http.DeleteAsync($"/api/v1/sales/price-lists/{vip.Id}/versions/{vipVersionId}/items/1")).StatusCode == HttpStatusCode.Forbidden,
             "user without sd:pricelist:edit receives 403 Forbidden on all version and Draft item mutations");
+
+        // Partner AddressType HTTP contract: accepts and emits string enum names, defaults omitted addressType to Shipping, rejects invalid values.
+        http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
+        using var createBillingHttp = await http.PostAsJsonAsync($"/api/v1/partners/{typedPartner.Id}/delivery-addresses", new { addressType = "Billing", recipientName = "HTTP Bill", address = "99 HTTP St", isDefault = true });
+        var billingJson = JsonDocument.Parse(await createBillingHttp.Content.ReadAsStringAsync());
+        Check(createBillingHttp.StatusCode == HttpStatusCode.Created
+            && billingJson.RootElement.GetProperty("data").GetProperty("addressType").GetString() == "Billing"
+            && billingJson.RootElement.GetProperty("data").GetProperty("isDefault").GetBoolean(),
+            "POST delivery-addresses accepts string addressType and returns string addressType");
+        var httpBillId = billingJson.RootElement.GetProperty("data").GetProperty("id").GetInt32();
+
+        using var createOmittedHttp = await http.PostAsJsonAsync($"/api/v1/partners/{typedPartner.Id}/delivery-addresses", new { recipientName = "HTTP Omitted", address = "100 Default St", isDefault = false });
+        var omittedJson = JsonDocument.Parse(await createOmittedHttp.Content.ReadAsStringAsync());
+        Check(createOmittedHttp.StatusCode == HttpStatusCode.Created
+            && omittedJson.RootElement.GetProperty("data").GetProperty("addressType").GetString() == "Shipping",
+            "POST delivery-addresses without addressType defaults to Shipping");
+        var httpOmittedId = omittedJson.RootElement.GetProperty("data").GetProperty("id").GetInt32();
+
+        using var updateOfficeHttp = await http.PutAsJsonAsync($"/api/v1/partners/{typedPartner.Id}/delivery-addresses/{httpOmittedId}", new { addressType = "Office", recipientName = "HTTP Office", address = "100 Office St", isDefault = false });
+        var officeJson = JsonDocument.Parse(await updateOfficeHttp.Content.ReadAsStringAsync());
+        Check(updateOfficeHttp.IsSuccessStatusCode
+            && officeJson.RootElement.GetProperty("data").GetProperty("addressType").GetString() == "Office",
+            "PUT delivery-addresses updates addressType using string values");
+
+        using var listTypedHttp = await http.GetAsync($"/api/v1/partners/{typedPartner.Id}/delivery-addresses");
+        var listTypedJson = JsonDocument.Parse(await listTypedHttp.Content.ReadAsStringAsync());
+        var listTypes = listTypedJson.RootElement.GetProperty("data").EnumerateArray().Select(x => x.GetProperty("addressType").GetString()).ToHashSet();
+        Check(listTypedHttp.IsSuccessStatusCode && listTypes.Contains("Shipping") && listTypes.Contains("Billing") && listTypes.Contains("Office"),
+            "GET delivery-addresses returns string addressType values");
+
+        Check((await http.PostAsJsonAsync($"/api/v1/partners/{typedPartner.Id}/delivery-addresses", new { addressType = "Unknown", recipientName = "Bad", address = "Bad St" })).StatusCode == HttpStatusCode.BadRequest
+            && (await http.PostAsJsonAsync($"/api/v1/partners/{typedPartner.Id}/delivery-addresses", new { addressType = 99, recipientName = "Bad", address = "Bad St" })).StatusCode == HttpStatusCode.BadRequest,
+            "POST delivery-addresses rejects unknown string or out-of-range numeric addressType with 400");
+
+        Check((await http.DeleteAsync($"/api/v1/partners/{typedPartner.Id}/delivery-addresses/{httpBillId}")).StatusCode == HttpStatusCode.NoContent
+            && (await http.DeleteAsync($"/api/v1/partners/{typedPartner.Id}/delivery-addresses/{httpOmittedId}")).StatusCode == HttpStatusCode.NoContent,
+            "temporary HTTP typed delivery addresses are cleaned up");
     }
     finally
     {
