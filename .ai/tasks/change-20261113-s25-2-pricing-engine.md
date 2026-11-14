@@ -2,8 +2,8 @@
 
 > **Loại:** change
 > **Ngày tạo:** 2026-11-13 · **Người làm:** Lợi (Dev chính Backend) · **Người yêu cầu:** Lợi
-> **Trạng thái:** Review
-> **Liên quan:** Trello card [S25.2][BE] Động cơ định giá (PricingEngine) & Dịch vụ Phiên bản Bảng giá · S25.1 migration `20261113030000_AddPriceListTypeTaxAndVersioning`
+> **Trạng thái:** Done
+> **Liên quan:** Trello card [S25.2][BE] Động cơ định giá (PricingEngine) & Dịch vụ Phiên bản Bảng giá (`https://trello.com/c/6ZVphKjm`) · PR [#44](https://github.com/I3Solution/ERPm-BE/pull/44) (merge `d5cb0771a32e0407cc714e20a45ec751ea800f4a`) · S25.1 migration `20261113030000_AddPriceListTypeTaxAndVersioning`
 
 ## 1. Mô tả
 Hoàn thiện nghiệp vụ định giá dựa trên schema versioning đã có:
@@ -35,10 +35,8 @@ Hoàn thiện nghiệp vụ định giá dựa trên schema versioning đã có:
 
 ## 4. Kiểm tra
 - Đã thêm kiểm tra tự động vào `tests/ERPm.Verification/Program.cs` cho tax inclusive/exclusive, clone version, bulk percentage/fixed-amount adjustment, rounding increment, chọn version theo ngày chứng từ, `GetVersionsAsync`/`GetVersionAsync` và route/authorization HTTP của các API version mới (`GET .../versions`, `GET .../versions/{versionId}`, `GET .../versions/{versionId}/items`, `POST .../versions/clone`, `POST .../versions/{versionId}/bulk-adjustment`).
-- Đã chạy `dotnet build ERPm.sln --nologo` sau khi bổ sung các endpoint GET: **0 Warning, 0 Error**.
-- `ERPm.Verification` chưa chạy cục bộ do máy không có PostgreSQL/Docker daemon cục bộ; cần push để GitHub Actions CI (`verify.yml`) chạy lại toàn bộ suite.
+- Đã chạy `dotnet build ERPm.sln --nologo -v q` trên `master` (`d5cb0771a32e0407cc714e20a45ec751ea800f4a`): **PASS** (`0 Warning(s), 0 Error(s)`).
+- PR #44 đã được merge vào `master` tại commit `d5cb0771a32e0407cc714e20a45ec751ea800f4a`.
 
 ## 5. Việc còn lại
-- Push branch `loipham/s25.2-pricing-engine` để CI chạy lại và kiểm tra kết quả xanh.
-- Kiểm tra API contract với FE (S25.4), phân quyền `sd:pricelist:view` / `sd:pricelist:edit`, và dữ liệu thực trên DB test.
-- Chờ Phúc review PR; xử lý feedback trước khi merge.
+Không. Phần mở rộng vòng đời version (`POST/PUT .../versions`, `activate`, `close`, CRUD items `Draft`) và filter `?type=Sales|Purchase` được tách sang task mới `S25.2b` (`https://trello.com/c/W1QLkld1`).
