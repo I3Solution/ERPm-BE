@@ -121,7 +121,7 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
             if (entity.CreditCheckStatus == CreditCheckStatus.PendingApproval)
             {
                 entity.Status = SalesOrderStatus.PendingApproval;
-                publish = OrderEvent("SD_ORDER_CREDIT_PENDING", ERPm.Domain.Enums.NotificationSeverity.WARNING, entity, null);
+                publish = OrderEvent("SD_ORDER_CREDIT_PENDING", ERPm.Domain.Enums.NotificationSeverity.WARNING, entity, null) with { ViewAction = "sd:order:approve_credit" };
             }
             else
             {

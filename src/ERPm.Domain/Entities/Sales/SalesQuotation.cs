@@ -35,6 +35,12 @@ public class SalesQuotation : BaseAuditableEntity
     public int? DepartmentId { get; set; }                        // Owning department, used by DEPARTMENT data scopes
     public int? PriceListId { get; set; }                         // List the prices were taken from, informational
 
+    // Address values are copied when selected; later source edits or deletion must not change this quotation.
+    public int? DeliveryAddressId { get; set; }
+    public string? DeliveryRecipientName { get; set; }
+    public string? DeliveryPhone { get; set; }
+    public string? DeliveryAddressText { get; set; }
+
     public string Status { get; set; } = QuotationStatus.Draft;   // Stored: Draft, Sent, Accepted, Rejected, Converted
 
     // Monetary fields in decimal(18, 4). SubTotal is gross, DiscountAmount the sum of line discounts.

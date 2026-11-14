@@ -1,3 +1,13 @@
+# ERPm-BE — Backend Status
+
+## In-Progress
+- [ ] S25.2 PricingEngine & version bảng giá — [task](tasks/change-20261113-s25-2-pricing-engine.md) · [step log](steps/step-25-2-pricing-engine.md). Branch: `loipham/s25.2-pricing-engine`; PR #44 đã bổ sung GET version APIs và đồng bộ `master`, chờ CI & Phúc review.
+
+## Next Steps
+- Chờ CI & Phúc review PR #44 trước khi merge.
+
+---
+
 # ERPm-BE — Step 19, 2026-10-29
 
 ## Completed
@@ -7,13 +17,12 @@
 - [x] Posting kho/bán hàng nguyên tử, concurrency/idempotency, giá vốn theo InventoryValue, thanh toán/công nợ, reversal và bất biến Posted.
 - [x] Đơn bán/mua có validation, tính tổng server-side, Draft/Confirmed và khóa chống sửa đồng thời.
 - [x] Build solution 0 warning/0 error; 44 kiểm tra PostgreSQL/API đạt. Thêm CI, chưa chạy từ remote.
+- [x] S25.1 Schema Bảng giá (Type, IsTaxInclusive, PriceListVersions): xem [db-20261113-pricelist-type-tax-versioning](tasks/db-20261113-pricelist-type-tax-versioning.md) · [step log](steps/step-25-1-pricelist-schema-versioning.md). PR #43 đã merge (54217df), CI & Neon migration pass, dotnet build & EF model snapshot khớp 100%.
+- [x] S25.3 Quotation Delivery Address Snapshot: xem [change-20261113-s25-3-quotation-address-snapshot](tasks/change-20261113-s25-3-quotation-address-snapshot.md) · [step log](steps/step-25-3-quotation-address-snapshot.md). PR #45 đã merge (`299da62`).
 
 ## In-Progress
 
 Nghiệm thu thủ công MVP và đánh giá vận hành. NuGet advisory feed chưa truy cập được trong phiên; restore offline tạm thời không bật audit, cấu hình CI vẫn giữ restore chuẩn.
-
-- [ ] S25.1 Schema Bảng giá (Type, IsTaxInclusive, PriceListVersions): xem [db-20261113-pricelist-type-tax-versioning](tasks/db-20261113-pricelist-type-tax-versioning.md). Chờ `dotnet build` và chạy migration trên DB thật.
-- [ ] S25.2 PricingEngine & version bảng giá: xem [change-20261113-s25-2-pricing-engine](tasks/change-20261113-s25-2-pricing-engine.md). Đã triển khai trên branch; CI xanh, chờ review.
 
 ## Next Steps
 

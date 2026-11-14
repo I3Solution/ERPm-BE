@@ -52,7 +52,19 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
             ValidateNumber(line.DiscountPercent);
         }
         var hash = Hash(request);
-        return posting.RunAsync(() => PostInvoiceAsync(request, hash, null, cancellationToken), cancellationToken);
+        return PostAndNotifyAsync(() => posting.RunAsync(() => PostInvoiceAsync(request, hash, null, cancellationToken), cancellationToken), cancellationToken);
+    }
+
+    // Low-stock notices collected while posting; sent only after the commit, to accounts that may view stock in the warehouse's branch.
+    private readonly List<DocumentNotice> lowStockNotices = [];
+
+    private async Task<SalesInvoiceDto> PostAndNotifyAsync(Func<Task<SalesInvoiceDto>> post, CancellationToken ct)
+    {
+        lowStockNotices.Clear();
+        var result = await post();
+        foreach (var notice in lowStockNotices.ToList()) await PermissionRecipients.PublishAsync(context, iam, notificationEngine, user, notice, ct);
+        lowStockNotices.Clear();
+        return result;
     }
 
     /// <summary>Posts an invoice inside the caller's transaction. <paramref name="salesOrderId"/> marks an invoice raised from an order, whose agreed prices are kept.</summary>
@@ -111,26 +123,15 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
                     balances[item.Id].QuantityOnHand -= line.Quantity;
                     balances[item.Id].InventoryValue -= costAmount;
 
-                    if (notificationEngine != null && item.MinStockAlert > 0 && balances[item.Id].QuantityOnHand <= item.MinStockAlert)
-                    {
-                        _ = notificationEngine.PublishAsync(new ERPm.Domain.Events.NotificationEvent(
-                            "WMS_LOW_STOCK",
-                            ERPm.Domain.Enums.NotificationCategory.WMS,
-                            ERPm.Domain.Enums.NotificationSeverity.WARNING,
-                            ERPm.Domain.Enums.NotificationTargetType.BranchTree,
-                            branchId: warehouse.BranchId,
-                            parameters: new Dictionary<string, object>
+                    if (item.MinStockAlert > 0 && balances[item.Id].QuantityOnHand <= item.MinStockAlert)
+                        lowStockNotices.Add(new DocumentNotice(
+                            "WMS_LOW_STOCK", ERPm.Domain.Enums.NotificationCategory.WMS, ERPm.Domain.Enums.NotificationSeverity.WARNING, "wms:stock:view",
+                            warehouse.BranchId, null, null,
+                            new Dictionary<string, object>
                             {
-                                ["item_name"] = item.Name,
-                                ["item_code"] = item.Code,
-                                ["warehouse_name"] = warehouse.Name,
-                                ["current_stock"] = balances[item.Id].QuantityOnHand,
-                                ["min_stock"] = item.MinStockAlert,
-                                ["uom"] = item.BaseUom?.Name ?? "cái"
-                            },
-                            actionUrl: $"/inventory?search={item.Code}"
-                        ));
-                    }
+                                ["item_name"] = item.Name, ["item_code"] = item.Code, ["warehouse_name"] = warehouse.Name,
+                                ["current_stock"] = balances[item.Id].QuantityOnHand, ["min_stock"] = item.MinStockAlert, ["uom"] = item.BaseUom?.Name ?? "cái"
+                            }, $"/inventory?search={item.Code}"));
                 }
             }
             invoice.SubTotal = invoice.Items.Sum(i => i.Amount);

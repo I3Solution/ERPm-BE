@@ -812,6 +812,9 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.Property(e => e.CustomerName).HasMaxLength(255).IsRequired();
             entity.Property(e => e.CustomerPhone).HasMaxLength(50);
             entity.Property(e => e.CustomerEmail).HasMaxLength(100);
+            entity.Property(e => e.DeliveryRecipientName).HasMaxLength(255);
+            entity.Property(e => e.DeliveryPhone).HasMaxLength(50);
+            entity.Property(e => e.DeliveryAddressText).HasMaxLength(800);
             entity.Property(e => e.Status).HasMaxLength(50).IsRequired();
 
             entity.Property(e => e.SubTotal).HasPrecision(18, 4);
@@ -831,6 +834,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.HasIndex(e => e.ConvertedSalesOrderId).IsUnique().HasFilter("converted_sales_order_id IS NOT NULL");
             entity.HasIndex(e => new { e.Status, e.ValidUntil });
             entity.HasIndex(e => e.CustomerId);
+            entity.HasIndex(e => e.DeliveryAddressId);
             entity.HasIndex(e => e.SalespersonId);
             entity.HasQueryFilter(e => !e.IsDeleted);
         });
