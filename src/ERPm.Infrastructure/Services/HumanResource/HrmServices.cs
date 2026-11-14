@@ -354,6 +354,23 @@ public class EmployeeService(ApplicationDbContext context, IIamService iam, ICur
         return await base.GetPagedAsync(query, cancellationToken);
     }
 
+    /// <summary>
+    /// Adds the three columns the list shows by name (department, job position, branch) to the generic sort of the
+    /// employee's own columns. Ties always fall back to Id so paging stays stable.
+    /// </summary>
+    protected override IQueryable<Employee> ApplySorting(IQueryable<Employee> query, BaseFilterQuery filter)
+    {
+        var asc = filter.IsAscending;
+        IOrderedQueryable<Employee>? ordered = filter.SortBy?.ToLowerInvariant() switch
+        {
+            "departmentname" => asc ? query.OrderBy(e => e.Department != null ? e.Department.Name : null) : query.OrderByDescending(e => e.Department != null ? e.Department.Name : null),
+            "jobpositionname" => asc ? query.OrderBy(e => e.JobPosition != null ? e.JobPosition.Name : null) : query.OrderByDescending(e => e.JobPosition != null ? e.JobPosition.Name : null),
+            "branchname" => asc ? query.OrderBy(e => e.Branch != null ? e.Branch.Name : null) : query.OrderByDescending(e => e.Branch != null ? e.Branch.Name : null),
+            _ => null
+        };
+        return ordered == null ? base.ApplySorting(query, filter) : (asc ? ordered.ThenBy(e => e.Id) : ordered.ThenByDescending(e => e.Id));
+    }
+
     protected override IQueryable<Employee> ApplyFilters(IQueryable<Employee> query, BaseFilterQuery filter)
     {
         query = base.ApplyFilters(query, filter);
