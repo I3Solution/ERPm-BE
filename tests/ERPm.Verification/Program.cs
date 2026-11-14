@@ -208,7 +208,11 @@ try
     Check(PricingEngine.Price(100, 1, [L(1, false, false, T(0, 70)), L(2, false, false, T(0, 80, 20))]).AppliedPriceListId == 2, "pricing without own list picks the lowest net price");
     Check(PricingEngine.Price(100, 1, [L(1, false, false, T(0, 60)), L(2, true, false, T(0, 90))]).AppliedPriceListId == 2, "the customer's own list wins over a cheaper one");
     Check(PricingEngine.Price(100, 1, [L(1, false, false, T(0, 70)), L(2, false, true, T(0, 70))]).AppliedPriceListId == 2, "equal prices prefer the branch-specific list");
-    Check(PermissionCatalog.Contains("sd:pricelist:view") && PermissionCatalog.Contains("sd:pricelist:delete"), "price list permissions are in the catalog");
+    var inclusive = PricingEngine.Price(100, 1, [new PriceCandidate(3, "Inclusive", false, false, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), [T(0, 110)], IsTaxInclusive: true)], 10);
+    Check(inclusive.UnitPrice == 100 && inclusive.TaxAmount == 10 && inclusive.TotalWithTax == 110 && inclusive.IsTaxInclusive, "tax-inclusive prices are decomposed into net and VAT");
+    var exclusive = PricingEngine.Price(100, 1, [L(4, false, false, T(0, 100))], 10);
+    Check(exclusive.UnitPrice == 100 && exclusive.TaxAmount == 10 && exclusive.TotalWithTax == 110 && !exclusive.IsTaxInclusive, "tax-exclusive prices add VAT to the net amount");
+    Check(PermissionCatalog.Contains("sd:pricelist:view") && PermissionCatalog.Contains("sd:pricelist:edit") && PermissionCatalog.Contains("sd:pricelist:delete"), "price list permissions are in the catalog");
 
     var lists = new PriceListService(db);
     var from = DateTime.UtcNow.AddDays(-1);
@@ -245,6 +249,42 @@ try
     Check(edited!.Name == "Wholesale 2" && edited.Items.Count == 2 && edited.Items.Any(i => i.Id == keptLine && i.UnitPrice == 65), "updating a price list keeps unchanged lines and adds new tiers");
     var shrunk = await lists.UpdateAsync(wholesale.Id, new UpdatePriceListRequest { Code = "WHOLESALE", Name = "Wholesale 2", Currency = "VND", EffectiveFrom = from, IsActive = true, Items = [new() { ItemId = item.Id, UnitPrice = 65 }] });
     Check(shrunk!.Items.Count == 1, "updating a price list removes dropped tiers");
+    var sourceVersion = await db.PriceListVersions.SingleAsync(v => v.PriceListId == wholesale.Id);
+    var clonedVersion = await lists.CloneVersionAsync(wholesale.Id, new ClonePriceListVersionRequest
+    {
+        SourceVersionId = sourceVersion.Id,
+        VersionCode = "V2",
+        EffectiveFrom = from.AddDays(5)
+    });
+    Check(clonedVersion.Status == PriceListVersionStatus.Draft && clonedVersion.ItemCount == 1 && clonedVersion.Items.Single().UnitPrice == 65, "cloning a price list version copies its price tiers into a Draft version");
+    var adjusted = await lists.BulkAdjustVersionAsync(wholesale.Id, clonedVersion.Id, new BulkPriceAdjustmentRequest
+    {
+        AdjustmentType = PriceAdjustmentType.Percentage,
+        Value = 10,
+        RoundingIncrement = 0.01m
+    });
+    Check(adjusted.AdjustedLineCount == 1 && (await db.PriceListVersions.Include(v => v.Items).SingleAsync(v => v.Id == clonedVersion.Id)).Items.Single().UnitPrice == 71.5m, "bulk percentage adjustment updates and rounds all Draft version prices");
+    var fixedAdjusted = await lists.BulkAdjustVersionAsync(wholesale.Id, clonedVersion.Id, new BulkPriceAdjustmentRequest
+    {
+        AdjustmentType = PriceAdjustmentType.FixedAmount,
+        Value = 0.25m,
+        RoundingIncrement = 0.5m
+    });
+    Check(fixedAdjusted.AdjustedLineCount == 1 && (await db.PriceListVersions.Include(v => v.Items).SingleAsync(v => v.Id == clonedVersion.Id)).Items.Single().UnitPrice == 72m, "bulk fixed-amount adjustment rounds to the configured increment");
+    var listedVersions = await lists.GetVersionsAsync(wholesale.Id);
+    Check(listedVersions.Count == 2 && listedVersions[0].Id == clonedVersion.Id && listedVersions[0].VersionCode == "V2" && listedVersions[0].ItemCount == 1 && listedVersions[0].Items.Count == 0
+        && listedVersions[1].Id == sourceVersion.Id && listedVersions[1].VersionCode == "V1", "listing price list versions returns lightweight version headers without loading items");
+    var fetchedDraftVersion = await lists.GetVersionAsync(wholesale.Id, clonedVersion.Id);
+    Check(fetchedDraftVersion.Id == clonedVersion.Id && fetchedDraftVersion.Status == PriceListVersionStatus.Draft && fetchedDraftVersion.Items.Count == 1
+        && fetchedDraftVersion.Items.Single().UnitPrice == 72m && fetchedDraftVersion.Items.Single().ItemCode == "ITEM", "reading a specific price list version returns its items after cloning and adjustment");
+    await Reject(async () => await lists.GetVersionsAsync(999999), "error.validation.reference");
+    await Reject(async () => await lists.GetVersionAsync(wholesale.Id, 999999), "error.validation.reference");
+    await db.PriceListVersions.Where(v => v.Id == sourceVersion.Id).ExecuteUpdateAsync(v => v.SetProperty(x => x.EffectiveTo, from.AddDays(4)));
+    await db.PriceListVersions.Where(v => v.Id == clonedVersion.Id).ExecuteUpdateAsync(v => v.SetProperty(x => x.Status, PriceListVersionStatus.Active));
+    var beforeVersion = (await lists.CalculateAsync(new CalculatePriceRequest { CustomerId = customer.Id, BranchId = branch.Id, DocumentDate = from.AddDays(2), Items = [new() { ItemId = item.Id, Quantity = 1 }] })).Items.Single();
+    var afterVersion = (await lists.CalculateAsync(new CalculatePriceRequest { CustomerId = customer.Id, BranchId = branch.Id, DocumentDate = from.AddDays(6), Items = [new() { ItemId = item.Id, Quantity = 1 }] })).Items.Single();
+    Check(beforeVersion.AppliedVersionCode == "V1" && afterVersion.AppliedVersionCode == "V2" && afterVersion.UnitPrice == 72m, "pricing selects the Active version effective on the document date");
+    await Reject(async () => await lists.BulkAdjustVersionAsync(wholesale.Id, sourceVersion.Id, new BulkPriceAdjustmentRequest { AdjustmentType = PriceAdjustmentType.FixedAmount, Value = 1 }), "error.sd.pricelist_version_not_draft");
     Check(await lists.UpdateAsync(999999, new UpdatePriceListRequest { Code = "X", Name = "X", Currency = "VND", EffectiveFrom = from }) == null, "updating a missing price list returns nothing");
     await Reject(async () => await lists.DeleteAsync(wholesale.Id), "error.sd.pricelist_in_use");
     await db.Partners.Where(p => p.Id == customer.Id).ExecuteUpdateAsync(p => p.SetProperty(c => c.PriceListId, (int?)null));
@@ -252,15 +292,28 @@ try
     // Quotations: lifecycle, validity, conversion into a Draft order.
     var quotes = new SalesQuotationService(db, new PostingTransaction(db));
     var quoteDate = DateTime.UtcNow;
-    CreateSalesQuotationRequest QuoteRequest(decimal quantity = 2, decimal discount = 20, DateTime? date = null, DateTime? until = null) => new()
+    var quoteAddress = await db.PartnerDeliveryAddresses.SingleAsync(a => a.PartnerId == customer.Id && !a.IsDefault);
+    quoteAddress.RecipientName = "Quotation Receiver";
+    quoteAddress.Phone = "0900000000";
+    quoteAddress.Address = "10 Original Street";
+    quoteAddress.Ward = "Original Ward";
+    quoteAddress.District = "Original District";
+    quoteAddress.City = "Original City";
+    await db.SaveChangesAsync();
+    CreateSalesQuotationRequest QuoteRequest(decimal quantity = 2, decimal discount = 20, DateTime? date = null, DateTime? until = null, int? deliveryAddressId = null) => new()
     {
-        QuotationDate = date ?? quoteDate, ValidUntil = until ?? quoteDate.AddDays(7), CustomerId = customer.Id, BranchId = branch.Id, TermsAndConditions = "Net 30",
+        QuotationDate = date ?? quoteDate, ValidUntil = until ?? quoteDate.AddDays(7), CustomerId = customer.Id, BranchId = branch.Id,
+        DeliveryAddressId = deliveryAddressId, TermsAndConditions = "Net 30",
         Items = [new() { ItemId = item.Id, Quantity = quantity, UnitPrice = 100, DiscountAmount = discount, Notes = "line" }]
     };
-    var quote = await quotes.CreateAsync(QuoteRequest());
+    var quote = await quotes.CreateAsync(QuoteRequest(deliveryAddressId: quoteAddress.Id));
     Check(System.Text.RegularExpressions.Regex.IsMatch(quote.QuotationNumber, @"^BG-\d{6}-\d{4,}$") && quote.Status == "Draft" && quote.SubTotal == 200 && quote.DiscountAmount == 20 && quote.TotalAmount == 180
-        && quote.CustomerName == "Customer" && quote.Items.Single().ItemCode == "ITEM" && quote.Items.Single().LineTotal == 180, "quotation is numbered, priced and snapshots customer and lines");
+        && quote.CustomerName == "Customer" && quote.Items.Single().ItemCode == "ITEM" && quote.Items.Single().LineTotal == 180
+        && quote.DeliveryAddressId == quoteAddress.Id && quote.DeliveryRecipientName == "Quotation Receiver" && quote.DeliveryPhone == "0900000000"
+        && quote.DeliveryAddressText == "10 Original Street, Original Ward, Original District, Original City",
+        "quotation is numbered, priced and snapshots customer, lines and delivery address");
     await Reject(async () => await quotes.CreateAsync(new CreateSalesQuotationRequest { QuotationDate = quoteDate, ValidUntil = quoteDate, CustomerId = customer.Id, BranchId = branch.Id }), "error.validation.request");
+    await Reject(async () => await quotes.CreateAsync(QuoteRequest(deliveryAddressId: int.MaxValue)), "error.sd.order_delivery_address_invalid");
     var toSupplier = QuoteRequest(); toSupplier.CustomerId = supplier.Id;
     await Reject(async () => await quotes.CreateAsync(toSupplier), "error.sales.customer");
     await Reject(async () => await quotes.CreateAsync(QuoteRequest(discount: 500)), "error.sales.discount");
@@ -268,18 +321,34 @@ try
     var found = await quotes.GetPagedAsync(new BaseFilterQuery { Keyword = quote.QuotationNumber, Status = "Draft" });
     Check(found.TotalCount == 1 && found.Items.Single().Items.Count == 0 && found.Items.Single().BranchName == branch.Name, "quotation page filters by number and status and returns headers only");
 
+    var sourceAddress = await db.PartnerDeliveryAddresses.SingleAsync(a => a.Id == quoteAddress.Id);
+    sourceAddress.Address = "Changed Source Street";
+    sourceAddress.Ward = "Changed Ward";
+    await db.SaveChangesAsync();
     Check((await quotes.SendAsync(quote.Id)).Status == "Sent", "a draft quotation can be sent");
     await Reject(async () => await quotes.SendAsync(quote.Id), "error.sd.quotation_invalid_status");
-    var revised = await quotes.UpdateAsync(quote.Id, new UpdateSalesQuotationRequest { QuotationDate = quoteDate, ValidUntil = quoteDate.AddDays(7), CustomerId = customer.Id, BranchId = branch.Id, Items = [new() { ItemId = item.Id, Quantity = 3, UnitPrice = 100 }] });
-    Check(revised!.TotalAmount == 300 && revised.Items.Count == 1 && revised.Status == "Sent", "a sent quotation can be revised and its lines are replaced");
+    var revised = await quotes.UpdateAsync(quote.Id, new UpdateSalesQuotationRequest { QuotationDate = quoteDate, ValidUntil = quoteDate.AddDays(7), CustomerId = customer.Id, BranchId = branch.Id,
+        DeliveryAddressId = quoteAddress.Id, Items = [new() { ItemId = item.Id, Quantity = 3, UnitPrice = 100 }] });
+    Check(revised!.TotalAmount == 300 && revised.Items.Count == 1 && revised.Status == "Sent"
+        && revised.DeliveryAddressText == "10 Original Street, Original Ward, Original District, Original City",
+        "a sent quotation can be revised without refreshing its saved delivery address");
     Check((await quotes.AcceptAsync(quote.Id)).Status == "Accepted", "a sent quotation can be accepted");
     await Reject(async () => await quotes.UpdateAsync(quote.Id, new UpdateSalesQuotationRequest { QuotationDate = quoteDate, ValidUntil = quoteDate.AddDays(7), CustomerId = customer.Id, BranchId = branch.Id, Items = [new() { ItemId = item.Id, Quantity = 1, UnitPrice = 1 }] }), "error.sd.quotation_invalid_status");
     await Reject(async () => await quotes.DeleteAsync(quote.Id), "error.sd.quotation_invalid_status");
 
+    var addressToDelete = await db.PartnerDeliveryAddresses.SingleAsync(a => a.Id == quoteAddress.Id);
+    addressToDelete.IsDeleted = true;
+    addressToDelete.DeletedAtUtc = DateTime.UtcNow;
+    await db.SaveChangesAsync();
     var converted = await quotes.ConvertToOrderAsync(quote.Id);
     var convertedOrder = await db.SalesOrders.Include(o => o.Items).SingleAsync(o => o.Id == converted.SalesOrderId);
     Check(convertedOrder.Status == "Draft" && convertedOrder.TotalAmount == 300 && convertedOrder.Items.Single().Quantity == 3 && convertedOrder.CustomerId == customer.Id && convertedOrder.OrderNumber == converted.OrderNumber && convertedOrder.Notes == quote.QuotationNumber,
         "conversion creates a Draft order with the quotation lines");
+    Check(convertedOrder.DeliveryAddressId == quoteAddress.Id && convertedOrder.DeliveryRecipientName == "Quotation Receiver"
+        && convertedOrder.DeliveryPhone == "0900000000"
+        && convertedOrder.DeliveryAddressText == "10 Original Street, Original Ward, Original District, Original City"
+        && convertedOrder.DeliveryAddress == convertedOrder.DeliveryAddressText,
+        "conversion carries the quotation address snapshot unchanged after the source address is deleted");
     var after = await quotes.GetByIdAsync(quote.Id);
     Check(after!.Status == "Converted" && after.ConvertedSalesOrderId == converted.SalesOrderId, "the converted quotation points at its order");
     await Reject(async () => await quotes.ConvertToOrderAsync(quote.Id), "error.sd.quotation_already_converted");
@@ -778,11 +847,12 @@ try
 
     // Order and return notices reach the same kind of people: viewers whose scope reaches the document, never the actor.
     IamPrincipal DocPrincipal(IamDataScope scope, string userKey, params string[] actions) => new([SystemRoles.Allow("Doc", actions, scope)], new OrgContext { CompanyId = 1, UserKey = userKey, Branches = new OrgTree([(branch.Id, (int?)null), (999999, (int?)null)]) }, false);
-    string[] docRights = ["sd:order:view", "sd:return:view"];
+    string[] docRights = ["sd:order:view", "sd:return:view", "sd:invoice:view", "wms:stock:view"];
+    string[] approverRights = [.. docRights, "sd:order:approve_credit"];
     var docIam = new IamStub(new()
     {
         [quoteActor.Id] = DocPrincipal(inBranch, "nobody", docRights),
-        [quoteViewer.Id] = DocPrincipal(inBranch, "nobody", docRights),
+        [quoteViewer.Id] = DocPrincipal(inBranch, "nobody", approverRights),
         [quoteBoss.Id] = DocPrincipal(new IamDataScope { Mode = DataScopeModes.Group }, "nobody", docRights),
         [quoteOwner.Id] = DocPrincipal(new IamDataScope { Mode = DataScopeModes.Self }, "verification", docRights),
         [quoteStranger.Id] = DocPrincipal(new IamDataScope { Mode = DataScopeModes.Self }, "someone-else", docRights),
@@ -800,7 +870,7 @@ try
     await docOrders.CancelAsync(noticeOrder.Id, "notice test", default);
     Check(DocTold("SD_ORDER_CANCELLED").SequenceEqual(Expected()), "a cancelled order tells the same people");
     var heldNotice = await docOrders.ConfirmAsync((await docOrders.CreateAsync(new CreateSalesOrderRequest { BranchId = branch.Id, CustomerId = poor.Id, Items = [new() { ItemId = creditItem.Id, Quantity = 1, UnitPrice = 100 }] })).Id, default);
-    Check(heldNotice.Status == "PendingApproval" && DocTold("SD_ORDER_CREDIT_PENDING").SequenceEqual(Expected()), "an order waiting for credit approval tells the same people");
+    Check(heldNotice.Status == "PendingApproval" && DocTold("SD_ORDER_CREDIT_PENDING").SequenceEqual(new int?[] { quoteViewer.Id }), "an order waiting for credit approval tells only the accounts that may approve credit in a scope reaching it, not other viewers");
     await docOrders.ApproveCreditAsync(heldNotice.Id, "notice test", default);
     Check(DocTold("SD_ORDER_CREDIT_APPROVED").SequenceEqual(Expected()), "an approved credit tells the same people");
     var docReturns = new SalesReturnService(db, new PostingTransaction(db), docEngine, docIam, new ActorUser(quoteActor.Id));
@@ -810,6 +880,16 @@ try
     var invoicer = new SalesInvoiceService(db, new BranchService(db), new PostingTransaction(db), new ActorUser(quoteActor.Id), docEngine, docIam);
     var toInvoice = await docOrders.ConfirmAsync((await docOrders.CreateAsync(new CreateSalesOrderRequest { BranchId = branch.Id, CustomerId = rich.Id, Items = [new() { ItemId = creditItem.Id, Quantity = 1, UnitPrice = 100 }] })).Id, default);
     await invoicer.CreateInvoiceFromOrderAsync(toInvoice.Id, FromOrder(PaymentMethod.Cash, 100));
+    // A sale that leaves stock at or under the item's alert level, then its cancellation, tell stock/invoice viewers only after the commit.
+    await db.Items.Where(i => i.Id == item.Id).ExecuteUpdateAsync(s => s.SetProperty(i => i.MinStockAlert, 1_000_000_000m)); db.ChangeTracker.Clear();
+    var alertSale = await invoicer.CreateInvoiceAsync(Sale());
+    await db.Items.Where(i => i.Id == item.Id).ExecuteUpdateAsync(s => s.SetProperty(i => i.MinStockAlert, 0m));
+    Check(DocTold("WMS_LOW_STOCK").SequenceEqual(new int?[] { quoteViewer.Id, quoteBoss.Id }.OrderBy(id => id)), "low stock tells accounts that may view stock in the warehouse branch (stock has no owner, so seller-only scopes get nothing), not the actor, other branches or people without the right");
+    await invoicer.CancelInvoiceAsync(alertSale.Id, "notice test");
+    Check(DocTold("SD_INVOICE_CANCELLED").SequenceEqual(Expected()), "a cancelled invoice tells viewers of invoices in a scope reaching it, not the actor");
+    var eventsBefore = docEngine.Events.Count;
+    await Reject(async () => await invoicer.CancelInvoiceAsync(alertSale.Id, " "), "error.validation.request");
+    Check(docEngine.Events.Count == eventsBefore, "a refused action notifies nobody");
     (await db.Accounts.SingleAsync(a => a.Code == "511")).IsActive = false; await db.SaveChangesAsync();   // restore the state the next checks expect
     Check(DocTold("SD_ORDER_INVOICED").SequenceEqual(Expected()), "an order turned into an invoice tells viewers of the order, not the person who invoiced it");
     Check(docEngine.Events.OfType<ERPm.Domain.Events.NotificationEvent>().All(e => e.TargetId != quoteActor.Id && e.TargetId != quoteNoRight.Id && e.TargetId != quoteOtherBranch.Id && e.TargetId != quoteStranger.Id), "nobody outside the right scope or the actor received any order or return notice");
@@ -927,6 +1007,22 @@ try
         Check(listPage.RootElement.GetProperty("data").GetProperty("totalCount").GetInt32() >= 1, "admin reads the price list page over HTTP");
         using var priced = await http.PostAsJsonAsync("/api/v1/sales/price-lists/calculate-price", new { branchId = allowedBranch.Id, items = new[] { new { itemId = 1, quantity = 1 } } });
         Check(priced.StatusCode != HttpStatusCode.NotFound && priced.StatusCode != HttpStatusCode.MethodNotAllowed && priced.StatusCode != HttpStatusCode.Forbidden, "calculate-price is routed and allowed for the administrator");
+        using var vipVersionsPayload = JsonDocument.Parse(await http.GetStringAsync($"/api/v1/sales/price-lists/{vip.Id}/versions"));
+        var vipVersionsData = vipVersionsPayload.RootElement.GetProperty("data");
+        var vipVersionId = vipVersionsData[0].GetProperty("id").GetInt32();
+        Check(vipVersionsData.GetArrayLength() == 1 && vipVersionsData[0].GetProperty("versionCode").GetString() == "V1" && vipVersionsData[0].GetProperty("itemCount").GetInt32() == 1,
+            "admin reads price list versions over HTTP");
+        using var vipVersionDetailPayload = JsonDocument.Parse(await http.GetStringAsync($"/api/v1/sales/price-lists/{vip.Id}/versions/{vipVersionId}"));
+        Check(vipVersionDetailPayload.RootElement.GetProperty("data").GetProperty("items").GetArrayLength() == 1, "admin reads a price list version with its items over HTTP");
+        using var vipVersionItemsPayload = JsonDocument.Parse(await http.GetStringAsync($"/api/v1/sales/price-lists/{vip.Id}/versions/{vipVersionId}/items"));
+        Check(vipVersionItemsPayload.RootElement.GetProperty("data").GetArrayLength() == 1, "admin reads a price list version's items endpoint over HTTP");
+        Check((await http.GetAsync("/api/v1/sales/price-lists/999999/versions")).StatusCode == HttpStatusCode.NotFound
+            && (await http.GetAsync($"/api/v1/sales/price-lists/{vip.Id}/versions/999999")).StatusCode == HttpStatusCode.NotFound,
+            "reading versions of a missing price list or version answers not found");
+        using var missingClone = await http.PostAsJsonAsync("/api/v1/sales/price-lists/1/versions/clone", new { sourceVersionId = 999999, versionCode = "API-CLONE", effectiveFrom = DateTime.UtcNow });
+        Check(missingClone.StatusCode == HttpStatusCode.NotFound, "clone-version API route validates the source version");
+        using var missingAdjustment = await http.PostAsJsonAsync("/api/v1/sales/price-lists/1/versions/999999/bulk-adjustment", new { adjustmentType = 1, value = 1, roundingIncrement = 0.01m });
+        Check(missingAdjustment.StatusCode == HttpStatusCode.NotFound, "bulk-adjustment API route validates the target version");
         Check((await http.GetAsync("/api/v1/sales/quotations")).IsSuccessStatusCode, "admin reads the quotation page over HTTP");
         Check((await http.PostAsync("/api/v1/sales/quotations/999999/convert-to-order", null)).StatusCode == HttpStatusCode.NotFound, "converting a missing quotation answers not found");
         Check((await http.PostAsJsonAsync("/api/v1/sales/orders/999999/cancel", new { reason = "x" })).StatusCode == HttpStatusCode.NotFound, "cancelling a missing order answers not found");
@@ -944,6 +1040,11 @@ try
         http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
         http.DefaultRequestHeaders.Authorization = new("Bearer", viewerToken);
         Check((await http.PostAsJsonAsync("/api/v1/sales/price-lists", new { code = "X", name = "X", currency = "VND", effectiveFrom = DateTime.UtcNow })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without sd:pricelist:create cannot create a price list");
+        Check((await http.GetAsync($"/api/v1/sales/price-lists/{vip.Id}/versions")).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden
+            && (await http.GetAsync($"/api/v1/sales/price-lists/{vip.Id}/versions/{vipVersionId}")).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden,
+            "a user without sd:pricelist:view cannot read price list versions");
+        Check((await http.PostAsJsonAsync("/api/v1/sales/price-lists/1/versions/clone", new { sourceVersionId = 1, versionCode = "NO-ACCESS", effectiveFrom = DateTime.UtcNow })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without sd:pricelist:edit cannot clone a version");
+        Check((await http.PostAsJsonAsync("/api/v1/sales/price-lists/1/versions/1/bulk-adjustment", new { adjustmentType = 1, value = 1, roundingIncrement = 0.01m })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without sd:pricelist:edit cannot bulk-adjust a version");
         http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
         Check((await http.GetAsync("/api/v1/sys/notifications/preferences")).IsSuccessStatusCode, "admin reads preferences over HTTP");
         using var broadcastResp = await http.PostAsJsonAsync("/api/v1/sys/notifications/broadcast", new { title = "Broadcast", body = "System announcement", category = "SYS", severity = "INFO", targetType = "ALL" });

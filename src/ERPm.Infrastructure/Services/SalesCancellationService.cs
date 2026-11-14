@@ -1,3 +1,4 @@
+using ERPm.Infrastructure.Services.Common;
 using ERPm.Application.DTOs.Sales;
 using ERPm.Domain.Entities.Accounting;
 using ERPm.Domain.Entities.Inventory;
@@ -8,10 +9,11 @@ namespace ERPm.Infrastructure.Services;
 
 public partial class SalesInvoiceService
 {
-    public Task<SalesInvoiceDto> CancelInvoiceAsync(int id, string reason, CancellationToken cancellationToken = default)
+    public async Task<SalesInvoiceDto> CancelInvoiceAsync(int id, string reason, CancellationToken cancellationToken = default)
     {
         Require(!string.IsNullOrWhiteSpace(reason) && reason.Length <= 500, "error.validation.request");
-        return posting.RunAsync(async () =>
+        DocumentNotice? publish = null;
+        var result = await posting.RunAsync(async () =>
         {
             await posting.LockAsync($"sale-cancel:{id}", cancellationToken);
             var invoice = await context.SalesInvoices.Include(i => i.Items).Include(i => i.StockIssue)
@@ -61,24 +63,14 @@ public partial class SalesInvoiceService
             try { await context.SaveChangesAsync(cancellationToken); }
             finally { context.AllowCancellation = false; }
 
-            if (notificationEngine != null)
-            {
-                _ = notificationEngine.PublishAsync(new ERPm.Domain.Events.NotificationEvent(
-                    "SD_INVOICE_CANCELLED",
-                    ERPm.Domain.Enums.NotificationCategory.SD,
-                    ERPm.Domain.Enums.NotificationSeverity.DANGER,
-                    ERPm.Domain.Enums.NotificationTargetType.BranchTree,
-                    branchId: invoice.BranchId,
-                    parameters: new Dictionary<string, object>
-                    {
-                        ["invoice_code"] = invoice.InvoiceNumber,
-                        ["total_amount"] = invoice.TotalAmount,
-                        ["cancelled_by"] = user?.UserId ?? "Hệ thống"
-                    },
-                    actionUrl: "/sales/invoices"
-                ));
-            }
+            publish = new DocumentNotice(
+                "SD_INVOICE_CANCELLED", ERPm.Domain.Enums.NotificationCategory.SD, ERPm.Domain.Enums.NotificationSeverity.DANGER, "sd:invoice:view",
+                invoice.BranchId, invoice.DepartmentId, invoice.CreatedBy,
+                new Dictionary<string, object> { ["invoice_code"] = invoice.InvoiceNumber, ["total_amount"] = invoice.TotalAmount, ["cancelled_by"] = user?.UserId ?? "Hệ thống" },
+                "/sales/invoices");
             return Map(invoice);
         }, cancellationToken);
+        await PermissionRecipients.PublishAsync(context, iam, notificationEngine, user, publish, cancellationToken);
+        return result;
     }
 }

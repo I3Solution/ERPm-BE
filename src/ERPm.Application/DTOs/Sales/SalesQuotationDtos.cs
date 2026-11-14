@@ -32,6 +32,10 @@ public class SalesQuotationDetailDto
     public string? BranchName { get; set; }
     public int? DepartmentId { get; set; }
     public int? PriceListId { get; set; }
+    public int? DeliveryAddressId { get; set; }
+    public string? DeliveryRecipientName { get; set; }
+    public string? DeliveryPhone { get; set; }
+    public string? DeliveryAddressText { get; set; }
     /// <summary>Draft, Sent, Accepted, Rejected, Converted, or Expired when the validity date has passed.</summary>
     public string Status { get; set; } = string.Empty;
     public decimal SubTotal { get; set; }
@@ -61,6 +65,8 @@ public class CreateSalesQuotationRequest
     public int? DepartmentId { get; set; }
     public int? SalespersonId { get; set; }
     public int? PriceListId { get; set; }
+    /// <summary>Optional saved delivery address belonging to the selected customer.</summary>
+    public int? DeliveryAddressId { get; set; }
     public string? TermsAndConditions { get; set; }
     public List<CreateSalesQuotationLineRequest> Items { get; set; } = new();
 }

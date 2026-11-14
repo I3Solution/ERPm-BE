@@ -18,7 +18,7 @@ public partial class SalesInvoiceService
         ValidateNumber(request.TenderedAmount);
         DocumentNotice? publish = null;
 
-        var invoice = await posting.RunAsync(async () =>
+        var invoice = await PostAndNotifyAsync(() => posting.RunAsync(async () =>
         {
             await posting.LockAsync($"order:Sales:{orderId}", cancellationToken);
             var order = await context.SalesOrders.Include(o => o.Items).SingleOrDefaultAsync(o => o.Id == orderId, cancellationToken);
@@ -50,7 +50,7 @@ public partial class SalesInvoiceService
                 new Dictionary<string, object> { ["order_code"] = order.OrderNumber, ["invoice_code"] = posted.InvoiceNumber, ["total_amount"] = posted.TotalAmount },
                 "/sales/invoices");
             return posted;
-        }, cancellationToken);
+        }, cancellationToken), cancellationToken);
 
         // Sent after the commit, to accounts that may view the order, never to the person who invoiced it.
         await PermissionRecipients.PublishAsync(context, iam, notificationEngine, user, publish, cancellationToken);
