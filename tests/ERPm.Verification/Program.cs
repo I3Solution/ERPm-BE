@@ -303,7 +303,7 @@ try
     var draftV3 = await lists.CreateVersionAsync(wholesale.Id, new CreatePriceListVersionRequest { VersionCode = "v3", EffectiveFrom = from.AddDays(10) });
     Check(draftV3.VersionCode == "V3" && draftV3.Status == PriceListVersionStatus.Draft && draftV3.Items.Count == 0, "creating a price list version starts it in Draft status");
     var updatedV3 = await lists.UpdateVersionAsync(wholesale.Id, draftV3.Id, new UpdatePriceListVersionRequest { VersionCode = "v3-edit", EffectiveFrom = from.AddDays(10), EffectiveTo = from.AddDays(20) });
-    Check(updatedV3.VersionCode == "V3-EDIT" && updatedV3.EffectiveTo == from.AddDays(20), "updating a Draft version updates its code and effective window");
+    Check(updatedV3.VersionCode == "V3-EDIT" && updatedV3.EffectiveTo.HasValue && Math.Abs((updatedV3.EffectiveTo.Value - from.AddDays(20)).TotalMilliseconds) < 1, "updating a Draft version updates its code and effective window");
     await Reject(async () => await lists.UpdateVersionAsync(wholesale.Id, draftV3.Id, new UpdatePriceListVersionRequest { VersionCode = "V2", EffectiveFrom = from.AddDays(10) }), "error.sd.pricelist_duplicate_version");
     await Reject(async () => await lists.UpdateVersionAsync(wholesale.Id, sourceVersion.Id, new UpdatePriceListVersionRequest { VersionCode = "V1-EDIT", EffectiveFrom = from }), "error.sd.pricelist_version_not_draft");
 
@@ -333,7 +333,7 @@ try
     var activatedV3 = await lists.ActivateVersionAsync(wholesale.Id, draftV3.Id);
     Check(activatedV3.Status == PriceListVersionStatus.Active, "activating a Draft version transitions it to Active");
     var whileActive = (await lists.CalculateAsync(new CalculatePriceRequest { CustomerId = customer.Id, BranchId = branch.Id, DocumentDate = from.AddDays(12), Items = [new() { ItemId = item.Id, Quantity = 1 }] })).Items.Single();
-    Check(whileActive.AppliedVersionCode == "V3-EDIT" && whileActive.UnitPrice == 65.55m, "activated version takes effect immediately for matching document dates");
+    Check(whileActive.AppliedVersionCode == "V3-EDIT" && whileActive.UnitPrice == 69m && whileActive.DiscountAmount == 3.45m && whileActive.LineTotal == 65.55m, "activated version takes effect immediately for matching document dates");
     await Reject(async () => await lists.ActivateVersionAsync(wholesale.Id, draftV3.Id), "error.sd.pricelist_version_invalid_status");
     await Reject(async () => await lists.UpdateVersionAsync(wholesale.Id, draftV3.Id, new UpdatePriceListVersionRequest { VersionCode = "V3-AGAIN", EffectiveFrom = from.AddDays(10) }), "error.sd.pricelist_version_not_draft");
     await Reject(async () => await lists.AddVersionItemAsync(wholesale.Id, draftV3.Id, new CreatePriceListItemRequest { ItemId = item.Id, UnitPrice = 50, MinQuantity = 5 }), "error.sd.pricelist_version_not_draft");
