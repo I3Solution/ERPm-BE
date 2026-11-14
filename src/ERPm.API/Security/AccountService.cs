@@ -12,7 +12,13 @@ namespace ERPm.API.Security;
 
 public sealed record LoginRequest(string UserName, string Password);
 public sealed record UserRequest(string UserName, string DisplayName, string Password, string Role, int[] BranchIds, int? EmployeeId = null);
-public sealed record UserAccessRequest(string DisplayName, string Role, int[] BranchIds, bool IsActive, string? Password, int? EmployeeId = null);
+public sealed record UserAccessRequest(string DisplayName, string Role, int[] BranchIds, bool IsActive, string? Password)
+{
+    /// <summary>The linked employee. Leaving it out keeps the current link; sending null unlinks, so lock and unlock calls cannot drop it by accident.</summary>
+    public int? EmployeeId { get; init { field = value; EmployeeIdSent = true; } }
+
+    public bool EmployeeIdSent { get; private init; }
+}
 public sealed record AccountDto(int Id, string UserName, string DisplayName, string Role, int[] BranchIds,
     int? EmployeeId = null, string? EmployeeCode = null, string? EmployeeName = null, bool IsActive = true);
 
@@ -91,7 +97,9 @@ public sealed class AccountService(ApplicationDbContext context, PostingTransact
         }
         user.DisplayName = request.DisplayName.Trim(); user.Role = request.Role; user.BranchIds = ids.ToList(); user.IsActive = request.IsActive;
         user.FailedLoginCount = 0; user.LockedUntilUtc = null; user.SecurityStamp = Guid.NewGuid().ToString("N");
-        var employee = await LinkEmployeeAsync(user, request.EmployeeId, granter, ct);
+        var employee = request.EmployeeIdSent
+            ? await LinkEmployeeAsync(user, request.EmployeeId, granter, ct)
+            : await context.Employees.FirstOrDefaultAsync(e => e.UserId == id, ct);
         await context.SaveChangesAsync(ct);
         iam.Invalidate();
         return new(user.Id, user.UserName, user.DisplayName, user.Role, ids, employee?.Id, employee?.Code, employee?.FullName, user.IsActive);
