@@ -332,6 +332,17 @@ try
     Check(whileDraft.AppliedVersionCode == "V2" && whileDraft.UnitPrice == 72m, "Draft version does not take effect until activated");
     await Reject(async () => await lists.CloseVersionAsync(wholesale.Id, draftV3.Id), "error.sd.pricelist_version_invalid_status");
 
+    // Activation is blocked while another Active version of the same list overlaps the window (inclusive on both ends).
+    try { await lists.ActivateVersionAsync(wholesale.Id, draftV3.Id); Check(false, "activating a version that overlaps an Active one is rejected"); }
+    catch (BusinessException overlap)
+    {
+        Check(overlap.Code == "error.sd.pricelist_version_overlap" && overlap.StatusCode == 409 && overlap.Args!["code"] == "V2" && overlap.Args["from"] == from.AddDays(5).ToString("dd/MM/yyyy"),
+            "overlap rejection names the blocking version and its window");
+    }
+    await db.PriceListVersions.Where(v => v.Id == clonedVersion.Id).ExecuteUpdateAsync(v => v.SetProperty(x => x.EffectiveTo, from.AddDays(10)));
+    await Reject(async () => await lists.ActivateVersionAsync(wholesale.Id, draftV3.Id), "error.sd.pricelist_version_overlap");
+    await db.PriceListVersions.Where(v => v.Id == clonedVersion.Id).ExecuteUpdateAsync(v => v.SetProperty(x => x.EffectiveTo, from.AddDays(9)));
+    Check((await lists.GetVersionAsync(wholesale.Id, draftV3.Id)).Status == PriceListVersionStatus.Draft, "a rejected activation leaves the version in Draft");
     var activatedV3 = await lists.ActivateVersionAsync(wholesale.Id, draftV3.Id);
     Check(activatedV3.Status == PriceListVersionStatus.Active, "activating a Draft version transitions it to Active");
     var whileActive = (await lists.CalculateAsync(new CalculatePriceRequest { CustomerId = customer.Id, BranchId = branch.Id, DocumentDate = from.AddDays(12), Items = [new() { ItemId = item.Id, Quantity = 1 }] })).Items.Single();
@@ -344,6 +355,7 @@ try
 
     var closedV3 = await lists.CloseVersionAsync(wholesale.Id, draftV3.Id);
     Check(closedV3.Status == PriceListVersionStatus.Expired, "closing an Active version transitions it to Expired");
+    await db.PriceListVersions.Where(v => v.Id == clonedVersion.Id).ExecuteUpdateAsync(v => v.SetProperty(x => x.EffectiveTo, (DateTime?)null));
     var afterClose = (await lists.CalculateAsync(new CalculatePriceRequest { CustomerId = customer.Id, BranchId = branch.Id, DocumentDate = from.AddDays(12), Items = [new() { ItemId = item.Id, Quantity = 1 }] })).Items.Single();
     Check(afterClose.AppliedVersionCode == "V2" && afterClose.UnitPrice == 72m, "closing a version removes it from active pricing");
     await Reject(async () => await lists.CloseVersionAsync(wholesale.Id, draftV3.Id), "error.sd.pricelist_version_invalid_status");
@@ -1214,6 +1226,15 @@ try
         Check(httpPutItem.IsSuccessStatusCode, "PUT version items updates a Draft item over HTTP");
         Check((await http.DeleteAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions/{httpVersionId}/items/{httpItemLine2Id}")).StatusCode == HttpStatusCode.NoContent,
             "DELETE version items removes a Draft item over HTTP");
+
+        using var httpOverlap = await http.PostAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions/{httpVersionId}/activate", null);
+        using var httpOverlapJson = JsonDocument.Parse(await httpOverlap.Content.ReadAsStringAsync());
+        var overlapMessage = httpOverlapJson.RootElement.GetProperty("message").GetString() ?? "";
+        Check(httpOverlap.StatusCode == HttpStatusCode.Conflict && httpOverlapJson.RootElement.GetProperty("errorCode").GetString() == "error.sd.pricelist_version_overlap"
+            && overlapMessage.Contains("V1") && !overlapMessage.Contains('{'), "POST activate over HTTP is blocked with a localized message naming the overlapping version");
+        using var httpVersionList = JsonDocument.Parse(await http.GetStringAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions"));
+        var blockingId = httpVersionList.RootElement.GetProperty("data").EnumerateArray().Single(v => v.GetProperty("versionCode").GetString() == "V1").GetProperty("id").GetInt32();
+        Check((await http.PostAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions/{blockingId}/close", null)).IsSuccessStatusCode, "closing the blocking version over HTTP succeeds");
 
         using var httpActivate = await http.PostAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions/{httpVersionId}/activate", null);
         Check(httpActivate.IsSuccessStatusCode && JsonDocument.Parse(await httpActivate.Content.ReadAsStringAsync()).RootElement.GetProperty("data").GetProperty("status").GetInt32() == 2,

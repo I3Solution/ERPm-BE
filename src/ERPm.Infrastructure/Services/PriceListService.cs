@@ -350,6 +350,20 @@ public sealed class PriceListService(ApplicationDbContext context)
     public async Task<PriceListVersionDto> ActivateVersionAsync(int priceListId, int versionId, CancellationToken ct = default)
     {
         var version = await FindVersionForTransitionAsync(priceListId, versionId, PriceListVersionStatus.Draft, ct);
+        // Effective windows are inclusive (pricing uses <= / >=), so windows that only touch on one day also overlap.
+        var from = version.EffectiveFrom;
+        var to = version.EffectiveTo;
+        var overlapping = await Context.PriceListVersions
+            .Where(v => v.PriceListId == priceListId && v.Id != versionId && v.Status == PriceListVersionStatus.Active
+                && (to == null || v.EffectiveFrom <= to) && (v.EffectiveTo == null || v.EffectiveTo >= from))
+            .OrderBy(v => v.EffectiveFrom).FirstOrDefaultAsync(ct);
+        if (overlapping != null)
+            throw new ERPm.Application.Common.BusinessException("error.sd.pricelist_version_overlap", 409, new Dictionary<string, string>
+            {
+                ["code"] = overlapping.VersionCode,
+                ["from"] = overlapping.EffectiveFrom.ToString("dd/MM/yyyy"),
+                ["to"] = overlapping.EffectiveTo?.ToString("dd/MM/yyyy") ?? "\u221e"
+            });
         version.Status = PriceListVersionStatus.Active;
         version.LastModifiedAtUtc = DateTime.UtcNow;
         await Context.SaveChangesAsync(ct);
