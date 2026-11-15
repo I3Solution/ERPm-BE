@@ -100,7 +100,7 @@ public class UpdateItemRequest : CreateItemRequest
     public bool IsActive { get; set; } = true;
 }
 
-public class ItemFilterQuery
+public class ItemFilterQuery : ERPm.Application.Common.Crud.ListSort
 {
     public string? Keyword { get; set; }
     public int? CategoryId { get; set; }

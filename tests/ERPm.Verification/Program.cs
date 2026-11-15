@@ -1086,6 +1086,30 @@ try
     await Reject(async () => await Receipts(db).CreateAsync(missingReceiptId, default), "error.validation.request");
     var translatedSearch = await catalogue.GetItemsAsync(new ERPm.Application.DTOs.Catalog.ItemFilterQuery { Keyword = "translated" });
     Check(translatedSearch.Items.Any(i => i.Id == roundingItem.Id), "catalogue search includes translated names");
+    // Sorting of the CRM partner, WMS item and WMS stock lists: by DTO property, unknown name rejected, default order kept.
+    var bySalePriceDesc = await catalogue.GetItemsAsync(new ERPm.Application.DTOs.Catalog.ItemFilterQuery { Sort = "-salePrice", PageSize = 200 });
+    Check(bySalePriceDesc.Items.Select(i => i.SalePrice).SequenceEqual(bySalePriceDesc.Items.Select(i => i.SalePrice).OrderByDescending(p => p)) && bySalePriceDesc.Items.Count > 1, "items sort by a requested column, descending with a minus sign");
+    var byNameAsc = await catalogue.GetItemsAsync(new ERPm.Application.DTOs.Catalog.ItemFilterQuery { SortBy = "Name", PageSize = 200 });
+    var byNameDesc = await catalogue.GetItemsAsync(new ERPm.Application.DTOs.Catalog.ItemFilterQuery { SortBy = "name", IsAscending = false, PageSize = 200 });
+    Check(byNameAsc.Items.Count > 1 && byNameAsc.Items.First().Name == byNameDesc.Items.Last().Name && byNameAsc.Items.Last().Name == byNameDesc.Items.First().Name, "items accept the property casing and sort in both directions");
+    var itemsDefault = await catalogue.GetItemsAsync(new ERPm.Application.DTOs.Catalog.ItemFilterQuery { PageSize = 200 });
+    var itemsByCode = await catalogue.GetItemsAsync(new ERPm.Application.DTOs.Catalog.ItemFilterQuery { Sort = "code", PageSize = 200 });
+    Check(itemsDefault.Items.Select(i => i.Id).SequenceEqual(itemsByCode.Items.Select(i => i.Id)), "items keep the code order without a sort");
+    await Reject(async () => await catalogue.GetItemsAsync(new ERPm.Application.DTOs.Catalog.ItemFilterQuery { Sort = "attributes" }), "error.validation.request");
+    await Reject(async () => await catalogue.GetItemsAsync(new ERPm.Application.DTOs.Catalog.ItemFilterQuery { Sort = "nope" }), "error.validation.request");
+    var partnerService = PartnersAs(holderA);
+    var partnersByNameDesc = await partnerService.GetPartnersAsync(new ERPm.Application.Common.Crud.ListSort { Sort = "-name" });
+    var partnersDefault = await partnerService.GetPartnersAsync();
+    var partnersByNameAsc = await partnerService.GetPartnersAsync(new ERPm.Application.Common.Crud.ListSort { Sort = "name" });
+    Check(partnersByNameDesc.Count > 1 && partnersByNameDesc.Count == partnersDefault.Count && partnersByNameAsc.First().Name == partnersByNameDesc.Last().Name && partnersByNameAsc.Last().Name == partnersByNameDesc.First().Name, "partners sort by a requested column in both directions with the same rows");
+    var partnersByCode = await partnerService.GetPartnersAsync(new ERPm.Application.Common.Crud.ListSort { Sort = "code" });
+    Check(partnersDefault.Select(p => p.Id).SequenceEqual(partnersByCode.Select(p => p.Id)), "partners keep the code order without a sort");
+    await Reject(async () => await partnerService.GetPartnersAsync(new ERPm.Application.Common.Crud.ListSort { Sort = "nope" }), "error.validation.request");
+    var stockList = new StockService(db, new BranchService(db), Receipts(db));
+    var balancesByQty = await stockList.GetStockBalancesAsync(null, null, new ERPm.Application.Common.Crud.ListSort { Sort = "-quantityOnHand" });
+    Check(balancesByQty.Select(b => b.QuantityOnHand).SequenceEqual(balancesByQty.Select(b => b.QuantityOnHand).OrderByDescending(q => q)) && balancesByQty.Count > 0, "stock balances sort by a requested column");
+    Check((await stockList.GetStockBalancesAsync(null, null)).Count == balancesByQty.Count, "stock balances keep every row without a sort");
+    await Reject(async () => await stockList.GetStockBalancesAsync(null, null, new ERPm.Application.Common.Crud.ListSort { Sort = "nope" }), "error.validation.request");
     var roundingReceipt1 = Receipt(3, 1); roundingReceipt1.Items[0].ItemId = roundingItem.Id;
     var roundingReceipt2 = Receipt(4, 2); roundingReceipt2.Items[0].ItemId = roundingItem.Id;
     await Receipts(db).CreateAsync(roundingReceipt1, default); await Receipts(db).CreateAsync(roundingReceipt2, default);
@@ -1150,6 +1174,25 @@ try
         using var branchEditDenied = await http.PutAsJsonAsync($"/api/v1/branches/{allowedBranch.Id}", new { code = "X", name = "X", parentId = (int?)null, isActive = true });
         using var branchDeleteDenied = await http.DeleteAsync($"/api/v1/branches/{allowedBranch.Id}");
         Check(branchEditDenied.StatusCode == HttpStatusCode.Forbidden && branchDeleteDenied.StatusCode == HttpStatusCode.Forbidden, "viewer cannot edit or delete branches");
+        // Sort query keys on the real HTTP binding: sort=field, sort=-field, sortBy+isAscending, and an unknown name is a 400.
+        async Task<(HttpStatusCode Status, List<string> Names)> ListNames(string url, string field)
+        {
+            using var response = await http.GetAsync(url);
+            if (!response.IsSuccessStatusCode) return (response.StatusCode, []);
+            using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var data = body.RootElement.GetProperty("data");
+            if (data.ValueKind == JsonValueKind.Object) data = data.GetProperty("items");
+            return (response.StatusCode, data.EnumerateArray().Select(e => e.GetProperty(field).GetString() ?? "").ToList());
+        }
+        foreach (var (list, url, field) in new[] { ("partners", "/api/v1/partners", "name"), ("stock balances", "/api/v1/stock/balances", "itemName"), ("items", "/api/v1/items", "name") })
+        {
+            var asc = await ListNames($"{url}?sort={field}", field);
+            var desc = await ListNames($"{url}?sort=-{field}", field);
+            var legacy = await ListNames($"{url}?sortBy={field}&isAscending=false", field);
+            var bogus = await ListNames($"{url}?sort=bogus", field);
+            Check(asc.Status == HttpStatusCode.OK && (asc.Names.Count > 0 || list == "stock balances") && asc.Names.SequenceEqual(desc.Names.AsEnumerable().Reverse()), $"{list}: sort=field and sort=-field are read from the query string and reverse each other (asc {asc.Status} [{string.Join("|", asc.Names)}] desc {desc.Status} [{string.Join("|", desc.Names)}])");
+            Check(legacy.Names.SequenceEqual(desc.Names) && bogus.Status == HttpStatusCode.BadRequest, $"{list}: sortBy+isAscending matches sort=-field and an unknown name returns 400");
+        }
         http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
         using var order = await http.PostAsJsonAsync("/api/v1/sales/orders", new { branchId = branch.Id, customerId = customer.Id, discountAmount = 10, items = new[] { new { itemId = item.Id, quantity = 2, unitPrice = 100, vatRate = 2.5 } } });
         if (!order.IsSuccessStatusCode) throw new Exception("Order failed: " + await order.Content.ReadAsStringAsync());

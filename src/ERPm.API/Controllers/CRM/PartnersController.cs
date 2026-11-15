@@ -19,9 +19,9 @@ public class PartnersController : BaseApiController
 
     [RequirePermission("crm:partner:view")]
     [HttpGet]
-    public async Task<ActionResult<ApiResponse<List<PartnerDto>>>> GetPartners(CancellationToken cancellationToken)
+    public async Task<ActionResult<ApiResponse<List<PartnerDto>>>> GetPartners([FromQuery] ERPm.Application.Common.Crud.ListSort listSort, CancellationToken cancellationToken)
     {
-        var result = await _partnerService.GetPartnersAsync(cancellationToken);
+        var result = await _partnerService.GetPartnersAsync(listSort, cancellationToken);
         return Ok(ApiResponse<List<PartnerDto>>.Ok(result));
     }
 

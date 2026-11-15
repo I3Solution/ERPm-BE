@@ -56,10 +56,7 @@ public class ItemService : IItemService
         var pageIndex = Math.Clamp(query.PageIndex, 1, 1000000);
         var pageSize = Math.Clamp(query.PageSize, 1, 200);
 
-        var items = await dbQuery
-            .OrderBy(i => i.Code)
-            .Skip((pageIndex - 1) * pageSize)
-            .Take(pageSize)
+        var projected = dbQuery
             .Select(i => new ItemDto
             {
                 Id = i.Id,
@@ -81,7 +78,11 @@ public class ItemService : IItemService
                 Description = i.Description,
                 IsActive = i.IsActive,
                 Attributes = i.Attributes
-            })
+            });
+        // Without a requested column the list keeps its code order.
+        var items = await (DtoSorting.IsRequested(query) ? projected.OrderByRequested(query) : projected.OrderBy(i => i.Code))
+            .Skip((pageIndex - 1) * pageSize)
+            .Take(pageSize)
             .ToListAsync(cancellationToken);
 
         return new PagedResult<ItemDto>

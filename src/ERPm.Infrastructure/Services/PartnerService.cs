@@ -1,3 +1,4 @@
+using ERPm.Infrastructure.Services.Common;
 using ERPm.Application.Common;
 using ERPm.Application.Common.Interfaces;
 using ERPm.Application.Common.Notifications;
@@ -30,8 +31,12 @@ public class PartnerService : IPartnerService
         _notificationEngine = notificationEngine;
     }
 
-    public async Task<List<PartnerDto>> GetPartnersAsync(CancellationToken cancellationToken = default) =>
-        await Projection(_context.Partners).OrderBy(p => p.Code).ToListAsync(cancellationToken);
+    public async Task<List<PartnerDto>> GetPartnersAsync(ERPm.Application.Common.Crud.ListSort? sort = null, CancellationToken cancellationToken = default)
+    {
+        var partners = Projection(_context.Partners);
+        // Without a requested column the list keeps its code order.
+        return await (sort != null && DtoSorting.IsRequested(sort) ? partners.OrderByRequested(sort) : partners.OrderBy(p => p.Code)).ToListAsync(cancellationToken);
+    }
 
     public async Task<PartnerDto> GetPartnerAsync(int partnerId, CancellationToken cancellationToken = default)
     {
