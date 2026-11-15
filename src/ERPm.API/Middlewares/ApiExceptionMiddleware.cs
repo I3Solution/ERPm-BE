@@ -14,6 +14,7 @@ public sealed class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<Ex
         catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested) { }
         catch (Exception error)
         {
+            var args = (error as BusinessException)?.Args;
             var (status, code) = error switch
             {
                 BusinessException business => (business.StatusCode, business.Code),
@@ -30,7 +31,11 @@ public sealed class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<Ex
             {
                 var language = http.Request.Headers.AcceptLanguage.ToString().StartsWith("en", StringComparison.OrdinalIgnoreCase) ? "en" : "vi";
                 var bundle = await localization.GetDictionaryBundleAsync(language, http.RequestAborted);
-                if (bundle.Entries.TryGetValue(code, out var message)) response.Message = message;
+                if (bundle.Entries.TryGetValue(code, out var message))
+                {
+                    if (args != null) foreach (var (key, value) in args) message = message.Replace("{" + key + "}", value);
+                    response.Message = message;
+                }
             }
             await http.Response.WriteAsJsonAsync(response, new JsonSerializerOptions(JsonSerializerDefaults.Web), http.RequestAborted);
         }
