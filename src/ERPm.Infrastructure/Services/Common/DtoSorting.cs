@@ -12,7 +12,7 @@ public static class DtoSorting
     public static bool IsRequested(ListSort? sort) => !string.IsNullOrWhiteSpace(sort?.SortBy);
 
     /// <summary>
-    /// Orders by the requested scalar DTO property (JSON or property casing), then by Id when the DTO has one so paging is stable.
+    /// Orders by the requested scalar DTO property (JSON or property casing), then by the row key so paging is stable.
     /// An unknown or non-scalar name is a 400 error.validation.request.
     /// </summary>
     public static IQueryable<T> OrderByRequested<T>(this IQueryable<T> query, ListSort sort)
@@ -21,8 +21,13 @@ public static class DtoSorting
         if (property == null || !(property.PropertyType.IsValueType || property.PropertyType == typeof(string)))
             throw new BusinessException("error.validation.request");
         var ordered = Order(query, property, sort.IsAscending ? "OrderBy" : "OrderByDescending");
-        var id = typeof(T).GetProperty("Id");
-        return id == null || id == property ? ordered : Order(ordered, id, sort.IsAscending ? "ThenBy" : "ThenByDescending");
+        // Ties break on the row key (Id, or ItemId/WarehouseId for stock balances) in the same direction, so paging is stable.
+        foreach (var key in new[] { "Id", "ItemId", "WarehouseId" })
+        {
+            var tie = typeof(T).GetProperty(key);
+            if (tie != null && tie != property) ordered = Order(ordered, tie, sort.IsAscending ? "ThenBy" : "ThenByDescending");
+        }
+        return ordered;
     }
 
     private static IQueryable<T> Order<T>(IQueryable<T> query, PropertyInfo property, string method)

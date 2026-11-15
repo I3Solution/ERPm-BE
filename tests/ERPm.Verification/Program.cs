@@ -1174,6 +1174,25 @@ try
         using var branchEditDenied = await http.PutAsJsonAsync($"/api/v1/branches/{allowedBranch.Id}", new { code = "X", name = "X", parentId = (int?)null, isActive = true });
         using var branchDeleteDenied = await http.DeleteAsync($"/api/v1/branches/{allowedBranch.Id}");
         Check(branchEditDenied.StatusCode == HttpStatusCode.Forbidden && branchDeleteDenied.StatusCode == HttpStatusCode.Forbidden, "viewer cannot edit or delete branches");
+        // Sort query keys on the real HTTP binding: sort=field, sort=-field, sortBy+isAscending, and an unknown name is a 400.
+        async Task<(HttpStatusCode Status, List<string> Names)> ListNames(string url, string field)
+        {
+            using var response = await http.GetAsync(url);
+            if (!response.IsSuccessStatusCode) return (response.StatusCode, []);
+            using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var data = body.RootElement.GetProperty("data");
+            if (data.ValueKind == JsonValueKind.Object) data = data.GetProperty("items");
+            return (response.StatusCode, data.EnumerateArray().Select(e => e.GetProperty(field).GetString() ?? "").ToList());
+        }
+        foreach (var (list, url, field) in new[] { ("partners", "/api/v1/partners", "name"), ("stock balances", "/api/v1/stock/balances", "itemName"), ("items", "/api/v1/items", "name") })
+        {
+            var asc = await ListNames($"{url}?sort={field}", field);
+            var desc = await ListNames($"{url}?sort=-{field}", field);
+            var legacy = await ListNames($"{url}?sortBy={field}&isAscending=false", field);
+            var bogus = await ListNames($"{url}?sort=bogus", field);
+            Check(asc.Status == HttpStatusCode.OK && (asc.Names.Count > 0 || list == "stock balances") && asc.Names.SequenceEqual(desc.Names.AsEnumerable().Reverse()), $"{list}: sort=field and sort=-field are read from the query string and reverse each other (asc {asc.Status} [{string.Join("|", asc.Names)}] desc {desc.Status} [{string.Join("|", desc.Names)}])");
+            Check(legacy.Names.SequenceEqual(desc.Names) && bogus.Status == HttpStatusCode.BadRequest, $"{list}: sortBy+isAscending matches sort=-field and an unknown name returns 400");
+        }
         http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
         using var order = await http.PostAsJsonAsync("/api/v1/sales/orders", new { branchId = branch.Id, customerId = customer.Id, discountAmount = 10, items = new[] { new { itemId = item.Id, quantity = 2, unitPrice = 100, vatRate = 2.5 } } });
         if (!order.IsSuccessStatusCode) throw new Exception("Order failed: " + await order.Content.ReadAsStringAsync());
