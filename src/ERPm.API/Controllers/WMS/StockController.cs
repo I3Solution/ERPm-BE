@@ -25,9 +25,9 @@ public class StockController : BaseApiController
 
     [RequirePermission("wms:stock:view")]
     [HttpGet("balances")]
-    public async Task<ActionResult<ApiResponse<List<StockBalanceDto>>>> GetStockBalances([FromQuery] int? warehouseId, [FromQuery] int? branchId, CancellationToken cancellationToken)
+    public async Task<ActionResult<ApiResponse<List<StockBalanceDto>>>> GetStockBalances([FromQuery] int? warehouseId, [FromQuery] int? branchId, [FromQuery] ERPm.Application.Common.Crud.ListSort sort, CancellationToken cancellationToken)
     {
-        var result = await _stockService.GetStockBalancesAsync(warehouseId, branchId, cancellationToken);
+        var result = await _stockService.GetStockBalancesAsync(warehouseId, branchId, sort, cancellationToken);
         return Ok(ApiResponse<List<StockBalanceDto>>.Ok(result));
     }
 

@@ -1,3 +1,4 @@
+using ERPm.Infrastructure.Services.Common;
 using ERPm.Application.Common.Interfaces;
 using ERPm.Application.DTOs.Inventory;
 using ERPm.Application.Features.Inventory;
@@ -50,7 +51,7 @@ public class StockService : IStockService
             .ToListAsync(cancellationToken);
     }
 
-    public async Task<List<StockBalanceDto>> GetStockBalancesAsync(int? warehouseId, int? branchId = null, CancellationToken cancellationToken = default)
+    public async Task<List<StockBalanceDto>> GetStockBalancesAsync(int? warehouseId, int? branchId = null, ERPm.Application.Common.Crud.ListSort? sort = null, CancellationToken cancellationToken = default)
     {
         var query = _context.StockBalances
             .Include(b => b.Warehouse)
@@ -69,8 +70,7 @@ public class StockService : IStockService
             query = query.Where(b => b.Warehouse != null && targetBranchIds.Contains(b.Warehouse.BranchId));
         }
 
-        return await query
-            .OrderBy(b => b.Item!.Code)
+        var balances = query
             .Select(b => new StockBalanceDto
             {
                 WarehouseId = b.WarehouseId,
@@ -86,8 +86,9 @@ public class StockService : IStockService
                 AverageCostPrice = b.AverageCostPrice,
                 TotalValue = b.InventoryValue,
                 IsLowStock = b.Item != null && b.QuantityOnHand <= b.Item.MinStockAlert
-            })
-            .ToListAsync(cancellationToken);
+            });
+        // Without a requested column the list keeps its item-code order.
+        return await (sort != null && DtoSorting.IsRequested(sort) ? balances.OrderByRequested(sort) : balances.OrderBy(b => b.ItemCode)).ToListAsync(cancellationToken);
     }
 
     public Task<bool> CreateStockReceiptAsync(CreateStockReceiptRequest request, CancellationToken cancellationToken = default)
