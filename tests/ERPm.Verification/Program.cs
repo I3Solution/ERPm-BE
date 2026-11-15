@@ -1,3 +1,5 @@
+using ERPm.Application.DTOs.HumanResource;
+using ERPm.Infrastructure.Services.HumanResource;
 using System.Text.Json;
 using ERPm.Application.Common;
 using ERPm.Domain.Entities.HumanResource;
@@ -820,6 +822,24 @@ try
     await db.SaveChangesAsync();
     var seller = await db.Employees.FirstOrDefaultAsync() ?? db.Employees.Add(new Employee { Code = "SELLER", FullName = "Seller", CompanyId = branch.Id, BranchId = branch.Id, JobPositionId = sellerPosition.Id }).Entity;
     await db.SaveChangesAsync();
+    // Employee list sorting: own columns and the by-name columns, descending, stable across pages, unknown columns rejected.
+    var positionA = db.JobPositions.Add(new JobPosition { Code = "SORT-A", Name = "Aaa position", CompanyId = branch.Id }).Entity;
+    var positionZ = db.JobPositions.Add(new JobPosition { Code = "SORT-Z", Name = "Zzz position", CompanyId = branch.Id }).Entity;
+    await db.SaveChangesAsync();
+    db.Employees.AddRange(
+        new Employee { Code = "SORT1", FullName = "Sort Bravo", CompanyId = branch.Id, BranchId = branch.Id, JobPositionId = positionZ.Id },
+        new Employee { Code = "SORT2", FullName = "Sort Alpha", CompanyId = branch.Id, BranchId = branch.Id, JobPositionId = positionA.Id },
+        new Employee { Code = "SORT3", FullName = "Sort Charlie", CompanyId = branch.Id, BranchId = branch.Id, JobPositionId = positionZ.Id });
+    await db.SaveChangesAsync();
+    var staff = new EmployeeService(db, new IamStub(new()));
+    var byName = await staff.GetPagedAsync(new EmployeeFilterQuery { Keyword = "Sort ", Sort = "fullName", PageSize = 2 });
+    var byNameNext = await staff.GetPagedAsync(new EmployeeFilterQuery { Keyword = "Sort ", Sort = "fullName", PageSize = 2, PageIndex = 2 });
+    Check(byName.Items.Select(e => e.FullName).Concat(byNameNext.Items.Select(e => e.FullName)).SequenceEqual(["Sort Alpha", "Sort Bravo", "Sort Charlie"]),
+        "the employee list sorts by name ascending across pages");
+    var byPositionDesc = await staff.GetPagedAsync(new EmployeeFilterQuery { Keyword = "Sort ", Sort = "-jobPositionName", PageSize = 50 });
+    Check(byPositionDesc.Items.Select(e => e.Code).SequenceEqual(["SORT3", "SORT1", "SORT2"]),
+        "the employee list sorts by job position name descending and breaks ties by id descending");
+    await Reject(async () => await staff.GetPagedAsync(new EmployeeFilterQuery { Sort = "passwordHash" }), "error.validation.request");
     await db.SalesOrders.Where(o => o.Id == approved.Id).ExecuteUpdateAsync(o => o.SetProperty(x => x.SalespersonId, seller.Id));
     var summary = await analytics.GetSummaryAsync(allTime);
     var invoiced = await db.SalesInvoices.Where(i => i.Status == VoucherStatus.Posted).SumAsync(i => i.TotalAmount);
