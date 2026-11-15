@@ -3261,6 +3261,15 @@ namespace ERPm.Infrastructure.Persistence.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("BillingAddressId")
+                        .HasColumnType("integer")
+                        .HasColumnName("billing_address_id");
+
+                    b.Property<string>("BillingAddressText")
+                        .HasMaxLength(800)
+                        .HasColumnType("character varying(800)")
+                        .HasColumnName("billing_address_text");
+
                     b.Property<int>("BranchId")
                         .HasColumnType("integer")
                         .HasColumnName("branch_id");
@@ -3341,6 +3350,10 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("is_deleted");
 
+                    b.Property<bool>("IsTaxInclusive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_tax_inclusive");
+
                     b.Property<DateTime?>("LastModifiedAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_modified_at_utc");
@@ -3402,6 +3415,9 @@ namespace ERPm.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id")
                         .HasName("pk_tbl_sd_sales_quotation");
+
+                    b.HasIndex("BillingAddressId")
+                        .HasDatabaseName("ix_tbl_sd_sales_quotation_billing_address_id");
 
                     b.HasIndex("BranchId")
                         .HasDatabaseName("ix_tbl_sd_sales_quotation_branch_id");

@@ -60,6 +60,9 @@ public sealed class SalesQuotationService(ApplicationDbContext context, PostingT
         DeliveryRecipientName = entity.DeliveryRecipientName,
         DeliveryPhone = entity.DeliveryPhone,
         DeliveryAddressText = entity.DeliveryAddressText,
+        BillingAddressId = entity.BillingAddressId,
+        BillingAddressText = entity.BillingAddressText,
+        IsTaxInclusive = entity.IsTaxInclusive,
         Status = EffectiveStatus(entity),
         SubTotal = entity.SubTotal,
         DiscountAmount = entity.DiscountAmount,
@@ -278,9 +281,29 @@ public sealed class SalesQuotationService(ApplicationDbContext context, PostingT
         entity.DeliveryAddressText = addressText.Length <= 800 ? addressText : addressText[..800];
     }
 
+    private async Task ApplyBillingAddressAsync(SalesQuotation entity, int? addressId, int customerId, int? storedAddressId, int storedCustomerId, CancellationToken ct)
+    {
+        // Same rule as the delivery address: an unchanged selection keeps the quotation's own copy.
+        if (addressId.HasValue && addressId == storedAddressId && customerId == storedCustomerId && entity.BillingAddressText != null)
+            return;
+
+        entity.BillingAddressId = null;
+        entity.BillingAddressText = null;
+        if (!addressId.HasValue) return;
+
+        var address = await Context.PartnerDeliveryAddresses.AsNoTracking()
+            .SingleOrDefaultAsync(a => a.Id == addressId.Value && a.PartnerId == customerId && a.AddressType == AddressType.Billing, ct);
+        Require(address != null, "error.sd.quotation_billing_address_invalid");
+        entity.BillingAddressId = address!.Id;
+        var addressText = string.Join(", ", new[] { address.Address, address.Ward, address.District, address.City }
+            .Where(part => !string.IsNullOrWhiteSpace(part)));
+        entity.BillingAddressText = addressText.Length <= 800 ? addressText : addressText[..800];
+    }
+
     private async Task PrepareAsync(SalesQuotation entity, CreateSalesQuotationRequest request, CancellationToken ct)
     {
         var storedAddressId = entity.DeliveryAddressId;
+        var storedBillingId = entity.BillingAddressId;
         var storedCustomerId = entity.CustomerId;
         Require(request.Items is { Count: > 0 and <= MaxLines }, "error.validation.request");
         Require(request.QuotationDate.Kind == DateTimeKind.Utc && request.ValidUntil.Kind == DateTimeKind.Utc && request.ValidUntil >= request.QuotationDate, "error.validation.request");
@@ -316,6 +339,9 @@ public sealed class SalesQuotationService(ApplicationDbContext context, PostingT
         entity.CustomerPhone = customer.Phone;
         entity.CustomerEmail = customer.Email;
         await ApplyDeliveryAddressAsync(entity, request.DeliveryAddressId, customer.Id, storedAddressId, storedCustomerId, ct);
+        await ApplyBillingAddressAsync(entity, request.BillingAddressId, customer.Id, storedBillingId, storedCustomerId, ct);
+        entity.IsTaxInclusive = request.IsTaxInclusive ?? (request.PriceListId != null
+            && await Context.PriceLists.Where(p => p.Id == request.PriceListId).Select(p => p.IsTaxInclusive).SingleAsync(ct));
         entity.SalespersonId = request.SalespersonId;
         entity.BranchId = request.BranchId;
         entity.DepartmentId = request.DepartmentId;

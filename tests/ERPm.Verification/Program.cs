@@ -400,6 +400,28 @@ try
     await Reject(async () => await quotes.CreateAsync(QuoteRequest(deliveryAddressId: int.MaxValue)), "error.sd.order_delivery_address_invalid");
     var toSupplier = QuoteRequest(); toSupplier.CustomerId = supplier.Id;
     await Reject(async () => await quotes.CreateAsync(toSupplier), "error.sales.customer");
+
+    // Quotation billing address (Billing type, same customer, snapshot) and tax-inclusive default from the price list.
+    var billAddress = new PartnerDeliveryAddress { PartnerId = customer.Id, AddressType = AddressType.Billing, RecipientName = "Accounts", Address = "5 Bill St", City = "Bill City" };
+    var strangerBill = new PartnerDeliveryAddress { PartnerId = supplier.Id, AddressType = AddressType.Billing, RecipientName = "Other", Address = "9 Other St" };
+    var inclusiveList = new PriceList { Code = "PL-QUOTE-INCL", Name = "Quote inclusive", IsTaxInclusive = true };
+    db.PartnerDeliveryAddresses.AddRange(billAddress, strangerBill); db.PriceLists.Add(inclusiveList); await db.SaveChangesAsync();
+    var billedRequest = QuoteRequest(); billedRequest.BillingAddressId = billAddress.Id;
+    var billed = await quotes.CreateAsync(billedRequest);
+    Check(billed.BillingAddressId == billAddress.Id && billed.BillingAddressText == "5 Bill St, Bill City" && !billed.IsTaxInclusive, "a quotation keeps a snapshot of its Billing address and defaults to tax-exclusive without a price list");
+    billAddress.Address = "Changed St"; await db.SaveChangesAsync();
+    billedRequest.Items[0].Quantity = 3;
+    var billedAgain = await quotes.UpdateAsync(billed.Id, new UpdateSalesQuotationRequest { QuotationDate = billedRequest.QuotationDate, ValidUntil = billedRequest.ValidUntil, CustomerId = customer.Id, BranchId = branch.Id, BillingAddressId = billAddress.Id, Items = billedRequest.Items });
+    Check(billedAgain!.BillingAddressText == "5 Bill St, Bill City", "editing the source address does not change an unchanged billing selection");
+    var shippingAsBilling = QuoteRequest(); shippingAsBilling.BillingAddressId = quoteAddress.Id;
+    await Reject(async () => await quotes.CreateAsync(shippingAsBilling), "error.sd.quotation_billing_address_invalid");
+    var otherCustomerBilling = QuoteRequest(); otherCustomerBilling.BillingAddressId = strangerBill.Id;
+    await Reject(async () => await quotes.CreateAsync(otherCustomerBilling), "error.sd.quotation_billing_address_invalid");
+    var fromList = QuoteRequest(); fromList.PriceListId = inclusiveList.Id;
+    var defaulted = await quotes.CreateAsync(fromList);
+    fromList.IsTaxInclusive = false;
+    var overridden = await quotes.CreateAsync(fromList);
+    Check(defaulted.IsTaxInclusive && !overridden.IsTaxInclusive, "tax-inclusive defaults from the quotation's price list and can be overridden");
     await Reject(async () => await quotes.CreateAsync(QuoteRequest(discount: 500)), "error.sales.discount");
     await Reject(async () => await quotes.CreateAsync(QuoteRequest(until: quoteDate.AddDays(-1))), "error.validation.request");
     var found = await quotes.GetPagedAsync(new BaseFilterQuery { Keyword = quote.QuotationNumber, Status = "Draft" });
