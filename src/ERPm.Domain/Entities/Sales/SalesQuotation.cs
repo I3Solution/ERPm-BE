@@ -40,6 +40,9 @@ public class SalesQuotation : BaseAuditableEntity
     public string? DeliveryRecipientName { get; set; }
     public string? DeliveryPhone { get; set; }
     public string? DeliveryAddressText { get; set; }
+    public int? BillingAddressId { get; set; }                    // Billing-type address of the same customer, copied as text when selected
+    public string? BillingAddressText { get; set; }
+    public bool IsTaxInclusive { get; set; }                      // True when the entered prices already contain VAT; defaults from the price list
 
     public string Status { get; set; } = QuotationStatus.Draft;   // Stored: Draft, Sent, Accepted, Rejected, Converted
 
