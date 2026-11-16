@@ -44,6 +44,9 @@ public static class DependencyInjection
         services.AddScoped<StockReceiptPostingService>();
         services.AddScoped<ERPm.Application.Features.Accounting.IDynamicPostingEngine, ERPm.Infrastructure.Services.Accounting.DynamicPostingEngine>();
         services.AddScoped<ERPm.Application.Features.Accounting.IPostingProfileService, ERPm.Infrastructure.Services.Accounting.PostingProfileService>();
+        services.AddScoped<ERPm.Application.Features.Accounting.ITreasuryFundService, ERPm.Infrastructure.Services.Accounting.TreasuryFundService>();
+        services.AddScoped<ERPm.Application.Features.Accounting.IReceiptVoucherService, ERPm.Infrastructure.Services.Accounting.ReceiptVoucherService>();
+        services.AddScoped<ERPm.Application.Features.Accounting.IPaymentVoucherService, ERPm.Infrastructure.Services.Accounting.PaymentVoucherService>();
 
         // Register Generic Base CRUD Service for open generic types (Type-safe & Zero boilerplate for Solo Dev)
         services.AddScoped(typeof(IBaseCrudService<,,,,>), typeof(BaseCrudService<,,,,>));

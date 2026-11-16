@@ -1130,6 +1130,7 @@ try
     ERPm.Verification.NotificationChecks.Pure(Check);
     await ERPm.Verification.NotificationChecks.RunDbChecksAsync(new(u => Db(u), Check, Reject));
     await ERPm.Verification.DynamicPostingChecks.RunDbChecksAsync(new(u => Db(u), Check, Reject));
+    await ERPm.Verification.TreasuryChecks.RunDbChecksAsync(new(u => Db(u), Check, Reject));
     using var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
     var port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop();
     var password = "Verify-" + Guid.NewGuid().ToString("N");
