@@ -33,6 +33,15 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
         return invoices.Select(Map).ToList();
     }
 
+    /// <summary>Posted invoices of one customer with a receivable left, oldest first (the order a FIFO allocation uses).</summary>
+    public async Task<List<OutstandingInvoiceDto>> GetOutstandingInvoicesAsync(int customerId, CancellationToken cancellationToken = default)
+        => await context.SalesInvoices.AsNoTracking()
+            .Where(i => i.CustomerId == customerId && i.Status == VoucherStatus.Posted && i.RemainingDebt > 0)
+            .OrderBy(i => i.InvoiceDate).ThenBy(i => i.Id)
+            .Select(i => new OutstandingInvoiceDto { Id = i.Id, InvoiceNumber = i.InvoiceNumber, InvoiceDate = i.InvoiceDate, BranchId = i.BranchId,
+                TotalAmount = i.TotalAmount, PaidAmount = i.PaidAmount, RemainingDebt = i.RemainingDebt })
+            .ToListAsync(cancellationToken);
+
     public async Task<SalesInvoiceDto?> GetInvoiceAsync(int id, CancellationToken cancellationToken = default)
     {
         var invoice = await context.SalesInvoices.AsNoTracking().Include(i => i.Branch).Include(i => i.Items).ThenInclude(i => i.Item)

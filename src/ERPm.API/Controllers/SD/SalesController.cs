@@ -21,6 +21,11 @@ public class SalesController : BaseApiController
         _salesService = salesService;
     }
 
+    [RequirePermission("acc:receipt-voucher:create")]
+    [HttpGet("invoices/outstanding")]
+    public async Task<ActionResult<ApiResponse<List<OutstandingInvoiceDto>>>> GetOutstandingInvoices([FromQuery] int customerId, CancellationToken cancellationToken)
+        => Ok(ApiResponse<List<OutstandingInvoiceDto>>.Ok(await _salesService.GetOutstandingInvoicesAsync(customerId, cancellationToken)));
+
     [RequirePermission("sd:invoice:view")]
     [HttpGet("invoices")]
     public async Task<ActionResult<ApiResponse<List<SalesInvoiceDto>>>> GetInvoices([FromQuery] int? branchId, CancellationToken cancellationToken)
