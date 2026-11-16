@@ -74,14 +74,18 @@ public static class EssentialDataSeeder
             ("112", "Tiền gửi ngân hàng", "Cash in Bank", AccountType.Asset, AccountNature.DebitOnly, false, false, true, null),
             ("1121", "Tiền Việt Nam tại ngân hàng", "Bank Deposits in VND", AccountType.Asset, AccountNature.DebitOnly, true, false, true, "112"),
             ("131", "Phải thu của khách hàng", "Accounts Receivable", AccountType.Asset, AccountNature.Bilateral, true, true, true, null),
+            ("141", "Tạm ứng", "Employee Advances", AccountType.Asset, AccountNature.DebitOnly, true, true, true, null),
             ("156", "Hàng hóa", "Merchandise Inventory", AccountType.Asset, AccountNature.DebitOnly, true, false, true, null),
             ("331", "Phải trả cho người bán", "Accounts Payable", AccountType.Liability, AccountNature.Bilateral, true, true, true, null),
             ("3331", "Thuế GTGT phải nộp", "VAT Payable", AccountType.Liability, AccountNature.CreditOnly, true, false, true, null),
+            ("334", "Phải trả người lao động", "Payable to Employees", AccountType.Liability, AccountNature.CreditOnly, true, false, true, null),
             ("411", "Vốn đầu tư của chủ sở hữu", "Owner's Equity", AccountType.Equity, AccountNature.CreditOnly, true, false, true, null),
             ("511", "Doanh thu bán hàng và cung cấp dịch vụ", "Sales Revenue", AccountType.Revenue, AccountNature.CreditOnly, true, false, true, null),
             ("521", "Các khoản giảm trừ doanh thu", "Sales Deductions", AccountType.Revenue, AccountNature.DebitOnly, true, false, true, null),
             ("632", "Giá vốn hàng bán", "Cost of Goods Sold", AccountType.Expense, AccountNature.DebitOnly, true, false, true, null),
             ("642", "Chi phí quản lý doanh nghiệp", "General & Administrative Expenses", AccountType.Expense, AccountNature.DebitOnly, true, false, true, null),
+            ("711", "Thu nhập khác", "Other Income", AccountType.Revenue, AccountNature.CreditOnly, true, false, true, null),
+            ("811", "Chi phí khác", "Other Expenses", AccountType.Expense, AccountNature.DebitOnly, true, false, true, null),
             ("911", "Xác định kết quả kinh doanh", "Income Summary", AccountType.Equity, AccountNature.Bilateral, true, false, true, null)
         };
 
@@ -137,10 +141,22 @@ public static class EssentialDataSeeder
             ("SD", "SALES_RETURN", null, "521", "131", "Sales return deduction"),
             ("ACC", "RECEIPT_CUSTOMER", "CASH", "1111", "131", "Customer debt collection via cash"),
             ("ACC", "RECEIPT_CUSTOMER", "BANK", "1121", "131", "Customer debt collection via bank"),
+            ("ACC", "RECEIPT_ADVANCE", "CASH", "1111", "131", "Customer advance receipt via cash"),
+            ("ACC", "RECEIPT_ADVANCE", "BANK", "1121", "131", "Customer advance receipt via bank"),
+            ("ACC", "RECEIPT_OTHER", "CASH", "1111", "711", "Other receipt via cash"),
+            ("ACC", "RECEIPT_OTHER", "BANK", "1121", "711", "Other receipt via bank"),
             ("ACC", "PAYMENT_SUPPLIER", "CASH", "331", "1111", "Supplier payment via cash"),
             ("ACC", "PAYMENT_SUPPLIER", "BANK", "331", "1121", "Supplier payment via bank"),
             ("ACC", "PAYMENT_EXPENSE", "CASH", "642", "1111", "Operating expense payment via cash"),
-            ("ACC", "PAYMENT_EXPENSE", "BANK", "642", "1121", "Operating expense payment via bank")
+            ("ACC", "PAYMENT_EXPENSE", "BANK", "642", "1121", "Operating expense payment via bank"),
+            ("ACC", "PAYMENT_SALARY", "CASH", "334", "1111", "Salary payment via cash"),
+            ("ACC", "PAYMENT_SALARY", "BANK", "334", "1121", "Salary payment via bank"),
+            ("ACC", "PAYMENT_ADVANCE", "CASH", "141", "1111", "Employee advance payment via cash"),
+            ("ACC", "PAYMENT_ADVANCE", "BANK", "141", "1121", "Employee advance payment via bank"),
+            ("ACC", "PAYMENT_OTHER", "CASH", "811", "1111", "Other payment via cash"),
+            ("ACC", "PAYMENT_OTHER", "BANK", "811", "1121", "Other payment via bank"),
+            ("ACC", "INTERNAL_TRANSFER", "BANK_TO_CASH", "1111", "1121", "Bank withdrawal to cash fund"),
+            ("ACC", "INTERNAL_TRANSFER", "CASH_TO_BANK", "1121", "1111", "Cash deposit to bank account")
         };
 
         var existingProfiles = await context.AccountPostingProfiles
