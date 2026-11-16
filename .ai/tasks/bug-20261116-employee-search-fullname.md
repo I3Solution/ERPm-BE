@@ -2,7 +2,7 @@
 
 > **Loại:** bug
 > **Ngày tạo:** 2026-11-16 · **Người làm:** Dev 2 (Thiện) · **Người yêu cầu:** BA 1 (Trello #117, phát hiện bởi Tester 2 khi đo HRM#23)
-> **Trạng thái:** Doing
+> **Trạng thái:** Done (BE#72 QA PASS @b313052, CI xanh, đã merge)
 > **Liên quan:** nhánh thien/fix-employee-search-fullname
 
 ## 1. Mô tả
