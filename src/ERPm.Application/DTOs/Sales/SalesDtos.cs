@@ -11,7 +11,11 @@ public class CreateSalesInvoiceRequest
     public string CustomerName { get; set; } = "Khách lẻ";
     public int WarehouseId { get; set; }
     public PaymentMethod PaymentMethod { get; set; } = PaymentMethod.Cash;
+    public int? CashFundId { get; set; }
+    public int? BankAccountId { get; set; }
     public decimal DiscountAmount { get; set; } = 0m;
+    public decimal TaxRate { get; set; } = 0m;
+    public decimal TaxAmount { get; set; } = 0m;
     public decimal PaidAmount { get; set; } = 0m;
     public string? Notes { get; set; }
     public List<SalesInvoiceItemRequest> Items { get; set; } = new();
@@ -38,8 +42,12 @@ public class SalesInvoiceDto
     public string? BranchName { get; set; }
     public string CustomerName { get; set; } = string.Empty;
     public string PaymentMethodName { get; set; } = string.Empty;
+    public int? CashFundId { get; set; }
+    public int? BankAccountId { get; set; }
     public decimal SubTotal { get; set; }
     public decimal DiscountAmount { get; set; }
+    public decimal TaxRate { get; set; }
+    public decimal TaxAmount { get; set; }
     public decimal TotalAmount { get; set; }
     public decimal PaidAmount { get; set; }
     public decimal TenderedAmount { get; set; }

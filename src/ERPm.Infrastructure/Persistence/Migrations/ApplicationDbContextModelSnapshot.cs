@@ -2743,6 +2743,10 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("price_list_id");
 
+                    b.Property<int?>("ReceivableAccountId")
+                        .HasColumnType("integer")
+                        .HasColumnName("receivable_account_id");
+
                     b.Property<string>("TaxCode")
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)")
@@ -2767,6 +2771,9 @@ namespace ERPm.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("PriceListId")
                         .HasDatabaseName("ix_tbl_crm_partner_price_list_id");
+
+                    b.HasIndex("ReceivableAccountId")
+                        .HasDatabaseName("ix_tbl_crm_partner_receivable_account_id");
 
                     b.ToTable("tbl_CRM_Partner", (string)null);
                 });
@@ -3369,6 +3376,10 @@ namespace ERPm.Infrastructure.Persistence.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("BankAccountId")
+                        .HasColumnType("integer")
+                        .HasColumnName("bank_account_id");
+
                     b.Property<int>("BranchId")
                         .HasColumnType("integer")
                         .HasColumnName("branch_id");
@@ -3384,6 +3395,10 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     b.Property<string>("CancelledBy")
                         .HasColumnType("text")
                         .HasColumnName("cancelled_by");
+
+                    b.Property<int?>("CashFundId")
+                        .HasColumnType("integer")
+                        .HasColumnName("cash_fund_id");
 
                     b.Property<decimal>("ChangeAmount")
                         .HasPrecision(18, 4)
@@ -3503,6 +3518,11 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("numeric(18,4)")
                         .HasColumnName("tax_amount");
 
+                    b.Property<decimal>("TaxRate")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("tax_rate");
+
                     b.Property<int?>("TenantId")
                         .HasColumnType("integer")
                         .HasColumnName("tenant_id");
@@ -3524,8 +3544,14 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_tbl_sale_invoice");
 
+                    b.HasIndex("BankAccountId")
+                        .HasDatabaseName("ix_tbl_sale_invoice_bank_account_id");
+
                     b.HasIndex("BranchId")
                         .HasDatabaseName("ix_tbl_sale_invoice_branch_id");
+
+                    b.HasIndex("CashFundId")
+                        .HasDatabaseName("ix_tbl_sale_invoice_cash_fund_id");
 
                     b.HasIndex("CustomerId")
                         .HasDatabaseName("ix_tbl_sale_invoice_customer_id");
@@ -6218,6 +6244,14 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasForeignKey("PriceListId")
                         .OnDelete(DeleteBehavior.SetNull)
                         .HasConstraintName("fk_tbl_crm_partner_price_lists_price_list_id");
+
+                    b.HasOne("ERPm.Domain.Entities.Accounting.Account", "ReceivableAccount")
+                        .WithMany()
+                        .HasForeignKey("ReceivableAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_crm_partner_accounts_receivable_account_id");
+
+                    b.Navigation("ReceivableAccount");
                 });
 
             modelBuilder.Entity("ERPm.Domain.Entities.Partner.PartnerDeliveryAddress", b =>
@@ -6333,12 +6367,24 @@ namespace ERPm.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("ERPm.Domain.Entities.Sales.SalesInvoice", b =>
                 {
+                    b.HasOne("ERPm.Domain.Entities.Accounting.BankAccount", "BankAccount")
+                        .WithMany()
+                        .HasForeignKey("BankAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_sale_invoice_bank_accounts_bank_account_id");
+
                     b.HasOne("ERPm.Domain.Entities.System.Branch", "Branch")
                         .WithMany("SalesInvoices")
                         .HasForeignKey("BranchId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_tbl_sale_invoice_tbl_sys_branch_branch_id");
+
+                    b.HasOne("ERPm.Domain.Entities.Accounting.CashFund", "CashFund")
+                        .WithMany()
+                        .HasForeignKey("CashFundId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_sale_invoice_cash_funds_cash_fund_id");
 
                     b.HasOne("ERPm.Domain.Entities.Partner.Partner", "Customer")
                         .WithMany()
@@ -6377,7 +6423,11 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_tbl_sale_invoice_tbl_wms_warehouse_warehouse_id");
 
+                    b.Navigation("BankAccount");
+
                     b.Navigation("Branch");
+
+                    b.Navigation("CashFund");
 
                     b.Navigation("Customer");
 

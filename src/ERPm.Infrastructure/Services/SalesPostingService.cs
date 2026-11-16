@@ -1,5 +1,6 @@
 ﻿using ERPm.Application.DTOs.Sales;
 using ERPm.Application.Common.Interfaces;
+using ERPm.Application.Features.Accounting;
 using ERPm.Application.Features.Sales;
 using ERPm.Application.Features.System;
 using ERPm.Domain.Entities.Accounting;
@@ -9,6 +10,7 @@ using ERPm.Domain.Entities.Partner;
 using ERPm.Domain.Entities.Sales;
 using ERPm.Domain.Services.Sales;
 using ERPm.Infrastructure.Persistence;
+using ERPm.Infrastructure.Services.Accounting;
 using ERPm.Infrastructure.Services.Common;
 using Microsoft.EntityFrameworkCore;
 using static ERPm.Infrastructure.Services.Common.PostingTransaction;
@@ -16,7 +18,7 @@ using static ERPm.Infrastructure.Services.Common.PostingTransaction;
 namespace ERPm.Infrastructure.Services;
 
 public partial class SalesInvoiceService(ApplicationDbContext context, IBranchService branches, PostingTransaction posting, ICurrentUser? user = null, ERPm.Application.Common.Notifications.INotificationEngine? notificationEngine = null,
-    ERPm.Application.Features.System.IIamService? iam = null) : ISalesInvoiceService
+    ERPm.Application.Features.System.IIamService? iam = null, IDynamicPostingEngine? postingEngine = null) : ISalesInvoiceService
 {
     public async Task<List<SalesInvoiceDto>> GetInvoicesAsync(int? branchId = null, CancellationToken cancellationToken = default)
     {
@@ -43,6 +45,9 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
         Require(request.RequestId != Guid.Empty && request.WarehouseId > 0 && request.Items is { Count: > 0 and <= 200 }, "error.validation.request");
         Require(Enum.IsDefined(request.PaymentMethod), "error.validation.payment_method");
         ValidateNumber(request.DiscountAmount);
+        ValidateNumber(request.TaxRate);
+        Require(request.TaxRate <= 100, "error.validation.request");
+        ValidateNumber(request.TaxAmount);
         ValidateNumber(request.PaidAmount);
         foreach (var line in request.Items)
         {
@@ -96,6 +101,7 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
                 RequestId = request.RequestId, RequestHash = hash,
                 InvoiceNumber = await posting.NumberAsync("HD", cancellationToken), BranchId = warehouse!.BranchId, DepartmentId = request.DepartmentId,
                 WarehouseId = warehouse.Id, CustomerId = request.CustomerId, PaymentMethod = request.PaymentMethod,
+                CashFundId = request.CashFundId, BankAccountId = request.BankAccountId,
                 CustomerName = request.CustomerName.Trim(), DiscountAmount = request.DiscountAmount, Notes = request.Notes, Status = VoucherStatus.Posted, SalesOrderId = salesOrderId
             };
             var issue = new StockIssue
@@ -136,7 +142,12 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
             }
             invoice.SubTotal = invoice.Items.Sum(i => i.Amount);
             Require(request.DiscountAmount <= invoice.SubTotal, "error.sales.discount");
-            invoice.TotalAmount = invoice.SubTotal - request.DiscountAmount;
+            var netAmount = invoice.SubTotal - request.DiscountAmount;
+            invoice.TaxRate = request.TaxRate;
+            invoice.TaxAmount = request.TaxAmount > 0
+                ? request.TaxAmount
+                : (request.TaxRate > 0 ? Round(netAmount * request.TaxRate / 100m) : 0m);
+            invoice.TotalAmount = netAmount + invoice.TaxAmount;
             ValidateNumber(invoice.TotalAmount, true);
             Require(request.PaymentMethod != PaymentMethod.Debt || request.PaidAmount == 0, "error.validation.payment_method");
             Require(request.PaymentMethod != PaymentMethod.BankTransfer || request.PaidAmount <= invoice.TotalAmount, "error.sales.overpayment");
@@ -165,26 +176,48 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
             issue.TotalCostAmount = issue.Items.Sum(i => i.TotalCost);
             ValidateNumber(issue.TotalCostAmount);
             if (issue.Items.Count > 0) invoice.StockIssue = issue;
-            var codes = new List<string> { "511" };
-            var cashAccount = request.PaymentMethod == PaymentMethod.BankTransfer ? "112" : "111";
-            if (invoice.PaidAmount > 0) codes.Add(cashAccount);
-            if (invoice.RemainingDebt > 0) codes.Add("131");
-            if (issue.TotalCostAmount > 0) codes.AddRange(["632", "156"]);
-            var accounts = await posting.AccountsAsync(codes, cancellationToken);
+            var engine = postingEngine ?? new DynamicPostingEngine(context);
+            var dimensionKey = request.PaymentMethod switch
+            {
+                PaymentMethod.BankTransfer => "BANK",
+                PaymentMethod.Cash => "CASH",
+                _ => "DEBT"
+            };
+            var revenueRule = await engine.ResolvePostingRuleAsync("SD", "SALES_REVENUE", warehouse.BranchId, dimensionKey, cancellationToken);
             var journal = new JournalEntry
             {
                 VoucherNumber = await posting.NumberAsync("PKT", cancellationToken), VoucherType = "SALES_INVOICE",
                 BranchId = warehouse.BranchId, Description = invoice.InvoiceNumber, Status = VoucherStatus.Posted
             };
-            void Add(string account, decimal debit, decimal credit) => journal.Lines.Add(new JournalEntryLine
+            void Add(int accountId, decimal debit, decimal credit) => journal.Lines.Add(new JournalEntryLine
             {
-                AccountId = accounts[account], DebitAmount = debit, CreditAmount = credit, PartnerId = customer?.Id, Description = invoice.InvoiceNumber
+                AccountId = accountId, DebitAmount = debit, CreditAmount = credit, PartnerId = customer?.Id, Description = invoice.InvoiceNumber
             });
-            if (invoice.PaidAmount > 0) Add(cashAccount, invoice.PaidAmount, 0);
-            if (invoice.RemainingDebt > 0) Add("131", invoice.RemainingDebt, 0);
-            Add("511", 0, invoice.TotalAmount);
-            if (issue.TotalCostAmount > 0) { Add("632", issue.TotalCostAmount, 0); Add("156", 0, issue.TotalCostAmount); }
-            ValidateJournal(journal);
+            if (invoice.PaidAmount > 0)
+            {
+                var paymentAccountId = request.PaymentMethod == PaymentMethod.BankTransfer
+                    ? await engine.ResolveBankAccountIdAsync(warehouse.BranchId, request.BankAccountId, cancellationToken)
+                    : await engine.ResolveCashAccountIdAsync(warehouse.BranchId, request.CashFundId, cancellationToken);
+                Add(paymentAccountId, invoice.PaidAmount, 0);
+            }
+            if (invoice.RemainingDebt > 0)
+            {
+                var receivableAccountId = await engine.ResolveReceivableAccountIdAsync(warehouse.BranchId, customer?.Id, cancellationToken);
+                Add(receivableAccountId, invoice.RemainingDebt, 0);
+            }
+            if (netAmount > 0) Add(revenueRule.CreditAccountId, 0, netAmount);
+            if (invoice.TaxAmount > 0)
+            {
+                var vatRule = await engine.ResolvePostingRuleAsync("SD", "SALES_VAT", warehouse.BranchId, null, cancellationToken);
+                Add(vatRule.CreditAccountId, 0, invoice.TaxAmount);
+            }
+            if (issue.TotalCostAmount > 0)
+            {
+                var cogsRule = await engine.ResolvePostingRuleAsync("SD", "SALES_COGS", warehouse.BranchId, null, cancellationToken);
+                Add(cogsRule.DebitAccountId, issue.TotalCostAmount, 0);
+                Add(cogsRule.CreditAccountId, 0, issue.TotalCostAmount);
+            }
+            await engine.ValidateJournalAsync(journal, cancellationToken);
             invoice.JournalEntry = journal;
             context.SalesInvoices.Add(invoice);
             await context.SaveChangesAsync(cancellationToken);
@@ -199,7 +232,8 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
         Id = i.Id, SalesOrderId = i.SalesOrderId, InvoiceNumber = i.InvoiceNumber, InvoiceDate = i.InvoiceDate, BranchId = i.BranchId, DepartmentId = i.DepartmentId,
         BranchCode = i.Branch?.Code, BranchName = i.Branch?.Name, CustomerName = i.CustomerName,
         PaymentMethodName = i.PaymentMethod switch { PaymentMethod.Cash => "sales.cash", PaymentMethod.BankTransfer => "sales.bank_transfer", _ => "sales.credit" },
-        Status = i.Status.ToString(), SubTotal = i.SubTotal, DiscountAmount = i.DiscountAmount,
+        CashFundId = i.CashFundId, BankAccountId = i.BankAccountId,
+        Status = i.Status.ToString(), SubTotal = i.SubTotal, DiscountAmount = i.DiscountAmount, TaxRate = i.TaxRate, TaxAmount = i.TaxAmount,
         TotalAmount = i.TotalAmount, PaidAmount = i.PaidAmount, TenderedAmount = i.TenderedAmount, ChangeAmount = i.ChangeAmount, RemainingDebt = i.RemainingDebt,
         Items = i.Items.Select(l => new SalesInvoiceItemDto
         {

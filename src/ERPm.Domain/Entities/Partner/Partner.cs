@@ -1,4 +1,5 @@
 using ERPm.Domain.Common;
+using ERPm.Domain.Entities.Accounting;
 
 namespace ERPm.Domain.Entities.Partner;
 
@@ -19,7 +20,11 @@ public class Partner : BaseAuditableEntity
     public bool IsUnlimitedCredit { get; set; }            // When true the credit limit is not enforced for this partner
 
     public int? PriceListId { get; set; }                  // Default selling price list of this customer
+    public int? ReceivableAccountId { get; set; }          // Default receivable GL account (e.g. 131)
 
     public bool IsActive { get; set; } = true;
     public string? Notes { get; set; }
+
+    // Navigation
+    public virtual Account? ReceivableAccount { get; set; }
 }
