@@ -234,6 +234,12 @@ public static class TreasuryChecks
         cashEntity = await db.CashFunds.AsNoTracking().FirstAsync(f => f.Id == cashFund.Id);
         ctx.Check(cashEntity.CurrentBalance == 150_000m, "PaymentVoucher deducts 900,000 leaving 150,000");
 
+        var period = await treasury.GetPeriodSummaryAsync(DateTime.UtcNow.AddDays(-1), DateTime.UtcNow, branch.Id);
+        ctx.Check(period.TotalReceipts == 350_000m && period.TotalPayments == 900_000m && period.NetCashFlow == -550_000m,
+            "Treasury period summary totals posted receipts and payments of the branch");
+        var emptyPeriod = await treasury.GetPeriodSummaryAsync(DateTime.UtcNow.AddDays(-30), DateTime.UtcNow.AddDays(-20), branch.Id);
+        ctx.Check(emptyPeriod.TotalReceipts == 0m && emptyPeriod.TotalPayments == 0m, "Treasury period summary excludes vouchers outside the period");
+
         // 7. Reversing ReceiptVoucher fails when CashFund (150,000) < Receipt (350,000)
         await ctx.Reject(
             () => receipts.ReverseReceiptVoucherAsync(receipt.Id, new ReverseVoucherRequest { Reason = "Test insufficient" }),

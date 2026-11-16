@@ -21,6 +21,18 @@ public class TreasuryFundsController(ITreasuryFundService treasuryService) : Bas
     }
 
     [RequirePermission("acc:treasury:view")]
+    [HttpGet("summary")]
+    public async Task<ActionResult<ApiResponse<TreasuryPeriodSummaryDto>>> GetPeriodSummary(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] int? branchId,
+        CancellationToken ct)
+    {
+        var result = await treasuryService.GetPeriodSummaryAsync(from, to, branchId, ct);
+        return Ok(ApiResponse<TreasuryPeriodSummaryDto>.Ok(result));
+    }
+
+    [RequirePermission("acc:treasury:view")]
     [HttpGet("cash-funds")]
     public async Task<ActionResult<ApiResponse<List<CashFundDto>>>> GetCashFunds(
         [FromQuery] int? branchId,
