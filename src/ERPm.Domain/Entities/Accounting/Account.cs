@@ -9,6 +9,10 @@ public class Account : BaseAuditableEntity
     public Dictionary<string, string> Translations { get; set; } = new(); // Multi-lingual names
 
     public AccountType AccountType { get; set; } = AccountType.Asset;
+    public AccountNature Nature { get; set; } = AccountNature.DebitOnly;
+    public bool IsPostable { get; set; } = true;
+    public bool TrackPartner { get; set; } = false;
+    public bool TrackBranch { get; set; } = true;
 
     public int? ParentId { get; set; }
     public bool IsActive { get; set; } = true;

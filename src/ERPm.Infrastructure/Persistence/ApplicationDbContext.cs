@@ -71,6 +71,12 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
     public DbSet<PurchaseOrderItem> PurchaseOrderItems => Set<PurchaseOrderItem>();
     public DbSet<Account> Accounts => Set<Account>();
+    public DbSet<AccountPostingProfile> AccountPostingProfiles => Set<AccountPostingProfile>();
+    public DbSet<CashFund> CashFunds => Set<CashFund>();
+    public DbSet<BankAccount> BankAccounts => Set<BankAccount>();
+    public DbSet<ReceiptVoucher> ReceiptVouchers => Set<ReceiptVoucher>();
+    public DbSet<ReceiptVoucherAllocation> ReceiptVoucherAllocations => Set<ReceiptVoucherAllocation>();
+    public DbSet<PaymentVoucher> PaymentVouchers => Set<PaymentVoucher>();
     public DbSet<JournalEntry> JournalEntries => Set<JournalEntry>();
     public DbSet<JournalEntryLine> JournalEntryLines => Set<JournalEntryLine>();
     public DbSet<NotificationTemplate> NotificationTemplates => Set<NotificationTemplate>();
@@ -1059,6 +1065,10 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
             entity.Property(e => e.Name).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.Nature).HasDefaultValue(AccountNature.DebitOnly).HasSentinel((AccountNature)0);
+            entity.Property(e => e.IsPostable).HasDefaultValue(true);
+            entity.Property(e => e.TrackPartner).HasDefaultValue(false);
+            entity.Property(e => e.TrackBranch).HasDefaultValue(true);
             entity.Property(e => e.Translations)
                 .HasColumnType("jsonb")
                 .HasConversion(
@@ -1072,6 +1082,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasIndex(e => e.Code).IsUnique();
+            entity.ToTable(t => t.HasCheckConstraint("CK_tbl_ACC_Account_Nature", "nature IN (1, 2, 3)"));
             entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
@@ -1119,6 +1130,213 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
                 .OnDelete(DeleteBehavior.SetNull);
         });
 
+        modelBuilder.Entity<AccountPostingProfile>(entity =>
+        {
+            entity.ToTable("tbl_ACC_AccountPostingProfile");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.Module).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.TransactionType).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.DimensionKey).HasMaxLength(100);
+            entity.Property(e => e.Description).HasMaxLength(500);
+            entity.Property(e => e.IsActive).HasDefaultValue(true);
+
+            entity.HasOne(e => e.Branch)
+                .WithMany()
+                .HasForeignKey(e => e.BranchId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.DebitAccount)
+                .WithMany()
+                .HasForeignKey(e => e.DebitAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.CreditAccount)
+                .WithMany()
+                .HasForeignKey(e => e.CreditAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Treat NULL branch_id / dimension_key as equal so global defaults cannot duplicate.
+            entity.HasIndex(e => new { e.Module, e.TransactionType, e.BranchId, e.DimensionKey })
+                .IsUnique()
+                .AreNullsDistinct(false)
+                .HasFilter("is_deleted = false")
+                .HasDatabaseName("UQ_PostingProfile_Key");
+
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<CashFund>(entity =>
+        {
+            entity.ToTable("tbl_ACC_CashFund");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.Code).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.CurrentBalance).HasPrecision(18, 4);
+            entity.Property(e => e.Currency).HasMaxLength(3).IsRequired().HasDefaultValue("VND");
+            entity.Property(e => e.IsActive).HasDefaultValue(true);
+
+            entity.HasOne(e => e.Branch)
+                .WithMany()
+                .HasForeignKey(e => e.BranchId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Account)
+                .WithMany()
+                .HasForeignKey(e => e.AccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.CustodianEmployee)
+                .WithMany()
+                .HasForeignKey(e => e.CustodianEmployeeId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.Code).IsUnique().HasFilter("is_deleted = false");
+            entity.HasIndex(e => e.BranchId);
+        });
+
+        modelBuilder.Entity<BankAccount>(entity =>
+        {
+            entity.ToTable("tbl_ACC_BankAccount");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.BankName).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.AccountNumber).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.AccountHolder).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.BankBranch).HasMaxLength(255);
+            entity.Property(e => e.CurrentBalance).HasPrecision(18, 4);
+            entity.Property(e => e.Currency).HasMaxLength(3).IsRequired().HasDefaultValue("VND");
+            entity.Property(e => e.IsActive).HasDefaultValue(true);
+
+            entity.HasOne(e => e.Branch)
+                .WithMany()
+                .HasForeignKey(e => e.BranchId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Account)
+                .WithMany()
+                .HasForeignKey(e => e.AccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => new { e.BankName, e.AccountNumber })
+                .IsUnique()
+                .HasFilter("is_deleted = false")
+                .HasDatabaseName("UQ_BankAccount_Number");
+            entity.HasIndex(e => e.BranchId);
+        });
+
+        modelBuilder.Entity<ReceiptVoucher>(entity =>
+        {
+            entity.ToTable("tbl_ACC_ReceiptVoucher");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.VoucherNumber).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.PayerName).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.PayerPhone).HasMaxLength(50);
+            entity.Property(e => e.Amount).HasPrecision(18, 4);
+            entity.Property(e => e.Notes).HasMaxLength(1000);
+
+            entity.HasOne(e => e.Branch)
+                .WithMany()
+                .HasForeignKey(e => e.BranchId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.CashFund)
+                .WithMany()
+                .HasForeignKey(e => e.CashFundId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.BankAccount)
+                .WithMany()
+                .HasForeignKey(e => e.BankAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Partner)
+                .WithMany()
+                .HasForeignKey(e => e.PartnerId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.JournalEntry)
+                .WithMany()
+                .HasForeignKey(e => e.JournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => e.VoucherNumber).IsUnique().HasFilter("is_deleted = false");
+            entity.HasIndex(e => new { e.BranchId, e.VoucherDate });
+            entity.HasIndex(e => e.PartnerId);
+            entity.ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_tbl_ACC_ReceiptVoucher_Amount", "amount > 0");
+                t.HasCheckConstraint("CK_tbl_ACC_ReceiptVoucher_Method", "payment_method IN (1, 2)");
+            });
+        });
+
+        modelBuilder.Entity<ReceiptVoucherAllocation>(entity =>
+        {
+            entity.ToTable("tbl_ACC_ReceiptVoucherAllocation");
+            ConfigureDualKeyEntity(entity);
+            entity.Property(e => e.AllocatedAmount).HasPrecision(18, 4);
+
+            entity.HasOne(e => e.ReceiptVoucher)
+                .WithMany(v => v.Allocations)
+                .HasForeignKey(e => e.ReceiptVoucherId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.SalesInvoice)
+                .WithMany()
+                .HasForeignKey(e => e.SalesInvoiceId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => new { e.ReceiptVoucherId, e.SalesInvoiceId }).IsUnique();
+            entity.ToTable(t => t.HasCheckConstraint("CK_tbl_ACC_ReceiptVoucherAllocation_Amount", "allocated_amount > 0"));
+        });
+
+        modelBuilder.Entity<PaymentVoucher>(entity =>
+        {
+            entity.ToTable("tbl_ACC_PaymentVoucher");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.VoucherNumber).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.RecipientName).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.Amount).HasPrecision(18, 4);
+            entity.Property(e => e.Notes).HasMaxLength(1000);
+
+            entity.HasOne(e => e.Branch)
+                .WithMany()
+                .HasForeignKey(e => e.BranchId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.CashFund)
+                .WithMany()
+                .HasForeignKey(e => e.CashFundId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.BankAccount)
+                .WithMany()
+                .HasForeignKey(e => e.BankAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Partner)
+                .WithMany()
+                .HasForeignKey(e => e.PartnerId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.ExpenseAccount)
+                .WithMany()
+                .HasForeignKey(e => e.ExpenseAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.JournalEntry)
+                .WithMany()
+                .HasForeignKey(e => e.JournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => e.VoucherNumber).IsUnique().HasFilter("is_deleted = false");
+            entity.HasIndex(e => new { e.BranchId, e.VoucherDate });
+            entity.HasIndex(e => e.PartnerId);
+            entity.ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_tbl_ACC_PaymentVoucher_Amount", "amount > 0");
+                t.HasCheckConstraint("CK_tbl_ACC_PaymentVoucher_Method", "payment_method IN (1, 2)");
+            });
+        });
+
         // A user's branch grants are enforced independently of client-side filtering.
         modelBuilder.Entity<Branch>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.Id)));
         modelBuilder.Entity<Warehouse>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)));
@@ -1141,6 +1359,11 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<StockIssueItem>().HasQueryFilter(e => !e.StockIssue!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.StockIssue.BranchId)
             || (e.StockIssue.DepartmentId != null && AllowedDepartmentIds.Contains(e.StockIssue.DepartmentId.Value)) || (OwnRecordsUserId != null && e.StockIssue.CreatedBy == OwnRecordsUserId)));
         modelBuilder.Entity<JournalEntryLine>().HasQueryFilter(e => !e.JournalEntry!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.JournalEntry.BranchId)));
+        modelBuilder.Entity<CashFund>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)));
+        modelBuilder.Entity<BankAccount>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)));
+        modelBuilder.Entity<ReceiptVoucher>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)));
+        modelBuilder.Entity<ReceiptVoucherAllocation>().HasQueryFilter(e => !e.ReceiptVoucher!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.ReceiptVoucher.BranchId)));
+        modelBuilder.Entity<PaymentVoucher>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)));
         modelBuilder.Entity<PriceListVersion>().HasQueryFilter(e => !e.IsDeleted && !e.PriceList!.IsDeleted);
         modelBuilder.Entity<PriceListItem>().HasQueryFilter(e => !e.PriceListVersion!.IsDeleted && !e.PriceListVersion.PriceList!.IsDeleted);
         modelBuilder.Entity<SalesQuotation>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)

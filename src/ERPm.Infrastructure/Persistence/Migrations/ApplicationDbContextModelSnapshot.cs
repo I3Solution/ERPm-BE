@@ -73,6 +73,12 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("is_deleted");
 
+                    b.Property<bool>("IsPostable")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_postable");
+
                     b.Property<DateTime?>("LastModifiedAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_modified_at_utc");
@@ -87,6 +93,12 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(255)")
                         .HasColumnName("name");
 
+                    b.Property<int>("Nature")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1)
+                        .HasColumnName("nature");
+
                     b.Property<int?>("ParentId")
                         .HasColumnType("integer")
                         .HasColumnName("parent_id");
@@ -94,6 +106,18 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     b.Property<int?>("TenantId")
                         .HasColumnType("integer")
                         .HasColumnName("tenant_id");
+
+                    b.Property<bool>("TrackBranch")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("track_branch");
+
+                    b.Property<bool>("TrackPartner")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("track_partner");
 
                     b.Property<string>("Translations")
                         .IsRequired()
@@ -116,7 +140,355 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     b.HasIndex("ParentId")
                         .HasDatabaseName("ix_tbl_acc_account_parent_id");
 
-                    b.ToTable("tbl_ACC_Account", (string)null);
+                    b.ToTable("tbl_ACC_Account", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_tbl_ACC_Account_Nature", "nature IN (1, 2, 3)");
+                        });
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Accounting.AccountPostingProfile", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("BranchId")
+                        .HasColumnType("integer")
+                        .HasColumnName("branch_id");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("created_by");
+
+                    b.Property<int>("CreditAccountId")
+                        .HasColumnType("integer")
+                        .HasColumnName("credit_account_id");
+
+                    b.Property<int>("DebitAccountId")
+                        .HasColumnType("integer")
+                        .HasColumnName("debit_account_id");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at_utc");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("deleted_by");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("description");
+
+                    b.Property<string>("DimensionKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("dimension_key");
+
+                    b.Property<Guid>("ExternalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("external_id");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
+                    b.Property<DateTime?>("LastModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_modified_at_utc");
+
+                    b.Property<string>("LastModifiedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("last_modified_by");
+
+                    b.Property<string>("Module")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("module");
+
+                    b.Property<int?>("TenantId")
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("TransactionType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("transaction_type");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_acc_account_posting_profile");
+
+                    b.HasIndex("BranchId")
+                        .HasDatabaseName("ix_tbl_acc_account_posting_profile_branch_id");
+
+                    b.HasIndex("CreditAccountId")
+                        .HasDatabaseName("ix_tbl_acc_account_posting_profile_credit_account_id");
+
+                    b.HasIndex("DebitAccountId")
+                        .HasDatabaseName("ix_tbl_acc_account_posting_profile_debit_account_id");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_acc_account_posting_profile_external_id");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id", "IsDeleted" });
+
+                    b.HasIndex("Module", "TransactionType", "BranchId", "DimensionKey")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_PostingProfile_Key")
+                        .HasFilter("is_deleted = false");
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("Module", "TransactionType", "BranchId", "DimensionKey"), false);
+
+                    b.ToTable("tbl_ACC_AccountPostingProfile", (string)null);
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Accounting.BankAccount", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AccountHolder")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("account_holder");
+
+                    b.Property<int>("AccountId")
+                        .HasColumnType("integer")
+                        .HasColumnName("account_id");
+
+                    b.Property<string>("AccountNumber")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("account_number");
+
+                    b.Property<string>("BankBranch")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("bank_branch");
+
+                    b.Property<string>("BankName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("bank_name");
+
+                    b.Property<int>("BranchId")
+                        .HasColumnType("integer")
+                        .HasColumnName("branch_id");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasDefaultValue("VND")
+                        .HasColumnName("currency");
+
+                    b.Property<decimal>("CurrentBalance")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("current_balance");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at_utc");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("deleted_by");
+
+                    b.Property<Guid>("ExternalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("external_id");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
+                    b.Property<DateTime?>("LastModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_modified_at_utc");
+
+                    b.Property<string>("LastModifiedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("last_modified_by");
+
+                    b.Property<int?>("TenantId")
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_acc_bank_account");
+
+                    b.HasIndex("AccountId")
+                        .HasDatabaseName("ix_tbl_acc_bank_account_account_id");
+
+                    b.HasIndex("BranchId")
+                        .HasDatabaseName("ix_tbl_acc_bank_account_branch_id");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_acc_bank_account_external_id");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id", "IsDeleted" });
+
+                    b.HasIndex("BankName", "AccountNumber")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_BankAccount_Number")
+                        .HasFilter("is_deleted = false");
+
+                    b.ToTable("tbl_ACC_BankAccount", (string)null);
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Accounting.CashFund", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AccountId")
+                        .HasColumnType("integer")
+                        .HasColumnName("account_id");
+
+                    b.Property<int>("BranchId")
+                        .HasColumnType("integer")
+                        .HasColumnName("branch_id");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasDefaultValue("VND")
+                        .HasColumnName("currency");
+
+                    b.Property<decimal>("CurrentBalance")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("current_balance");
+
+                    b.Property<int?>("CustodianEmployeeId")
+                        .HasColumnType("integer")
+                        .HasColumnName("custodian_employee_id");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at_utc");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("deleted_by");
+
+                    b.Property<Guid>("ExternalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("external_id");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
+                    b.Property<DateTime?>("LastModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_modified_at_utc");
+
+                    b.Property<string>("LastModifiedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("last_modified_by");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("name");
+
+                    b.Property<int?>("TenantId")
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_acc_cash_fund");
+
+                    b.HasIndex("AccountId")
+                        .HasDatabaseName("ix_tbl_acc_cash_fund_account_id");
+
+                    b.HasIndex("BranchId")
+                        .HasDatabaseName("ix_tbl_acc_cash_fund_branch_id");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_acc_cash_fund_code")
+                        .HasFilter("is_deleted = false");
+
+                    b.HasIndex("CustodianEmployeeId")
+                        .HasDatabaseName("ix_tbl_acc_cash_fund_custodian_employee_id");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_acc_cash_fund_external_id");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id", "IsDeleted" });
+
+                    b.ToTable("tbl_ACC_CashFund", (string)null);
                 });
 
             modelBuilder.Entity("ERPm.Domain.Entities.Accounting.JournalEntry", b =>
@@ -288,6 +660,346 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_tbl_acc_journal_entry_line_partner_id");
 
                     b.ToTable("tbl_ACC_JournalEntryLine", (string)null);
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Accounting.PaymentVoucher", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("amount");
+
+                    b.Property<int?>("BankAccountId")
+                        .HasColumnType("integer")
+                        .HasColumnName("bank_account_id");
+
+                    b.Property<int>("BranchId")
+                        .HasColumnType("integer")
+                        .HasColumnName("branch_id");
+
+                    b.Property<int?>("CashFundId")
+                        .HasColumnType("integer")
+                        .HasColumnName("cash_fund_id");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("created_by");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at_utc");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("deleted_by");
+
+                    b.Property<int?>("ExpenseAccountId")
+                        .HasColumnType("integer")
+                        .HasColumnName("expense_account_id");
+
+                    b.Property<Guid>("ExternalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("external_id");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
+                    b.Property<int?>("JournalEntryId")
+                        .HasColumnType("integer")
+                        .HasColumnName("journal_entry_id");
+
+                    b.Property<DateTime?>("LastModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_modified_at_utc");
+
+                    b.Property<string>("LastModifiedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("last_modified_by");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("notes");
+
+                    b.Property<int?>("PartnerId")
+                        .HasColumnType("integer")
+                        .HasColumnName("partner_id");
+
+                    b.Property<int>("PaymentMethod")
+                        .HasColumnType("integer")
+                        .HasColumnName("payment_method");
+
+                    b.Property<int>("PaymentType")
+                        .HasColumnType("integer")
+                        .HasColumnName("payment_type");
+
+                    b.Property<string>("RecipientName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("recipient_name");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.Property<int?>("TenantId")
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTime>("VoucherDate")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("voucher_date");
+
+                    b.Property<string>("VoucherNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("voucher_number");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_acc_payment_voucher");
+
+                    b.HasIndex("BankAccountId")
+                        .HasDatabaseName("ix_tbl_acc_payment_voucher_bank_account_id");
+
+                    b.HasIndex("CashFundId")
+                        .HasDatabaseName("ix_tbl_acc_payment_voucher_cash_fund_id");
+
+                    b.HasIndex("ExpenseAccountId")
+                        .HasDatabaseName("ix_tbl_acc_payment_voucher_expense_account_id");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_acc_payment_voucher_external_id");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id", "IsDeleted" });
+
+                    b.HasIndex("JournalEntryId")
+                        .HasDatabaseName("ix_tbl_acc_payment_voucher_journal_entry_id");
+
+                    b.HasIndex("PartnerId")
+                        .HasDatabaseName("ix_tbl_acc_payment_voucher_partner_id");
+
+                    b.HasIndex("VoucherNumber")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_acc_payment_voucher_voucher_number")
+                        .HasFilter("is_deleted = false");
+
+                    b.HasIndex("BranchId", "VoucherDate")
+                        .HasDatabaseName("ix_tbl_acc_payment_voucher_branch_id_voucher_date");
+
+                    b.ToTable("tbl_ACC_PaymentVoucher", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_tbl_ACC_PaymentVoucher_Amount", "amount > 0");
+
+                            t.HasCheckConstraint("CK_tbl_ACC_PaymentVoucher_Method", "payment_method IN (1, 2)");
+                        });
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Accounting.ReceiptVoucher", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("amount");
+
+                    b.Property<int?>("BankAccountId")
+                        .HasColumnType("integer")
+                        .HasColumnName("bank_account_id");
+
+                    b.Property<int>("BranchId")
+                        .HasColumnType("integer")
+                        .HasColumnName("branch_id");
+
+                    b.Property<int?>("CashFundId")
+                        .HasColumnType("integer")
+                        .HasColumnName("cash_fund_id");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("created_by");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at_utc");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("deleted_by");
+
+                    b.Property<Guid>("ExternalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("external_id");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
+                    b.Property<int?>("JournalEntryId")
+                        .HasColumnType("integer")
+                        .HasColumnName("journal_entry_id");
+
+                    b.Property<DateTime?>("LastModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_modified_at_utc");
+
+                    b.Property<string>("LastModifiedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("last_modified_by");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("notes");
+
+                    b.Property<int?>("PartnerId")
+                        .HasColumnType("integer")
+                        .HasColumnName("partner_id");
+
+                    b.Property<string>("PayerName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("payer_name");
+
+                    b.Property<string>("PayerPhone")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("payer_phone");
+
+                    b.Property<int>("PaymentMethod")
+                        .HasColumnType("integer")
+                        .HasColumnName("payment_method");
+
+                    b.Property<int>("ReceiptType")
+                        .HasColumnType("integer")
+                        .HasColumnName("receipt_type");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.Property<int?>("TenantId")
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTime>("VoucherDate")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("voucher_date");
+
+                    b.Property<string>("VoucherNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("voucher_number");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_acc_receipt_voucher");
+
+                    b.HasIndex("BankAccountId")
+                        .HasDatabaseName("ix_tbl_acc_receipt_voucher_bank_account_id");
+
+                    b.HasIndex("CashFundId")
+                        .HasDatabaseName("ix_tbl_acc_receipt_voucher_cash_fund_id");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_acc_receipt_voucher_external_id");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id", "IsDeleted" });
+
+                    b.HasIndex("JournalEntryId")
+                        .HasDatabaseName("ix_tbl_acc_receipt_voucher_journal_entry_id");
+
+                    b.HasIndex("PartnerId")
+                        .HasDatabaseName("ix_tbl_acc_receipt_voucher_partner_id");
+
+                    b.HasIndex("VoucherNumber")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_acc_receipt_voucher_voucher_number")
+                        .HasFilter("is_deleted = false");
+
+                    b.HasIndex("BranchId", "VoucherDate")
+                        .HasDatabaseName("ix_tbl_acc_receipt_voucher_branch_id_voucher_date");
+
+                    b.ToTable("tbl_ACC_ReceiptVoucher", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_tbl_ACC_ReceiptVoucher_Amount", "amount > 0");
+
+                            t.HasCheckConstraint("CK_tbl_ACC_ReceiptVoucher_Method", "payment_method IN (1, 2)");
+                        });
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Accounting.ReceiptVoucherAllocation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("AllocatedAmount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("allocated_amount");
+
+                    b.Property<Guid>("ExternalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("external_id");
+
+                    b.Property<int>("ReceiptVoucherId")
+                        .HasColumnType("integer")
+                        .HasColumnName("receipt_voucher_id");
+
+                    b.Property<int>("SalesInvoiceId")
+                        .HasColumnType("integer")
+                        .HasColumnName("sales_invoice_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_acc_receipt_voucher_allocation");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_acc_receipt_voucher_allocation_external_id");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id" });
+
+                    b.HasIndex("SalesInvoiceId")
+                        .HasDatabaseName("ix_tbl_acc_receipt_voucher_allocation_sales_invoice_id");
+
+                    b.HasIndex("ReceiptVoucherId", "SalesInvoiceId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_acc_receipt_voucher_allocation_receipt_voucher_id_sales_i");
+
+                    b.ToTable("tbl_ACC_ReceiptVoucherAllocation", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_tbl_ACC_ReceiptVoucherAllocation_Amount", "allocated_amount > 0");
+                        });
                 });
 
             modelBuilder.Entity("ERPm.Domain.Entities.Catalog.Category", b =>
@@ -4888,6 +5600,85 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     b.Navigation("Parent");
                 });
 
+            modelBuilder.Entity("ERPm.Domain.Entities.Accounting.AccountPostingProfile", b =>
+                {
+                    b.HasOne("ERPm.Domain.Entities.System.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_acc_account_posting_profile_tbl_sys_branch_branch_id");
+
+                    b.HasOne("ERPm.Domain.Entities.Accounting.Account", "CreditAccount")
+                        .WithMany()
+                        .HasForeignKey("CreditAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_acc_account_posting_profile_tbl_acc_account_credit_accoun");
+
+                    b.HasOne("ERPm.Domain.Entities.Accounting.Account", "DebitAccount")
+                        .WithMany()
+                        .HasForeignKey("DebitAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_acc_account_posting_profile_tbl_acc_account_debit_account");
+
+                    b.Navigation("Branch");
+
+                    b.Navigation("CreditAccount");
+
+                    b.Navigation("DebitAccount");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Accounting.BankAccount", b =>
+                {
+                    b.HasOne("ERPm.Domain.Entities.Accounting.Account", "Account")
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_acc_bank_account_tbl_acc_account_account_id");
+
+                    b.HasOne("ERPm.Domain.Entities.System.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_acc_bank_account_tbl_sys_branch_branch_id");
+
+                    b.Navigation("Account");
+
+                    b.Navigation("Branch");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Accounting.CashFund", b =>
+                {
+                    b.HasOne("ERPm.Domain.Entities.Accounting.Account", "Account")
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_acc_cash_fund_tbl_acc_account_account_id");
+
+                    b.HasOne("ERPm.Domain.Entities.System.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_acc_cash_fund_tbl_sys_branch_branch_id");
+
+                    b.HasOne("ERPm.Domain.Entities.HumanResource.Employee", "CustodianEmployee")
+                        .WithMany()
+                        .HasForeignKey("CustodianEmployeeId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_tbl_acc_cash_fund_tbl_hrm_employee_custodian_employee_id");
+
+                    b.Navigation("Account");
+
+                    b.Navigation("Branch");
+
+                    b.Navigation("CustodianEmployee");
+                });
+
             modelBuilder.Entity("ERPm.Domain.Entities.Accounting.JournalEntry", b =>
                 {
                     b.HasOne("ERPm.Domain.Entities.System.Branch", "Branch")
@@ -4933,6 +5724,123 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     b.Navigation("JournalEntry");
 
                     b.Navigation("Partner");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Accounting.PaymentVoucher", b =>
+                {
+                    b.HasOne("ERPm.Domain.Entities.Accounting.BankAccount", "BankAccount")
+                        .WithMany()
+                        .HasForeignKey("BankAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_acc_payment_voucher_tbl_acc_bank_account_bank_account_id");
+
+                    b.HasOne("ERPm.Domain.Entities.System.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_acc_payment_voucher_tbl_sys_branch_branch_id");
+
+                    b.HasOne("ERPm.Domain.Entities.Accounting.CashFund", "CashFund")
+                        .WithMany()
+                        .HasForeignKey("CashFundId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_acc_payment_voucher_tbl_acc_cash_fund_cash_fund_id");
+
+                    b.HasOne("ERPm.Domain.Entities.Accounting.Account", "ExpenseAccount")
+                        .WithMany()
+                        .HasForeignKey("ExpenseAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_acc_payment_voucher_tbl_acc_account_expense_account_id");
+
+                    b.HasOne("ERPm.Domain.Entities.Accounting.JournalEntry", "JournalEntry")
+                        .WithMany()
+                        .HasForeignKey("JournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_acc_payment_voucher_tbl_acc_journal_entry_journal_entry_id");
+
+                    b.HasOne("ERPm.Domain.Entities.Partner.Partner", "Partner")
+                        .WithMany()
+                        .HasForeignKey("PartnerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_acc_payment_voucher_tbl_crm_partner_partner_id");
+
+                    b.Navigation("BankAccount");
+
+                    b.Navigation("Branch");
+
+                    b.Navigation("CashFund");
+
+                    b.Navigation("ExpenseAccount");
+
+                    b.Navigation("JournalEntry");
+
+                    b.Navigation("Partner");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Accounting.ReceiptVoucher", b =>
+                {
+                    b.HasOne("ERPm.Domain.Entities.Accounting.BankAccount", "BankAccount")
+                        .WithMany()
+                        .HasForeignKey("BankAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_acc_receipt_voucher_tbl_acc_bank_account_bank_account_id");
+
+                    b.HasOne("ERPm.Domain.Entities.System.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_acc_receipt_voucher_tbl_sys_branch_branch_id");
+
+                    b.HasOne("ERPm.Domain.Entities.Accounting.CashFund", "CashFund")
+                        .WithMany()
+                        .HasForeignKey("CashFundId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_acc_receipt_voucher_tbl_acc_cash_fund_cash_fund_id");
+
+                    b.HasOne("ERPm.Domain.Entities.Accounting.JournalEntry", "JournalEntry")
+                        .WithMany()
+                        .HasForeignKey("JournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_acc_receipt_voucher_tbl_acc_journal_entry_journal_entry_id");
+
+                    b.HasOne("ERPm.Domain.Entities.Partner.Partner", "Partner")
+                        .WithMany()
+                        .HasForeignKey("PartnerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_tbl_acc_receipt_voucher_tbl_crm_partner_partner_id");
+
+                    b.Navigation("BankAccount");
+
+                    b.Navigation("Branch");
+
+                    b.Navigation("CashFund");
+
+                    b.Navigation("JournalEntry");
+
+                    b.Navigation("Partner");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Accounting.ReceiptVoucherAllocation", b =>
+                {
+                    b.HasOne("ERPm.Domain.Entities.Accounting.ReceiptVoucher", "ReceiptVoucher")
+                        .WithMany("Allocations")
+                        .HasForeignKey("ReceiptVoucherId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_acc_receipt_voucher_allocation_tbl_acc_receipt_voucher_rec");
+
+                    b.HasOne("ERPm.Domain.Entities.Sales.SalesInvoice", "SalesInvoice")
+                        .WithMany()
+                        .HasForeignKey("SalesInvoiceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_acc_receipt_voucher_allocation_tbl_sale_invoice_sales_inv");
+
+                    b.Navigation("ReceiptVoucher");
+
+                    b.Navigation("SalesInvoice");
                 });
 
             modelBuilder.Entity("ERPm.Domain.Entities.Catalog.Category", b =>
@@ -5953,6 +6861,11 @@ namespace ERPm.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("ERPm.Domain.Entities.Accounting.JournalEntry", b =>
                 {
                     b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Accounting.ReceiptVoucher", b =>
+                {
+                    b.Navigation("Allocations");
                 });
 
             modelBuilder.Entity("ERPm.Domain.Entities.Catalog.Category", b =>
