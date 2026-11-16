@@ -307,6 +307,34 @@ public static class TreasuryChecks
         });
         ctx.Check(bankTransfer.DestinationBankAccountBalance == 100_000m, "BankToBank transfer credits destination bank account");
 
+        // 4. Outstanding invoices of a customer (S26.6 receipt allocation): right customer, Posted, receivable left, oldest first, branch scope
+        var otherBranch = new Branch { Code = "TRE26B", Name = "Treasury Branch B", ParentId = rootBranch.Id, IsActive = true };
+        var debtor = new Partner { Code = "KH-TRE26-OPEN", Name = "Open Debt Customer", PartnerType = PartnerType.Customer, IsUnlimitedCredit = true, IsActive = true };
+        var bystander = new Partner { Code = "KH-TRE26-OTHER", Name = "Other Customer", PartnerType = PartnerType.Customer, IsUnlimitedCredit = true, IsActive = true };
+        db.Branches.Add(otherBranch);
+        db.Partners.AddRange(debtor, bystander);
+        await db.SaveChangesAsync();
+        SalesInvoice Open(string number, int days, int? customerId, int branchId, VoucherStatus status, decimal remaining) => new()
+        {
+            InvoiceNumber = number, InvoiceDate = DateTime.UtcNow.AddDays(-days), BranchId = branchId, WarehouseId = warehouse.Id, CustomerId = customerId,
+            CustomerName = "x", Status = status, TotalAmount = 500m, PaidAmount = 500m - remaining, RemainingDebt = remaining
+        };
+        db.SalesInvoices.AddRange(
+            Open("OPN-NEW", 1, debtor.Id, branch.Id, VoucherStatus.Posted, 40m),
+            Open("OPN-OLD", 5, debtor.Id, branch.Id, VoucherStatus.Posted, 100m),
+            Open("OPN-PAID", 3, debtor.Id, branch.Id, VoucherStatus.Posted, 0m),
+            Open("OPN-VOID", 2, debtor.Id, branch.Id, VoucherStatus.Cancelled, 60m),
+            Open("OPN-OTHERCUST", 4, bystander.Id, branch.Id, VoucherStatus.Posted, 70m),
+            Open("OPN-OTHERBR", 6, debtor.Id, otherBranch.Id, VoucherStatus.Posted, 30m));
+        await db.SaveChangesAsync();
+        var openInvoices = await salesService.GetOutstandingInvoicesAsync(debtor.Id);
+        ctx.Check(openInvoices.Select(i => i.InvoiceNumber).SequenceEqual(["OPN-OTHERBR", "OPN-OLD", "OPN-NEW"]),
+            "Outstanding invoices: only this customer's Posted invoices with a receivable, oldest first");
+        await using var scopedDb = ctx.Db(new TestUser(admin: false, branches: [branch.Id]));
+        var scopedSales = new SalesInvoiceService(scopedDb, new BranchService(scopedDb), new PostingTransaction(scopedDb), null, null, null, engine);
+        ctx.Check((await scopedSales.GetOutstandingInvoicesAsync(debtor.Id)).Select(i => i.InvoiceNumber).SequenceEqual(["OPN-OLD", "OPN-NEW"]),
+            "Outstanding invoices respect the branch scope of the user");
+
         var accountService = new AccountService(db);
         var tree = await accountService.GetAccountsAsync();
         var postable = await accountService.GetAccountsAsync(isPostable: true);
@@ -344,7 +372,7 @@ public static class TreasuryChecks
             "error.accounting.account_in_use");
     }
 
-    private sealed class TestUser : ICurrentUser
+    private sealed class TestUser(bool admin = true, int[]? branches = null) : ICurrentUser
     {
         public string? UserId => "1";
         public string? UserName => "treasury-verifier";
@@ -353,10 +381,10 @@ public static class TreasuryChecks
         public int? CompanyId => null;
         public int? BranchId => null;
         public int? DepartmentId => null;
-        public IReadOnlyList<int> AllowedBranchIds => [];
-        public int[] BranchIds => [];
+        public IReadOnlyList<int> AllowedBranchIds => branches ?? [];
+        public int[] BranchIds => branches ?? [];
         public bool IsAuthenticated => true;
-        public bool IsAdmin => true;
+        public bool IsAdmin => admin;
         public bool IsSystem => false;
     }
 }
