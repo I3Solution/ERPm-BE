@@ -34,11 +34,14 @@ public class SalesInvoice : BaseAuditableEntity
     public int WarehouseId { get; set; }
 
     public PaymentMethod PaymentMethod { get; set; } = PaymentMethod.Cash;
+    public int? CashFundId { get; set; }                   // Cash fund used for cash payment
+    public int? BankAccountId { get; set; }                // Bank account used for bank transfer
     public VoucherStatus Status { get; set; } = VoucherStatus.Posted;
 
     // Monetary fields (Required decimal(18, 4))
     public decimal SubTotal { get; set; } = 0m;            // Gross subtotal before discount
     public decimal DiscountAmount { get; set; } = 0m;      // Invoice discount amount
+    public decimal TaxRate { get; set; } = 0m;             // VAT rate percentage (e.g. 8, 10)
     public decimal TaxAmount { get; set; } = 0m;           // VAT amount
     public decimal TotalAmount { get; set; } = 0m;         // Net total payable
     public decimal PaidAmount { get; set; } = 0m;          // Amount paid by customer
@@ -53,6 +56,8 @@ public class SalesInvoice : BaseAuditableEntity
     public virtual Branch? Branch { get; set; }
     public virtual PartnerEntity? Customer { get; set; }
     public virtual Warehouse? Warehouse { get; set; }
+    public virtual CashFund? CashFund { get; set; }
+    public virtual BankAccount? BankAccount { get; set; }
     public virtual JournalEntry? JournalEntry { get; set; }
     public virtual StockIssue? StockIssue { get; set; }
     public virtual ICollection<SalesInvoiceItem> Items { get; set; } = new List<SalesInvoiceItem>();

@@ -125,7 +125,7 @@ try
     var stored = await db.SalesInvoices.Include(i => i.JournalEntry!).ThenInclude(j => j.Lines).Include(i => i.Items).SingleAsync(i => i.Id == result.Id);
     var accounts = await db.Accounts.ToDictionaryAsync(a => a.Id, a => a.Code);
     Check(stored.Items.Single().CostPrice == 20, "sale uses warehouse average cost, not catalogue cost");
-    Check(stored.JournalEntry!.Lines.Where(l => accounts[l.AccountId] == "111").Sum(l => l.DebitAmount) == 40 && stored.JournalEntry.Lines.Where(l => accounts[l.AccountId] == "131").Sum(l => l.DebitAmount) == 60, "journal splits cash and receivable");
+    Check(stored.JournalEntry!.Lines.Where(l => accounts[l.AccountId] == "1111").Sum(l => l.DebitAmount) == 40 && stored.JournalEntry.Lines.Where(l => accounts[l.AccountId] == "131").Sum(l => l.DebitAmount) == 60, "journal splits cash and receivable");
     var replay = await Sales(db).CreateInvoiceAsync(request);
     Check(replay.Id == result.Id && await db.SalesInvoices.CountAsync() == 1, "retry returns same invoice");
     request.PaidAmount = 50;
@@ -1129,6 +1129,7 @@ try
     await IamChecks.DatabaseAsync(new(u => Db(u), Check, Reject));
     ERPm.Verification.NotificationChecks.Pure(Check);
     await ERPm.Verification.NotificationChecks.RunDbChecksAsync(new(u => Db(u), Check, Reject));
+    await ERPm.Verification.DynamicPostingChecks.RunDbChecksAsync(new(u => Db(u), Check, Reject));
     using var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
     var port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop();
     var password = "Verify-" + Guid.NewGuid().ToString("N");

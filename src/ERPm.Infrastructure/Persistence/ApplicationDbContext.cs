@@ -493,6 +493,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.Property(e => e.DebtBalance).HasPrecision(18, 4);
 
             entity.HasOne<PriceList>().WithMany().HasForeignKey(e => e.PriceListId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.ReceivableAccount).WithMany().HasForeignKey(e => e.ReceivableAccountId).OnDelete(DeleteBehavior.Restrict);
 
             entity.HasIndex(e => e.Code).IsUnique();
             entity.HasQueryFilter(e => !e.IsDeleted);
@@ -676,6 +677,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
 
             entity.Property(e => e.SubTotal).HasPrecision(18, 4);
             entity.Property(e => e.DiscountAmount).HasPrecision(18, 4);
+            entity.Property(e => e.TaxRate).HasPrecision(18, 4);
             entity.Property(e => e.TaxAmount).HasPrecision(18, 4);
             entity.Property(e => e.TotalAmount).HasPrecision(18, 4);
             entity.Property(e => e.PaidAmount).HasPrecision(18, 4);
@@ -697,6 +699,16 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.HasOne(e => e.Warehouse)
                 .WithMany()
                 .HasForeignKey(e => e.WarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.CashFund)
+                .WithMany()
+                .HasForeignKey(e => e.CashFundId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.BankAccount)
+                .WithMany()
+                .HasForeignKey(e => e.BankAccountId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(e => e.JournalEntry)
