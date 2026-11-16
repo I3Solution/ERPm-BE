@@ -54,8 +54,14 @@ public interface IApplicationDbContext
     DbSet<PurchaseOrder> PurchaseOrders { get; }
     DbSet<PurchaseOrderItem> PurchaseOrderItems { get; }
 
-    // Accounting Foundation
+    // Accounting Foundation & Treasury
     DbSet<Account> Accounts { get; }
+    DbSet<AccountPostingProfile> AccountPostingProfiles { get; }
+    DbSet<CashFund> CashFunds { get; }
+    DbSet<BankAccount> BankAccounts { get; }
+    DbSet<ReceiptVoucher> ReceiptVouchers { get; }
+    DbSet<ReceiptVoucherAllocation> ReceiptVoucherAllocations { get; }
+    DbSet<PaymentVoucher> PaymentVouchers { get; }
     DbSet<JournalEntry> JournalEntries { get; }
     DbSet<JournalEntryLine> JournalEntryLines { get; }
 
