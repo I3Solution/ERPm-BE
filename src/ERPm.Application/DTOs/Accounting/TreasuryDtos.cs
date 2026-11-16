@@ -85,6 +85,16 @@ public class TreasuryBalanceSummaryDto
     public List<BankAccountDto> BankAccounts { get; set; } = [];
 }
 
+public class TreasuryPeriodSummaryDto
+{
+    public int? BranchId { get; set; }
+    public DateTime From { get; set; }
+    public DateTime To { get; set; }
+    public decimal TotalReceipts { get; set; }
+    public decimal TotalPayments { get; set; }
+    public decimal NetCashFlow { get; set; }
+}
+
 public enum InternalTransferDirection
 {
     CashToBank = 1,

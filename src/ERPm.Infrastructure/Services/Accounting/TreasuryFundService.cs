@@ -206,6 +206,35 @@ public class TreasuryFundService(
         };
     }
 
+    // Posted vouchers only (Cancelled = reversed, Draft = not yet effective); "to" is inclusive of the whole day.
+    public async Task<TreasuryPeriodSummaryDto> GetPeriodSummaryAsync(DateTime? from, DateTime? to, int? branchId = null, CancellationToken ct = default)
+    {
+        var today = DateTime.UtcNow.Date;
+        var start = (from ?? new DateTime(today.Year, today.Month, 1)).Date;
+        var end = (to ?? today).Date;
+        Require(start <= end, "error.validation.request");
+        var endExclusive = end.AddDays(1);
+
+        var receipts = context.ReceiptVouchers.AsNoTracking()
+            .Where(v => v.Status == VoucherStatus.Posted && v.VoucherDate >= start && v.VoucherDate < endExclusive);
+        var payments = context.PaymentVouchers.AsNoTracking()
+            .Where(v => v.Status == VoucherStatus.Posted && v.VoucherDate >= start && v.VoucherDate < endExclusive);
+        if (branchId is > 0)
+        {
+            var ids = await branches.GetBranchAndDescendantIdsAsync(branchId.Value, ct);
+            receipts = receipts.Where(v => ids.Contains(v.BranchId));
+            payments = payments.Where(v => ids.Contains(v.BranchId));
+        }
+
+        var totalReceipts = Round(await receipts.SumAsync(v => (decimal?)v.Amount, ct) ?? 0m);
+        var totalPayments = Round(await payments.SumAsync(v => (decimal?)v.Amount, ct) ?? 0m);
+        return new TreasuryPeriodSummaryDto
+        {
+            BranchId = branchId, From = start, To = end,
+            TotalReceipts = totalReceipts, TotalPayments = totalPayments, NetCashFlow = Round(totalReceipts - totalPayments)
+        };
+    }
+
     public Task<InternalTransferResultDto> TransferInternalAsync(InternalTransferRequest request, CancellationToken ct = default)
     {
         Require(request.BranchId > 0, "error.validation.request");

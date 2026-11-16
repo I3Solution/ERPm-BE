@@ -17,5 +17,6 @@ public interface ITreasuryFundService
     Task DeleteBankAccountAsync(int id, CancellationToken ct = default);
 
     Task<TreasuryBalanceSummaryDto> GetBalancesAsync(int? branchId = null, CancellationToken ct = default);
+    Task<TreasuryPeriodSummaryDto> GetPeriodSummaryAsync(DateTime? from, DateTime? to, int? branchId = null, CancellationToken ct = default);
     Task<InternalTransferResultDto> TransferInternalAsync(InternalTransferRequest request, CancellationToken ct = default);
 }
