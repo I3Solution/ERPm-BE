@@ -18,12 +18,24 @@ public class ReceiptVoucherService(
     PostingTransaction posting,
     IDynamicPostingEngine engine) : IReceiptVoucherService
 {
-    public async Task<List<ReceiptVoucherDto>> GetReceiptVouchersAsync(
+    public async Task<PagedResult<ReceiptVoucherDto>> GetReceiptVouchersAsync(
         int? branchId = null,
         int? partnerId = null,
+        string? q = null,
+        DateTime? from = null,
+        DateTime? to = null,
+        int page = 1,
+        int pageSize = 20,
         CancellationToken ct = default)
     {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+
         var query = context.ReceiptVouchers.AsNoTracking()
+            .Include(v => v.Branch)
+            .Include(v => v.CashFund)
+            .Include(v => v.BankAccount)
+            .Include(v => v.Partner)
             .Include(v => v.Allocations)
             .ThenInclude(a => a.SalesInvoice)
             .AsQueryable();
@@ -39,20 +51,54 @@ public class ReceiptVoucherService(
             query = query.Where(v => v.PartnerId == partnerId.Value);
         }
 
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            var term = q.Trim().ToLower();
+            query = query.Where(v =>
+                v.VoucherNumber.ToLower().Contains(term) ||
+                v.PayerName.ToLower().Contains(term) ||
+                (v.Notes != null && v.Notes.ToLower().Contains(term)));
+        }
+
+        if (from.HasValue)
+        {
+            query = query.Where(v => v.VoucherDate >= from.Value);
+        }
+
+        if (to.HasValue)
+        {
+            query = query.Where(v => v.VoucherDate <= to.Value);
+        }
+
+        var totalCount = await query.CountAsync(ct);
         var list = await query
             .OrderByDescending(v => v.VoucherDate)
             .ThenByDescending(v => v.Id)
-            .Take(100)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .ToListAsync(ct);
 
-        return list.Select(Map).ToList();
+        return new PagedResult<ReceiptVoucherDto>
+        {
+            Items = list.Select(Map).ToList(),
+            TotalCount = totalCount,
+            PageIndex = page,
+            PageSize = pageSize
+        };
     }
 
     public async Task<ReceiptVoucherDto?> GetReceiptVoucherAsync(int id, CancellationToken ct = default)
     {
         var voucher = await context.ReceiptVouchers.AsNoTracking()
+            .Include(v => v.Branch)
+            .Include(v => v.CashFund)
+            .Include(v => v.BankAccount)
+            .Include(v => v.Partner)
+            .Include(v => v.JournalEntry)
+                .ThenInclude(j => j!.Lines)
+                    .ThenInclude(l => l.Account)
             .Include(v => v.Allocations)
-            .ThenInclude(a => a.SalesInvoice)
+                .ThenInclude(a => a.SalesInvoice)
             .FirstOrDefaultAsync(v => v.Id == id, ct);
 
         return voucher == null ? null : Map(voucher);
@@ -115,8 +161,33 @@ public class ReceiptVoucherService(
                 Notes = request.Notes?.Trim()
             };
 
-            // Apply invoice allocations in deterministic order.
-            foreach (var allocInput in allocations.OrderBy(a => a.SalesInvoiceId))
+            // Apply invoice allocations in deterministic order (explicit or FIFO).
+            var effectiveAllocations = allocations;
+            if (effectiveAllocations.Count == 0 && request.AutoAllocateFifo && partner != null && request.ReceiptType == ReceiptType.CustomerPayment)
+            {
+                var openInvoices = await context.SalesInvoices
+                    .Where(i => i.CustomerId == partner.Id && i.Status == VoucherStatus.Posted && i.RemainingDebt > 0)
+                    .OrderBy(i => i.InvoiceDate)
+                    .ThenBy(i => i.Id)
+                    .Select(i => new { i.Id, i.RemainingDebt })
+                    .ToListAsync(ct);
+
+                var remainingToAllocate = amount;
+                effectiveAllocations = [];
+                foreach (var inv in openInvoices)
+                {
+                    if (remainingToAllocate <= 0) break;
+                    var take = Math.Min(remainingToAllocate, inv.RemainingDebt);
+                    effectiveAllocations.Add(new ReceiptAllocationInput
+                    {
+                        SalesInvoiceId = inv.Id,
+                        AllocatedAmount = take
+                    });
+                    remainingToAllocate = Round(remainingToAllocate - take);
+                }
+            }
+
+            foreach (var allocInput in effectiveAllocations.OrderBy(a => a.SalesInvoiceId))
             {
                 await posting.LockAsync($"sales-invoice:{allocInput.SalesInvoiceId}", ct);
                 var invoice = await context.SalesInvoices
@@ -288,6 +359,8 @@ public class ReceiptVoucherService(
                 await engine.ResolveReceivableAccountIdAsync(request.BranchId, partner?.Id, ct),
             ReceiptType.BankWithdrawalToCash =>
                 (await engine.ResolvePostingRuleAsync("ACC", "INTERNAL_TRANSFER", request.BranchId, "BANK_TO_CASH", ct)).CreditAccountId,
+            ReceiptType.EmployeeRefund =>
+                (await engine.ResolvePostingRuleAsync("ACC", "RECEIPT_EMPLOYEE_REFUND", request.BranchId, dim, ct)).CreditAccountId,
             ReceiptType.OtherReceipt =>
                 (await engine.ResolvePostingRuleAsync("ACC", "RECEIPT_OTHER", request.BranchId, dim, ct)).CreditAccountId,
             _ => throw new BusinessException("error.validation.request", 400)
@@ -300,16 +373,40 @@ public class ReceiptVoucherService(
         VoucherNumber = v.VoucherNumber,
         VoucherDate = v.VoucherDate,
         BranchId = v.BranchId,
+        BranchName = v.Branch?.Name,
         PaymentMethod = v.PaymentMethod,
         CashFundId = v.CashFundId,
         BankAccountId = v.BankAccountId,
+        FundOrBankName = v.CashFund != null
+            ? v.CashFund.Name
+            : v.BankAccount != null
+                ? $"{v.BankAccount.BankName} - {v.BankAccount.AccountNumber}"
+                : null,
         PartnerId = v.PartnerId,
+        PartnerName = v.Partner?.Name,
         PayerName = v.PayerName,
         PayerPhone = v.PayerPhone,
         Amount = v.Amount,
         ReceiptType = v.ReceiptType,
         Status = v.Status,
         JournalEntryId = v.JournalEntryId,
+        JournalEntry = v.JournalEntry == null ? null : new JournalEntrySummaryDto
+        {
+            Id = v.JournalEntry.Id,
+            VoucherNumber = v.JournalEntry.VoucherNumber,
+            TotalDebit = v.JournalEntry.Lines.Sum(l => l.DebitAmount),
+            TotalCredit = v.JournalEntry.Lines.Sum(l => l.CreditAmount),
+            Lines = v.JournalEntry.Lines.Select(l => new JournalEntryLineDto
+            {
+                AccountId = l.AccountId,
+                AccountCode = l.Account?.Code ?? string.Empty,
+                AccountName = l.Account?.Name ?? string.Empty,
+                DebitAmount = l.DebitAmount,
+                CreditAmount = l.CreditAmount,
+                PartnerId = l.PartnerId,
+                Description = l.Description
+            }).ToList()
+        },
         Notes = v.Notes,
         Allocations = v.Allocations.Select(a => new ReceiptAllocationDto
         {

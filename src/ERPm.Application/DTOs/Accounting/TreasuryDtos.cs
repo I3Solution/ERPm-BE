@@ -88,15 +88,17 @@ public class TreasuryBalanceSummaryDto
 public enum InternalTransferDirection
 {
     CashToBank = 1,
-    BankToCash = 2
+    BankToCash = 2,
+    BankToBank = 3
 }
 
 public class InternalTransferRequest
 {
     public int BranchId { get; set; }
     public InternalTransferDirection Direction { get; set; }
-    public int CashFundId { get; set; }
-    public int BankAccountId { get; set; }
+    public int? CashFundId { get; set; }
+    public int? BankAccountId { get; set; }
+    public int? DestinationBankAccountId { get; set; }
     public decimal Amount { get; set; }
     public DateTime? TransferDate { get; set; }
     public string? Notes { get; set; }
@@ -107,8 +109,29 @@ public class InternalTransferResultDto
     public int JournalEntryId { get; set; }
     public string VoucherNumber { get; set; } = string.Empty;
     public decimal Amount { get; set; }
-    public decimal CashFundBalance { get; set; }
+    public decimal? CashFundBalance { get; set; }
     public decimal BankAccountBalance { get; set; }
+    public decimal? DestinationBankAccountBalance { get; set; }
+}
+
+public class JournalEntryLineDto
+{
+    public int AccountId { get; set; }
+    public string AccountCode { get; set; } = string.Empty;
+    public string AccountName { get; set; } = string.Empty;
+    public decimal DebitAmount { get; set; }
+    public decimal CreditAmount { get; set; }
+    public int? PartnerId { get; set; }
+    public string? Description { get; set; }
+}
+
+public class JournalEntrySummaryDto
+{
+    public int Id { get; set; }
+    public string VoucherNumber { get; set; } = string.Empty;
+    public decimal TotalDebit { get; set; }
+    public decimal TotalCredit { get; set; }
+    public List<JournalEntryLineDto> Lines { get; set; } = [];
 }
 
 public class ReceiptAllocationInput
@@ -138,6 +161,7 @@ public class CreateReceiptVoucherRequest
     public decimal Amount { get; set; }
     public ReceiptType ReceiptType { get; set; } = ReceiptType.CustomerPayment;
     public string? Notes { get; set; }
+    public bool AutoAllocateFifo { get; set; } = false;
     public List<ReceiptAllocationInput> Allocations { get; set; } = [];
 }
 
@@ -147,16 +171,20 @@ public class ReceiptVoucherDto
     public string VoucherNumber { get; set; } = string.Empty;
     public DateTime VoucherDate { get; set; }
     public int BranchId { get; set; }
+    public string? BranchName { get; set; }
     public TreasuryPaymentMethod PaymentMethod { get; set; }
     public int? CashFundId { get; set; }
     public int? BankAccountId { get; set; }
+    public string? FundOrBankName { get; set; }
     public int? PartnerId { get; set; }
+    public string? PartnerName { get; set; }
     public string PayerName { get; set; } = string.Empty;
     public string? PayerPhone { get; set; }
     public decimal Amount { get; set; }
     public ReceiptType ReceiptType { get; set; }
     public VoucherStatus Status { get; set; }
     public int? JournalEntryId { get; set; }
+    public JournalEntrySummaryDto? JournalEntry { get; set; }
     public string? Notes { get; set; }
     public List<ReceiptAllocationDto> Allocations { get; set; } = [];
 }
@@ -182,16 +210,20 @@ public class PaymentVoucherDto
     public string VoucherNumber { get; set; } = string.Empty;
     public DateTime VoucherDate { get; set; }
     public int BranchId { get; set; }
+    public string? BranchName { get; set; }
     public TreasuryPaymentMethod PaymentMethod { get; set; }
     public int? CashFundId { get; set; }
     public int? BankAccountId { get; set; }
+    public string? FundOrBankName { get; set; }
     public int? PartnerId { get; set; }
+    public string? PartnerName { get; set; }
     public string RecipientName { get; set; } = string.Empty;
     public decimal Amount { get; set; }
     public PaymentType PaymentType { get; set; }
     public int? ExpenseAccountId { get; set; }
     public VoucherStatus Status { get; set; }
     public int? JournalEntryId { get; set; }
+    public JournalEntrySummaryDto? JournalEntry { get; set; }
     public string? Notes { get; set; }
 }
 

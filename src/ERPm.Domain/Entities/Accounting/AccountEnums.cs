@@ -34,6 +34,7 @@ public enum ReceiptType
     CustomerPayment = 1,
     AdvanceFromCustomer = 2,
     BankWithdrawalToCash = 3,
+    EmployeeRefund = 4,
     OtherReceipt = 99
 }
 
@@ -43,5 +44,7 @@ public enum PaymentType
     ExpensePayment = 2,
     SalaryPayment = 3,
     CashDepositToBank = 4,
+    EmployeeAdvance = 5,
+    TaxPayment = 6,
     OtherPayment = 99
 }

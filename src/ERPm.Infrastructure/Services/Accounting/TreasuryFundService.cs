@@ -208,42 +208,89 @@ public class TreasuryFundService(
 
     public Task<InternalTransferResultDto> TransferInternalAsync(InternalTransferRequest request, CancellationToken ct = default)
     {
-        Require(request.BranchId > 0 && request.CashFundId > 0 && request.BankAccountId > 0, "error.validation.request");
+        Require(request.BranchId > 0, "error.validation.request");
         Require(Enum.IsDefined(request.Direction), "error.validation.request");
         ValidateNumber(request.Amount, positive: true);
 
+        if (request.Direction == InternalTransferDirection.BankToBank)
+        {
+            Require(request.BankAccountId is > 0 && request.DestinationBankAccountId is > 0, "error.validation.request");
+            Require(request.BankAccountId != request.DestinationBankAccountId, "error.treasury.invalid_transfer", 400);
+        }
+        else
+        {
+            Require(request.CashFundId is > 0 && request.BankAccountId is > 0, "error.validation.request");
+        }
+
         return posting.RunAsync(async () =>
         {
-            // Lock in deterministic order (cash then bank) to avoid deadlocks.
-            await posting.LockAsync($"treasury-cash:{request.CashFundId}", ct);
-            await posting.LockAsync($"treasury-bank:{request.BankAccountId}", ct);
-
-            var cashFund = await context.CashFunds
-                .FirstOrDefaultAsync(f => f.Id == request.CashFundId && f.IsActive, ct)
-                ?? throw new BusinessException("error.treasury.fund_not_found", 404);
-            var bankAccount = await context.BankAccounts
-                .FirstOrDefaultAsync(b => b.Id == request.BankAccountId && b.IsActive, ct)
-                ?? throw new BusinessException("error.treasury.bank_account_not_found", 404);
-
-            Require(cashFund.BranchId == request.BranchId && bankAccount.BranchId == request.BranchId, "error.validation.request");
-
             var amount = Round(request.Amount);
             int debitAccountId;
             int creditAccountId;
+            decimal? cashFundBalance = null;
+            decimal bankAccountBalance;
+            decimal? destinationBankBalance = null;
 
-            if (request.Direction == InternalTransferDirection.CashToBank)
+            if (request.Direction == InternalTransferDirection.BankToBank)
             {
-                TreasuryPostingHelper.DebitFundBalance(cashFund, null, amount);
-                TreasuryPostingHelper.CreditFundBalance(null, bankAccount, amount);
-                debitAccountId = bankAccount.AccountId;
-                creditAccountId = cashFund.AccountId;
+                var srcId = request.BankAccountId!.Value;
+                var dstId = request.DestinationBankAccountId!.Value;
+                // Lock bank accounts in ascending Id order to avoid deadlocks.
+                var firstId = Math.Min(srcId, dstId);
+                var secondId = Math.Max(srcId, dstId);
+                await posting.LockAsync($"treasury-bank:{firstId}", ct);
+                await posting.LockAsync($"treasury-bank:{secondId}", ct);
+
+                var sourceBank = await context.BankAccounts
+                    .FirstOrDefaultAsync(b => b.Id == srcId && b.IsActive, ct)
+                    ?? throw new BusinessException("error.treasury.bank_account_not_found", 404);
+                var destBank = await context.BankAccounts
+                    .FirstOrDefaultAsync(b => b.Id == dstId && b.IsActive, ct)
+                    ?? throw new BusinessException("error.treasury.bank_account_not_found", 404);
+
+                Require(sourceBank.BranchId == request.BranchId && destBank.BranchId == request.BranchId, "error.validation.request");
+
+                TreasuryPostingHelper.DebitFundBalance(null, sourceBank, amount);
+                TreasuryPostingHelper.CreditFundBalance(null, destBank, amount);
+                debitAccountId = destBank.AccountId;
+                creditAccountId = sourceBank.AccountId;
+                bankAccountBalance = sourceBank.CurrentBalance;
+                destinationBankBalance = destBank.CurrentBalance;
             }
             else
             {
-                TreasuryPostingHelper.DebitFundBalance(null, bankAccount, amount);
-                TreasuryPostingHelper.CreditFundBalance(cashFund, null, amount);
-                debitAccountId = cashFund.AccountId;
-                creditAccountId = bankAccount.AccountId;
+                var cashFundId = request.CashFundId!.Value;
+                var bankAccountId = request.BankAccountId!.Value;
+                // Lock in deterministic order (cash then bank) to avoid deadlocks.
+                await posting.LockAsync($"treasury-cash:{cashFundId}", ct);
+                await posting.LockAsync($"treasury-bank:{bankAccountId}", ct);
+
+                var cashFund = await context.CashFunds
+                    .FirstOrDefaultAsync(f => f.Id == cashFundId && f.IsActive, ct)
+                    ?? throw new BusinessException("error.treasury.fund_not_found", 404);
+                var bankAccount = await context.BankAccounts
+                    .FirstOrDefaultAsync(b => b.Id == bankAccountId && b.IsActive, ct)
+                    ?? throw new BusinessException("error.treasury.bank_account_not_found", 404);
+
+                Require(cashFund.BranchId == request.BranchId && bankAccount.BranchId == request.BranchId, "error.validation.request");
+
+                if (request.Direction == InternalTransferDirection.CashToBank)
+                {
+                    TreasuryPostingHelper.DebitFundBalance(cashFund, null, amount);
+                    TreasuryPostingHelper.CreditFundBalance(null, bankAccount, amount);
+                    debitAccountId = bankAccount.AccountId;
+                    creditAccountId = cashFund.AccountId;
+                }
+                else
+                {
+                    TreasuryPostingHelper.DebitFundBalance(null, bankAccount, amount);
+                    TreasuryPostingHelper.CreditFundBalance(cashFund, null, amount);
+                    debitAccountId = cashFund.AccountId;
+                    creditAccountId = bankAccount.AccountId;
+                }
+
+                cashFundBalance = cashFund.CurrentBalance;
+                bankAccountBalance = bankAccount.CurrentBalance;
             }
 
             var transferDate = request.TransferDate ?? DateTime.UtcNow;
@@ -286,8 +333,9 @@ public class TreasuryFundService(
                 JournalEntryId = journal.Id,
                 VoucherNumber = journal.VoucherNumber,
                 Amount = amount,
-                CashFundBalance = cashFund.CurrentBalance,
-                BankAccountBalance = bankAccount.CurrentBalance
+                CashFundBalance = cashFundBalance,
+                BankAccountBalance = bankAccountBalance,
+                DestinationBankAccountBalance = destinationBankBalance
             };
         }, ct);
     }

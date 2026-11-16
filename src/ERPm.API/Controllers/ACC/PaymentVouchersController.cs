@@ -7,17 +7,23 @@ using Microsoft.AspNetCore.Mvc;
 namespace ERPm.API.Controllers.ACC;
 
 [Route("api/v1/accounting/payment-vouchers")]
+[Route("api/v1/treasury/payment-vouchers")]
 public class PaymentVouchersController(IPaymentVoucherService paymentService) : BaseApiController
 {
     [RequirePermission("acc:payment-voucher:view")]
     [HttpGet]
-    public async Task<ActionResult<ApiResponse<List<PaymentVoucherDto>>>> GetAll(
+    public async Task<ActionResult<ApiResponse<PagedResult<PaymentVoucherDto>>>> GetAll(
         [FromQuery] int? branchId,
         [FromQuery] int? partnerId,
-        CancellationToken ct)
+        [FromQuery] string? q,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken ct = default)
     {
-        var result = await paymentService.GetPaymentVouchersAsync(branchId, partnerId, ct);
-        return Ok(ApiResponse<List<PaymentVoucherDto>>.Ok(result));
+        var result = await paymentService.GetPaymentVouchersAsync(branchId, partnerId, q, from, to, page, pageSize, ct);
+        return Ok(ApiResponse<PagedResult<PaymentVoucherDto>>.Ok(result));
     }
 
     [RequirePermission("acc:payment-voucher:view")]

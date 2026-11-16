@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace ERPm.API.Controllers.ACC;
 
 [Route("api/v1/accounting/treasury")]
+[Route("api/v1/treasury")]
 public class TreasuryFundsController(ITreasuryFundService treasuryService) : BaseApiController
 {
     [RequirePermission("acc:treasury:view")]

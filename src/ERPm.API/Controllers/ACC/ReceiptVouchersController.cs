@@ -7,17 +7,23 @@ using Microsoft.AspNetCore.Mvc;
 namespace ERPm.API.Controllers.ACC;
 
 [Route("api/v1/accounting/receipt-vouchers")]
+[Route("api/v1/treasury/receipt-vouchers")]
 public class ReceiptVouchersController(IReceiptVoucherService receiptService) : BaseApiController
 {
     [RequirePermission("acc:receipt-voucher:view")]
     [HttpGet]
-    public async Task<ActionResult<ApiResponse<List<ReceiptVoucherDto>>>> GetAll(
+    public async Task<ActionResult<ApiResponse<PagedResult<ReceiptVoucherDto>>>> GetAll(
         [FromQuery] int? branchId,
         [FromQuery] int? partnerId,
-        CancellationToken ct)
+        [FromQuery] string? q,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken ct = default)
     {
-        var result = await receiptService.GetReceiptVouchersAsync(branchId, partnerId, ct);
-        return Ok(ApiResponse<List<ReceiptVoucherDto>>.Ok(result));
+        var result = await receiptService.GetReceiptVouchersAsync(branchId, partnerId, q, from, to, page, pageSize, ct);
+        return Ok(ApiResponse<PagedResult<ReceiptVoucherDto>>.Ok(result));
     }
 
     [RequirePermission("acc:receipt-voucher:view")]

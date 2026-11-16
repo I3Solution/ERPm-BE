@@ -44,6 +44,7 @@ public static class PermissionCatalog
         ("sd:report", [View]),
         ("pur:order", [View, Create, Edit, Delete, Confirm]),
         ("crm:partner", [View, Create, UnlimitedCredit]),
+        ("acc:account", [View, Create, Edit]),
         ("acc:posting-profile", [View, Create, Edit]),
         ("acc:treasury", [View, Create, Edit, Delete]),
         ("acc:receipt-voucher", [View, Create, Cancel]),
