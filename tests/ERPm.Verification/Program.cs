@@ -870,6 +870,8 @@ try
     var byNameNext = await staff.GetPagedAsync(new EmployeeFilterQuery { Keyword = "Sort ", Sort = "fullName", PageSize = 2, PageIndex = 2 });
     Check(byName.Items.Select(e => e.FullName).Concat(byNameNext.Items.Select(e => e.FullName)).SequenceEqual(["Sort Alpha", "Sort Bravo", "Sort Charlie"]),
         "the employee list sorts by name ascending across pages");
+    var byFullName = await staff.GetPagedAsync(new EmployeeFilterQuery { Keyword = "sort alpha" });
+    Check(byFullName.Items.Count == 1 && byFullName.Items[0].Code == "SORT2", "the employee keyword matches the full name, not only the code");
     var byPositionDesc = await staff.GetPagedAsync(new EmployeeFilterQuery { Keyword = "Sort ", Sort = "-jobPositionName", PageSize = 50 });
     Check(byPositionDesc.Items.Select(e => e.Code).SequenceEqual(["SORT3", "SORT1", "SORT2"]),
         "the employee list sorts by job position name descending and breaks ties by id descending");
