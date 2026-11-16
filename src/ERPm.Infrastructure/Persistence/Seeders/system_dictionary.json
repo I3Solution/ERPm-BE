@@ -55,6 +55,8 @@
     "common.back_to_list": "Quay lại danh sách",
     "common.load_error": "Không tải được dữ liệu.",
     "common.retry": "Thử lại",
+
+    "common.empty": "Chưa có dữ liệu.",
     "common.prev_page": "Trước",
     "common.next_page": "Sau",
     "common.unsaved_title": "Thay đổi chưa lưu",
@@ -1096,6 +1098,8 @@
     "common.back_to_list": "Back to list",
     "common.load_error": "Could not load data.",
     "common.retry": "Retry",
+
+    "common.empty": "No data yet.",
     "common.prev_page": "Previous",
     "common.next_page": "Next",
     "common.unsaved_title": "Unsaved changes",
