@@ -237,6 +237,9 @@ public static class TreasuryChecks
         var period = await treasury.GetPeriodSummaryAsync(DateTime.UtcNow.AddDays(-1), DateTime.UtcNow, branch.Id);
         ctx.Check(period.TotalReceipts == 350_000m && period.TotalPayments == 900_000m && period.NetCashFlow == -550_000m,
             "Treasury period summary totals posted receipts and payments of the branch");
+        // Dates bound from the query string have Kind=Unspecified; the endpoint must accept them.
+        var unspecified = await treasury.GetPeriodSummaryAsync(DateTime.SpecifyKind(DateTime.UtcNow.Date.AddDays(-1), DateTimeKind.Unspecified), DateTime.SpecifyKind(DateTime.UtcNow.Date, DateTimeKind.Unspecified), branch.Id);
+        ctx.Check(unspecified.TotalReceipts == 350_000m, "Treasury period summary accepts dates with Kind=Unspecified");
         var emptyPeriod = await treasury.GetPeriodSummaryAsync(DateTime.UtcNow.AddDays(-30), DateTime.UtcNow.AddDays(-20), branch.Id);
         ctx.Check(emptyPeriod.TotalReceipts == 0m && emptyPeriod.TotalPayments == 0m, "Treasury period summary excludes vouchers outside the period");
 
