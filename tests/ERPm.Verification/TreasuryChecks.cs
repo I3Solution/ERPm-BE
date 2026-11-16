@@ -257,6 +257,85 @@ public static class TreasuryChecks
         ctx.Check(partnerEntity.DebtBalance == 500_000m, "Reversing receipt restores Partner DebtBalance");
         ctx.Check(cashEntity.CurrentBalance == 700_000m, "Reversing receipt restores CashFund CurrentBalance");
         ctx.Check(reversalJournal != null, "Reversing receipt creates a reversal JournalEntry with ReversesJournalEntryId");
+
+        // 8. Spec alignment checks: embedded JournalEntry, PagedResult, FIFO allocation, BankToBank, AccountService
+        ctx.Check(receipt.JournalEntry != null && receipt.JournalEntry.Lines.Count == 2 && receipt.JournalEntry.TotalDebit == 350_000m,
+            "ReceiptVoucherDto embeds JournalEntry with balanced lines");
+
+        var pagedReceipts = await receipts.GetReceiptVouchersAsync(branchId: branch.Id, q: receipt.VoucherNumber, page: 1, pageSize: 10);
+        ctx.Check(pagedReceipts.TotalCount == 1 && pagedReceipts.Items.Count == 1, "GetReceiptVouchersAsync supports search q and PagedResult");
+
+        var fifoReceipt = await receipts.CreateReceiptVoucherAsync(new CreateReceiptVoucherRequest
+        {
+            BranchId = branch.Id,
+            PaymentMethod = TreasuryPaymentMethod.Cash,
+            CashFundId = cashFund.Id,
+            PartnerId = partner.Id,
+            PayerName = partner.Name,
+            Amount = 250_000m,
+            ReceiptType = ReceiptType.CustomerPayment,
+            AutoAllocateFifo = true
+        });
+        ctx.Check(fifoReceipt.Allocations.Count == 2
+            && fifoReceipt.Allocations.Any(a => a.SalesInvoiceId == inv1.Id && a.AllocatedAmount == 200_000m)
+            && fifoReceipt.Allocations.Any(a => a.SalesInvoiceId == inv2.Id && a.AllocatedAmount == 50_000m),
+            "AutoAllocateFifo allocates oldest invoices first");
+
+        var bankAccount2 = await treasury.CreateBankAccountAsync(new CreateBankAccountRequest
+        {
+            BankName = "Techcombank",
+            AccountNumber = $"TCB-{Guid.NewGuid():N}"[..16],
+            AccountHolder = "ERPm Verify",
+            BranchId = branch.Id,
+            AccountId = acc1121.Id,
+            OpeningBalance = 0m
+        });
+        var bankTransfer = await treasury.TransferInternalAsync(new InternalTransferRequest
+        {
+            BranchId = branch.Id,
+            Direction = InternalTransferDirection.BankToBank,
+            BankAccountId = bankAccount.Id,
+            DestinationBankAccountId = bankAccount2.Id,
+            Amount = 100_000m,
+            Notes = "Bank to bank transfer"
+        });
+        ctx.Check(bankTransfer.DestinationBankAccountBalance == 100_000m, "BankToBank transfer credits destination bank account");
+
+        var accountService = new AccountService(db);
+        var tree = await accountService.GetAccountsAsync();
+        var postable = await accountService.GetAccountsAsync(isPostable: true);
+        ctx.Check(tree.Count > 0 && postable.All(a => a.IsPostable), "AccountService returns COA tree and filters postable accounts");
+
+        var createdAccount = await accountService.CreateAccountAsync(new CreateAccountRequest
+        {
+            Code = $"1119-{Guid.NewGuid():N}"[..10],
+            Name = "Temp Cash Subaccount",
+            AccountType = AccountType.Asset,
+            Nature = AccountNature.DebitOnly,
+            IsPostable = true,
+            ParentId = acc1111.ParentId
+        });
+        var updatedAccount = await accountService.UpdateAccountAsync(createdAccount.Id, new UpdateAccountRequest
+        {
+            Code = createdAccount.Code,
+            Name = "Updated Temp Cash Subaccount",
+            AccountType = AccountType.Asset,
+            Nature = AccountNature.DebitOnly,
+            IsPostable = true,
+            ParentId = createdAccount.ParentId
+        });
+        ctx.Check(updatedAccount.Name == "Updated Temp Cash Subaccount", "AccountService updates unused account");
+
+        await ctx.Reject(
+            () => accountService.UpdateAccountAsync(acc1111.Id, new UpdateAccountRequest
+            {
+                Code = acc1111.Code,
+                Name = "Should Fail",
+                AccountType = acc1111.AccountType,
+                Nature = acc1111.Nature,
+                IsPostable = acc1111.IsPostable
+            }),
+            "error.accounting.account_in_use");
     }
 
     private sealed class TestUser : ICurrentUser

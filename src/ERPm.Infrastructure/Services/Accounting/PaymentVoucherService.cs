@@ -17,12 +17,25 @@ public class PaymentVoucherService(
     PostingTransaction posting,
     IDynamicPostingEngine engine) : IPaymentVoucherService
 {
-    public async Task<List<PaymentVoucherDto>> GetPaymentVouchersAsync(
+    public async Task<PagedResult<PaymentVoucherDto>> GetPaymentVouchersAsync(
         int? branchId = null,
         int? partnerId = null,
+        string? q = null,
+        DateTime? from = null,
+        DateTime? to = null,
+        int page = 1,
+        int pageSize = 20,
         CancellationToken ct = default)
     {
-        var query = context.PaymentVouchers.AsNoTracking().AsQueryable();
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+
+        var query = context.PaymentVouchers.AsNoTracking()
+            .Include(v => v.Branch)
+            .Include(v => v.CashFund)
+            .Include(v => v.BankAccount)
+            .Include(v => v.Partner)
+            .AsQueryable();
 
         if (branchId is > 0)
         {
@@ -35,18 +48,52 @@ public class PaymentVoucherService(
             query = query.Where(v => v.PartnerId == partnerId.Value);
         }
 
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            var term = q.Trim().ToLower();
+            query = query.Where(v =>
+                v.VoucherNumber.ToLower().Contains(term) ||
+                v.RecipientName.ToLower().Contains(term) ||
+                (v.Notes != null && v.Notes.ToLower().Contains(term)));
+        }
+
+        if (from.HasValue)
+        {
+            query = query.Where(v => v.VoucherDate >= from.Value);
+        }
+
+        if (to.HasValue)
+        {
+            query = query.Where(v => v.VoucherDate <= to.Value);
+        }
+
+        var totalCount = await query.CountAsync(ct);
         var list = await query
             .OrderByDescending(v => v.VoucherDate)
             .ThenByDescending(v => v.Id)
-            .Take(100)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .ToListAsync(ct);
 
-        return list.Select(Map).ToList();
+        return new PagedResult<PaymentVoucherDto>
+        {
+            Items = list.Select(Map).ToList(),
+            TotalCount = totalCount,
+            PageIndex = page,
+            PageSize = pageSize
+        };
     }
 
     public async Task<PaymentVoucherDto?> GetPaymentVoucherAsync(int id, CancellationToken ct = default)
     {
         var voucher = await context.PaymentVouchers.AsNoTracking()
+            .Include(v => v.Branch)
+            .Include(v => v.CashFund)
+            .Include(v => v.BankAccount)
+            .Include(v => v.Partner)
+            .Include(v => v.JournalEntry)
+                .ThenInclude(j => j!.Lines)
+                    .ThenInclude(l => l.Account)
             .FirstOrDefaultAsync(v => v.Id == id, ct);
         return voucher == null ? null : Map(voucher);
     }
@@ -215,6 +262,10 @@ public class PaymentVoucherService(
                 (await engine.ResolvePostingRuleAsync("ACC", "PAYMENT_SALARY", request.BranchId, dim, ct)).DebitAccountId,
             PaymentType.CashDepositToBank =>
                 (await engine.ResolvePostingRuleAsync("ACC", "INTERNAL_TRANSFER", request.BranchId, "CASH_TO_BANK", ct)).DebitAccountId,
+            PaymentType.EmployeeAdvance =>
+                (await engine.ResolvePostingRuleAsync("ACC", "PAYMENT_ADVANCE", request.BranchId, dim, ct)).DebitAccountId,
+            PaymentType.TaxPayment =>
+                (await engine.ResolvePostingRuleAsync("ACC", "PAYMENT_TAX", request.BranchId, dim, ct)).DebitAccountId,
             PaymentType.OtherPayment =>
                 (await engine.ResolvePostingRuleAsync("ACC", "PAYMENT_OTHER", request.BranchId, dim, ct)).DebitAccountId,
             _ => throw new BusinessException("error.validation.request", 400)
@@ -227,16 +278,40 @@ public class PaymentVoucherService(
         VoucherNumber = v.VoucherNumber,
         VoucherDate = v.VoucherDate,
         BranchId = v.BranchId,
+        BranchName = v.Branch?.Name,
         PaymentMethod = v.PaymentMethod,
         CashFundId = v.CashFundId,
         BankAccountId = v.BankAccountId,
+        FundOrBankName = v.CashFund != null
+            ? v.CashFund.Name
+            : v.BankAccount != null
+                ? $"{v.BankAccount.BankName} - {v.BankAccount.AccountNumber}"
+                : null,
         PartnerId = v.PartnerId,
+        PartnerName = v.Partner?.Name,
         RecipientName = v.RecipientName,
         Amount = v.Amount,
         PaymentType = v.PaymentType,
         ExpenseAccountId = v.ExpenseAccountId,
         Status = v.Status,
         JournalEntryId = v.JournalEntryId,
+        JournalEntry = v.JournalEntry == null ? null : new JournalEntrySummaryDto
+        {
+            Id = v.JournalEntry.Id,
+            VoucherNumber = v.JournalEntry.VoucherNumber,
+            TotalDebit = v.JournalEntry.Lines.Sum(l => l.DebitAmount),
+            TotalCredit = v.JournalEntry.Lines.Sum(l => l.CreditAmount),
+            Lines = v.JournalEntry.Lines.Select(l => new JournalEntryLineDto
+            {
+                AccountId = l.AccountId,
+                AccountCode = l.Account?.Code ?? string.Empty,
+                AccountName = l.Account?.Name ?? string.Empty,
+                DebitAmount = l.DebitAmount,
+                CreditAmount = l.CreditAmount,
+                PartnerId = l.PartnerId,
+                Description = l.Description
+            }).ToList()
+        },
         Notes = v.Notes
     };
 }

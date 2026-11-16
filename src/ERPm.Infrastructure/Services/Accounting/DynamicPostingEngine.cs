@@ -134,13 +134,13 @@ public sealed class DynamicPostingEngine(ApplicationDbContext context) : IDynami
         if (journal.Lines.Count < 2 ||
             journal.Lines.Any(l => l.AccountId <= 0 || l.DebitAmount < 0 || l.CreditAmount < 0 || (l.DebitAmount == 0) == (l.CreditAmount == 0)))
         {
-            throw new BusinessException("error.accounting.unbalanced_journal", 409);
+            throw new BusinessException("error.accounting.unbalanced_journal", 400);
         }
 
         var totalDebit = journal.Lines.Sum(l => l.DebitAmount);
         var totalCredit = journal.Lines.Sum(l => l.CreditAmount);
         if (totalDebit <= 0 || totalDebit != totalCredit)
-            throw new BusinessException("error.accounting.unbalanced_journal", 409);
+            throw new BusinessException("error.accounting.unbalanced_journal", 400);
 
         var accountIds = journal.Lines.Select(l => l.AccountId).Distinct().ToArray();
         var accounts = await context.Accounts

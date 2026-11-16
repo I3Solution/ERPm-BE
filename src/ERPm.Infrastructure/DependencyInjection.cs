@@ -42,6 +42,7 @@ public static class DependencyInjection
         services.AddScoped<IApplicationDbContext>(provider => provider.GetRequiredService<ApplicationDbContext>());
         services.AddScoped<PostingTransaction>();
         services.AddScoped<StockReceiptPostingService>();
+        services.AddScoped<ERPm.Application.Features.Accounting.IAccountService, ERPm.Infrastructure.Services.Accounting.AccountService>();
         services.AddScoped<ERPm.Application.Features.Accounting.IDynamicPostingEngine, ERPm.Infrastructure.Services.Accounting.DynamicPostingEngine>();
         services.AddScoped<ERPm.Application.Features.Accounting.IPostingProfileService, ERPm.Infrastructure.Services.Accounting.PostingProfileService>();
         services.AddScoped<ERPm.Application.Features.Accounting.ITreasuryFundService, ERPm.Infrastructure.Services.Accounting.TreasuryFundService>();
