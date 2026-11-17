@@ -1,5 +1,6 @@
 using ERPm.Application.Common.Crud;
 using ERPm.Application.Common.Notifications;
+using ERPm.Application.Common.Transfer;
 using ERPm.Infrastructure.Notifications;
 using ERPm.Infrastructure.Notifications.Channels;
 using ERPm.Application.Common.Interfaces;
@@ -13,6 +14,7 @@ using ERPm.Application.Features.System;
 using ERPm.Infrastructure.Persistence;
 using ERPm.Infrastructure.Services;
 using ERPm.Infrastructure.Services.Common;
+using ERPm.Infrastructure.Services.Common.Transfer;
 using ERPm.Infrastructure.Services.HumanResource;
 using ERPm.Infrastructure.Services.Iam;
 using ERPm.Application.DTOs.HumanResource;
@@ -48,6 +50,7 @@ public static class DependencyInjection
         services.AddScoped<ERPm.Application.Features.Accounting.ITreasuryFundService, ERPm.Infrastructure.Services.Accounting.TreasuryFundService>();
         services.AddScoped<ERPm.Application.Features.Accounting.IReceiptVoucherService, ERPm.Infrastructure.Services.Accounting.ReceiptVoucherService>();
         services.AddScoped<ERPm.Application.Features.Accounting.IPaymentVoucherService, ERPm.Infrastructure.Services.Accounting.PaymentVoucherService>();
+        services.AddScoped<ERPm.Application.Features.Accounting.IAccountingReportService, ERPm.Infrastructure.Services.Accounting.AccountingReportService>();
 
         // Register Generic Base CRUD Service for open generic types (Type-safe & Zero boilerplate for Solo Dev)
         services.AddScoped(typeof(IBaseCrudService<,,,,>), typeof(BaseCrudService<,,,,>));
@@ -99,6 +102,10 @@ public static class DependencyInjection
         services.AddScoped<INotificationEngine, NotificationEngine>();
         services.AddScoped<INotificationService, NotificationService>();
         services.AddHostedService<ERPm.Infrastructure.Notifications.BackgroundWorkers.NotificationOutboxWorker>();
+
+        // Core Excel Import/Export
+        services.AddSingleton<IExcelExportService, ExcelExportService>();
+        services.AddSingleton<IExcelImportService, ExcelImportService>();
 
         return services;
     }

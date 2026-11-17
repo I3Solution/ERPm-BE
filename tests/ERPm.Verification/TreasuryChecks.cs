@@ -237,6 +237,9 @@ public static class TreasuryChecks
         var period = await treasury.GetPeriodSummaryAsync(DateTime.UtcNow.AddDays(-1), DateTime.UtcNow, branch.Id);
         ctx.Check(period.TotalReceipts == 350_000m && period.TotalPayments == 900_000m && period.NetCashFlow == -550_000m,
             "Treasury period summary totals posted receipts and payments of the branch");
+        // Dates bound from the query string have Kind=Unspecified; the endpoint must accept them.
+        var unspecified = await treasury.GetPeriodSummaryAsync(DateTime.SpecifyKind(DateTime.UtcNow.Date.AddDays(-1), DateTimeKind.Unspecified), DateTime.SpecifyKind(DateTime.UtcNow.Date, DateTimeKind.Unspecified), branch.Id);
+        ctx.Check(unspecified.TotalReceipts == 350_000m, "Treasury period summary accepts dates with Kind=Unspecified");
         var emptyPeriod = await treasury.GetPeriodSummaryAsync(DateTime.UtcNow.AddDays(-30), DateTime.UtcNow.AddDays(-20), branch.Id);
         ctx.Check(emptyPeriod.TotalReceipts == 0m && emptyPeriod.TotalPayments == 0m, "Treasury period summary excludes vouchers outside the period");
 
@@ -325,6 +328,34 @@ public static class TreasuryChecks
         ctx.Check((await partnerService.GetPartnersPageAsync(1, 10, "0988000005", null)).TotalCount == 1, "Partner page: search matches the phone");
         await ctx.Reject(() => partnerService.GetPartnersPageAsync(1, 500, null, null), "error.validation.request");
 
+        // 4. Outstanding invoices of a customer (S26.6 receipt allocation): right customer, Posted, receivable left, oldest first, branch scope
+        var otherBranch = new Branch { Code = "TRE26B", Name = "Treasury Branch B", ParentId = rootBranch.Id, IsActive = true };
+        var debtor = new Partner { Code = "KH-TRE26-OPEN", Name = "Open Debt Customer", PartnerType = PartnerType.Customer, IsUnlimitedCredit = true, IsActive = true };
+        var bystander = new Partner { Code = "KH-TRE26-OTHER", Name = "Other Customer", PartnerType = PartnerType.Customer, IsUnlimitedCredit = true, IsActive = true };
+        db.Branches.Add(otherBranch);
+        db.Partners.AddRange(debtor, bystander);
+        await db.SaveChangesAsync();
+        SalesInvoice Open(string number, int days, int? customerId, int branchId, VoucherStatus status, decimal remaining) => new()
+        {
+            InvoiceNumber = number, InvoiceDate = DateTime.UtcNow.AddDays(-days), BranchId = branchId, WarehouseId = warehouse.Id, CustomerId = customerId,
+            CustomerName = "x", Status = status, TotalAmount = 500m, PaidAmount = 500m - remaining, RemainingDebt = remaining
+        };
+        db.SalesInvoices.AddRange(
+            Open("OPN-NEW", 1, debtor.Id, branch.Id, VoucherStatus.Posted, 40m),
+            Open("OPN-OLD", 5, debtor.Id, branch.Id, VoucherStatus.Posted, 100m),
+            Open("OPN-PAID", 3, debtor.Id, branch.Id, VoucherStatus.Posted, 0m),
+            Open("OPN-VOID", 2, debtor.Id, branch.Id, VoucherStatus.Cancelled, 60m),
+            Open("OPN-OTHERCUST", 4, bystander.Id, branch.Id, VoucherStatus.Posted, 70m),
+            Open("OPN-OTHERBR", 6, debtor.Id, otherBranch.Id, VoucherStatus.Posted, 30m));
+        await db.SaveChangesAsync();
+        var openInvoices = await salesService.GetOutstandingInvoicesAsync(debtor.Id);
+        ctx.Check(openInvoices.Select(i => i.InvoiceNumber).SequenceEqual(["OPN-OTHERBR", "OPN-OLD", "OPN-NEW"]),
+            "Outstanding invoices: only this customer's Posted invoices with a receivable, oldest first");
+        await using var scopedDb = ctx.Db(new TestUser(admin: false, branches: [branch.Id]));
+        var scopedSales = new SalesInvoiceService(scopedDb, new BranchService(scopedDb), new PostingTransaction(scopedDb), null, null, null, engine);
+        ctx.Check((await scopedSales.GetOutstandingInvoicesAsync(debtor.Id)).Select(i => i.InvoiceNumber).SequenceEqual(["OPN-OLD", "OPN-NEW"]),
+            "Outstanding invoices respect the branch scope of the user");
+
         var accountService = new AccountService(db);
         var tree = await accountService.GetAccountsAsync();
         var postable = await accountService.GetAccountsAsync(isPostable: true);
@@ -362,7 +393,7 @@ public static class TreasuryChecks
             "error.accounting.account_in_use");
     }
 
-    private sealed class TestUser : ICurrentUser
+    private sealed class TestUser(bool admin = true, int[]? branches = null) : ICurrentUser
     {
         public string? UserId => "1";
         public string? UserName => "treasury-verifier";
@@ -371,10 +402,10 @@ public static class TreasuryChecks
         public int? CompanyId => null;
         public int? BranchId => null;
         public int? DepartmentId => null;
-        public IReadOnlyList<int> AllowedBranchIds => [];
-        public int[] BranchIds => [];
+        public IReadOnlyList<int> AllowedBranchIds => branches ?? [];
+        public int[] BranchIds => branches ?? [];
         public bool IsAuthenticated => true;
-        public bool IsAdmin => true;
+        public bool IsAdmin => admin;
         public bool IsSystem => false;
     }
 }

@@ -210,8 +210,9 @@ public class TreasuryFundService(
     public async Task<TreasuryPeriodSummaryDto> GetPeriodSummaryAsync(DateTime? from, DateTime? to, int? branchId = null, CancellationToken ct = default)
     {
         var today = DateTime.UtcNow.Date;
-        var start = (from ?? new DateTime(today.Year, today.Month, 1)).Date;
-        var end = (to ?? today).Date;
+        // Query-string dates arrive with Kind=Unspecified, which Npgsql refuses for timestamptz: pin both ends to UTC.
+        var start = DateTime.SpecifyKind((from ?? new DateTime(today.Year, today.Month, 1)).Date, DateTimeKind.Utc);
+        var end = DateTime.SpecifyKind((to ?? today).Date, DateTimeKind.Utc);
         Require(start <= end, "error.validation.request");
         var endExclusive = end.AddDays(1);
 

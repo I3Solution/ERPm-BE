@@ -1133,6 +1133,7 @@ try
     await ERPm.Verification.NotificationChecks.RunDbChecksAsync(new(u => Db(u), Check, Reject));
     await ERPm.Verification.DynamicPostingChecks.RunDbChecksAsync(new(u => Db(u), Check, Reject));
     await ERPm.Verification.TreasuryChecks.RunDbChecksAsync(new(u => Db(u), Check, Reject));
+    await ERPm.Verification.AccountingReportChecks.RunDbChecksAsync(new(u => Db(u), Check));
     using var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
     var port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop();
     var password = "Verify-" + Guid.NewGuid().ToString("N");
@@ -1340,7 +1341,9 @@ try
         Check((await http.PostAsJsonAsync("/api/v1/sales/orders/999999/create-invoice", new { warehouseId = 1, paymentMethod = 1, tenderedAmount = 0 })).StatusCode == HttpStatusCode.NotFound, "invoicing a missing order answers not found");
         Check((await http.GetAsync("/api/v1/sales/analytics/summary?from=2026-02-01T00:00:00Z&to=2026-01-01T00:00:00Z")).StatusCode == HttpStatusCode.BadRequest, "an inverted analytics period answers bad request");
         Check((await http.GetAsync("/api/v1/sales/invoices/999999")).StatusCode == HttpStatusCode.NotFound, "reading a missing invoice answers not found");
+        Check((await http.GetAsync("/api/v1/sales/invoices/outstanding?customerId=999999")).IsSuccessStatusCode, "admin reads the outstanding invoices of a customer over HTTP");
         http.DefaultRequestHeaders.Authorization = new("Bearer", viewerToken);
+        Check((await http.GetAsync("/api/v1/sales/invoices/outstanding?customerId=1")).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without acc:receipt-voucher:create cannot list outstanding invoices");
         Check((await http.PostAsync("/api/v1/sales/quotations/1/send", null)).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without sd:quotation:edit cannot send a quotation");
         Check((await http.PostAsJsonAsync("/api/v1/sales/orders/1/approve-credit", new { reason = "x" })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden && (await http.PostAsJsonAsync("/api/v1/sales/orders/1/cancel", new { reason = "x" })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without the permission cannot approve credit or cancel an order");
         Check((await http.PostAsJsonAsync("/api/v1/sales/returns", new { branchId = 1, warehouseId = 1, refundMethod = 1, reason = "x", items = Array.Empty<object>() })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without sd:return:create cannot post a return");
