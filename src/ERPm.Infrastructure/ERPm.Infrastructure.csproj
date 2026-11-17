@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.105.1" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.14" />
     <ProjectReference Include="..\ERPm.Application\ERPm.Application.csproj" />
     <ProjectReference Include="..\ERPm.Domain\ERPm.Domain.csproj" />
