@@ -77,6 +77,12 @@ public static class TreasuryChecks
         ctx.Check(transfer.CashFundBalance == 700_000m && transfer.BankAccountBalance == 800_000m,
             "Internal transfer updates both cash and bank balances");
 
+        // Dates bound from JSON ("YYYY-MM-DD") have Kind=Unspecified; both directions must accept them (round trip keeps balances).
+        var unspecDate = DateTime.SpecifyKind(DateTime.UtcNow.Date, DateTimeKind.Unspecified);
+        await treasury.TransferInternalAsync(new InternalTransferRequest { BranchId = branch.Id, Direction = InternalTransferDirection.CashToBank, CashFundId = cashFund.Id, BankAccountId = bankAccount.Id, Amount = 1_000m, TransferDate = unspecDate });
+        var back = await treasury.TransferInternalAsync(new InternalTransferRequest { BranchId = branch.Id, Direction = InternalTransferDirection.BankToCash, CashFundId = cashFund.Id, BankAccountId = bankAccount.Id, Amount = 1_000m, TransferDate = unspecDate });
+        ctx.Check(back.CashFundBalance == 700_000m && back.BankAccountBalance == 800_000m, "Internal transfer accepts TransferDate with Kind=Unspecified in both directions");
+
         await ctx.Reject(
             () => treasury.TransferInternalAsync(new InternalTransferRequest
             {
