@@ -3440,6 +3440,10 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("numeric(18,4)")
                         .HasColumnName("discount_amount");
 
+                    b.Property<DateTime?>("DueDate")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("due_date");
+
                     b.Property<Guid>("ExternalId")
                         .HasColumnType("uuid")
                         .HasColumnName("external_id");

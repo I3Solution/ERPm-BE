@@ -26,6 +26,7 @@ public class SalesInvoice : BaseAuditableEntity
     public string? CancellationReason { get; set; }
     public string InvoiceNumber { get; set; } = string.Empty; // e.g. HD0001
     public DateTime InvoiceDate { get; set; } = DateTime.UtcNow;
+    public DateTime? DueDate { get; set; }                 // Payment due date for AR aging
 
     public int BranchId { get; set; }                      // Issuing branch ID
     public int? DepartmentId { get; set; }                 // Owning department, used by DEPARTMENT data scopes

@@ -49,6 +49,7 @@ public static class PermissionCatalog
         ("acc:treasury", [View, Create, Edit, Delete]),
         ("acc:receipt-voucher", [View, Create, Cancel]),
         ("acc:payment-voucher", [View, Create, Cancel]),
+        ("acc:report", [View]),
         ("dashboard:metrics", [View]),
     ];
 

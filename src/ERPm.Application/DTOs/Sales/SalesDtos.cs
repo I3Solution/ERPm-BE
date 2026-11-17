@@ -17,6 +17,7 @@ public class CreateSalesInvoiceRequest
     public decimal TaxRate { get; set; } = 0m;
     public decimal TaxAmount { get; set; } = 0m;
     public decimal PaidAmount { get; set; } = 0m;
+    public DateTime? DueDate { get; set; }
     public string? Notes { get; set; }
     public List<SalesInvoiceItemRequest> Items { get; set; } = new();
 }
@@ -35,6 +36,7 @@ public class OutstandingInvoiceDto
     public int Id { get; set; }
     public string InvoiceNumber { get; set; } = string.Empty;
     public DateTime InvoiceDate { get; set; }
+    public DateTime? DueDate { get; set; }
     public int BranchId { get; set; }
     public decimal TotalAmount { get; set; }
     public decimal PaidAmount { get; set; }
@@ -48,6 +50,7 @@ public class SalesInvoiceDto
     public int? SalesOrderId { get; set; }
     public string InvoiceNumber { get; set; } = string.Empty;
     public DateTime InvoiceDate { get; set; }
+    public DateTime? DueDate { get; set; }
     public int BranchId { get; set; }
     public int? DepartmentId { get; set; }
     public string? BranchCode { get; set; }

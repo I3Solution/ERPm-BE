@@ -111,7 +111,8 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
                 InvoiceNumber = await posting.NumberAsync("HD", cancellationToken), BranchId = warehouse!.BranchId, DepartmentId = request.DepartmentId,
                 WarehouseId = warehouse.Id, CustomerId = request.CustomerId, PaymentMethod = request.PaymentMethod,
                 CashFundId = request.CashFundId, BankAccountId = request.BankAccountId,
-                CustomerName = request.CustomerName.Trim(), DiscountAmount = request.DiscountAmount, Notes = request.Notes, Status = VoucherStatus.Posted, SalesOrderId = salesOrderId
+                CustomerName = request.CustomerName.Trim(), DiscountAmount = request.DiscountAmount, Notes = request.Notes, Status = VoucherStatus.Posted, SalesOrderId = salesOrderId,
+                DueDate = request.DueDate ?? DateTime.UtcNow
             };
             var issue = new StockIssue
             {
