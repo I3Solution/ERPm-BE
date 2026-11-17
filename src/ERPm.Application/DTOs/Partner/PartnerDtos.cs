@@ -20,6 +20,20 @@ public class PartnerDto
     public bool IsActive { get; set; }
 }
 
+/// <summary>One page of the partner list plus the figures the list header needs for the whole filtered set.</summary>
+public class PartnerPageDto
+{
+    public List<PartnerDto> Items { get; set; } = new();
+    /// <summary>Rows matching the search and the type tab.</summary>
+    public int TotalCount { get; set; }
+    /// <summary>All partners, ignoring search and tab (the "All" tab count).</summary>
+    public int AllCount { get; set; }
+    public int PageIndex { get; set; }
+    public int PageSize { get; set; }
+    /// <summary>Receivable of all customers (Customer and Both), not only of this page.</summary>
+    public decimal TotalCustomerDebt { get; set; }
+}
+
 public class CreatePartnerRequest
 {
     public string Code { get; set; } = string.Empty;

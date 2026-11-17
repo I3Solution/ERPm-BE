@@ -38,6 +38,29 @@ public class PartnerService : IPartnerService
         return await (sort != null && DtoSorting.IsRequested(sort) ? partners.OrderByRequested(sort) : partners.OrderBy(p => p.Code)).ToListAsync(cancellationToken);
     }
 
+    public async Task<PartnerPageDto> GetPartnersPageAsync(int pageIndex, int pageSize, string? q, string? type, ERPm.Application.Common.Crud.ListSort? sort = null, CancellationToken cancellationToken = default)
+    {
+        Require(pageIndex >= 1 && pageSize is >= 1 and <= 200, "error.validation.request");
+        var all = Projection(_context.Partners);
+        var filtered = all;
+        if (type == "customer") filtered = filtered.Where(p => p.PartnerType == PartnerType.Customer || p.PartnerType == PartnerType.Both);
+        else if (type == "vendor") filtered = filtered.Where(p => p.PartnerType == PartnerType.Supplier || p.PartnerType == PartnerType.Both);
+        var text = q?.Trim().ToLower();
+        if (!string.IsNullOrEmpty(text))
+            filtered = filtered.Where(p => p.Name.ToLower().Contains(text) || p.Code.ToLower().Contains(text)
+                || (p.Phone != null && p.Phone.Contains(text)) || (p.TaxCode != null && p.TaxCode.Contains(text)));
+        var ordered = sort != null && DtoSorting.IsRequested(sort) ? filtered.OrderByRequested(sort) : filtered.OrderBy(p => p.Code);
+        return new PartnerPageDto
+        {
+            Items = await ordered.Skip((pageIndex - 1) * pageSize).Take(pageSize).ToListAsync(cancellationToken),
+            TotalCount = await filtered.CountAsync(cancellationToken),
+            AllCount = await all.CountAsync(cancellationToken),
+            PageIndex = pageIndex,
+            PageSize = pageSize,
+            TotalCustomerDebt = await all.Where(p => p.PartnerType == PartnerType.Customer || p.PartnerType == PartnerType.Both).SumAsync(p => p.DebtBalance, cancellationToken)
+        };
+    }
+
     public async Task<PartnerDto> GetPartnerAsync(int partnerId, CancellationToken cancellationToken = default)
     {
         var partner = await Projection(_context.Partners.Where(p => p.Id == partnerId)).SingleOrDefaultAsync(cancellationToken);

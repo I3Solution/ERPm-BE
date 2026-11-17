@@ -310,6 +310,24 @@ public static class TreasuryChecks
         });
         ctx.Check(bankTransfer.DestinationBankAccountBalance == 100_000m, "BankToBank transfer credits destination bank account");
 
+        // 5. Partner list paging on the server (CRM list): page window, search, type tab, counts
+        var partnerService = new PartnerService(db, new TestUser(), null, null);
+        for (var n = 1; n <= 27; n++)
+            db.Partners.Add(new Partner { Code = $"PG{n:D2}", Name = n % 2 == 0 ? $"Paged Vendor {n}" : $"Paged Customer {n}", PartnerType = n % 2 == 0 ? PartnerType.Supplier : PartnerType.Customer,
+                Phone = $"0988{n:D6}", IsActive = true });
+        await db.SaveChangesAsync();
+        var pageOne = await partnerService.GetPartnersPageAsync(1, 10, "paged", null);
+        var pageThree = await partnerService.GetPartnersPageAsync(3, 10, "paged", null);
+        ctx.Check(pageOne.Items.Count == 10 && pageOne.TotalCount == 27 && pageThree.Items.Count == 7 && pageOne.AllCount >= 27
+            && pageOne.Items.Select(i => i.Code).SequenceEqual(Enumerable.Range(1, 10).Select(i => $"PG{i:D2}")),
+            "Partner page: the window, the filtered total and the code order");
+        var vendors = await partnerService.GetPartnersPageAsync(1, 50, "paged", "vendor");
+        var customers = await partnerService.GetPartnersPageAsync(1, 50, "paged", "customer");
+        ctx.Check(vendors.TotalCount == 13 && vendors.Items.All(i => i.PartnerType != PartnerType.Customer) && customers.TotalCount == 14,
+            "Partner page: the type tab keeps Both and its own kind");
+        ctx.Check((await partnerService.GetPartnersPageAsync(1, 10, "0988000005", null)).TotalCount == 1, "Partner page: search matches the phone");
+        await ctx.Reject(() => partnerService.GetPartnersPageAsync(1, 500, null, null), "error.validation.request");
+
         // 4. Outstanding invoices of a customer (S26.6 receipt allocation): right customer, Posted, receivable left, oldest first, branch scope
         var otherBranch = new Branch { Code = "TRE26B", Name = "Treasury Branch B", ParentId = rootBranch.Id, IsActive = true };
         var debtor = new Partner { Code = "KH-TRE26-OPEN", Name = "Open Debt Customer", PartnerType = PartnerType.Customer, IsUnlimitedCredit = true, IsActive = true };

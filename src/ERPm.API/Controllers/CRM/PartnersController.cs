@@ -25,6 +25,13 @@ public class PartnersController : BaseApiController
         return Ok(ApiResponse<List<PartnerDto>>.Ok(result));
     }
 
+    /// <summary>One page of partners with search and type tab applied on the server (the plain list stays for dropdowns).</summary>
+    [RequirePermission("crm:partner:view")]
+    [HttpGet("paged")]
+    public async Task<ActionResult<ApiResponse<PartnerPageDto>>> GetPartnersPage([FromQuery] int pageIndex = 1, [FromQuery] int pageSize = 20, [FromQuery] string? q = null,
+        [FromQuery] string? type = null, [FromQuery] ERPm.Application.Common.Crud.ListSort? listSort = null, CancellationToken cancellationToken = default)
+        => Ok(ApiResponse<PartnerPageDto>.Ok(await _partnerService.GetPartnersPageAsync(pageIndex, pageSize, q, type, listSort, cancellationToken)));
+
     [RequirePermission("crm:partner:view")]
     [HttpGet("{id:int}")]
     public async Task<ActionResult<ApiResponse<PartnerDto>>> GetPartner(int id, CancellationToken cancellationToken) =>
