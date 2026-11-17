@@ -323,7 +323,7 @@ public class TreasuryFundService(
                 bankAccountBalance = bankAccount.CurrentBalance;
             }
 
-            var transferDate = request.TransferDate ?? DateTime.UtcNow;
+            var transferDate = (request.TransferDate ?? DateTime.UtcNow).AsUtc();
             var voucherNumber = await posting.NumberAsync("CTNB", ct);
             var description = string.IsNullOrWhiteSpace(request.Notes)
                 ? $"Internal transfer {voucherNumber}"

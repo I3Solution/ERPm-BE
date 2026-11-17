@@ -59,12 +59,12 @@ public class PaymentVoucherService(
 
         if (from.HasValue)
         {
-            query = query.Where(v => v.VoucherDate >= from.Value);
+            query = query.Where(v => v.VoucherDate >= from.Value.AsUtc());
         }
 
         if (to.HasValue)
         {
-            query = query.Where(v => v.VoucherDate <= to.Value);
+            query = query.Where(v => v.VoucherDate <= to.Value.AsUtc());
         }
 
         var totalCount = await query.CountAsync(ct);
@@ -128,7 +128,7 @@ public class PaymentVoucherService(
             }
 
             var debitAccountId = await ResolveDebitAccountIdAsync(request, ct);
-            var voucherDate = request.VoucherDate ?? DateTime.UtcNow;
+            var voucherDate = (request.VoucherDate ?? DateTime.UtcNow).AsUtc();
             var voucherNumber = await posting.NumberAsync("PC", ct);
             var description = string.IsNullOrWhiteSpace(request.Notes)
                 ? $"Payment {voucherNumber} - {request.RecipientName.Trim()}"

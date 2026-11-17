@@ -62,12 +62,12 @@ public class ReceiptVoucherService(
 
         if (from.HasValue)
         {
-            query = query.Where(v => v.VoucherDate >= from.Value);
+            query = query.Where(v => v.VoucherDate >= from.Value.AsUtc());
         }
 
         if (to.HasValue)
         {
-            query = query.Where(v => v.VoucherDate <= to.Value);
+            query = query.Where(v => v.VoucherDate <= to.Value.AsUtc());
         }
 
         var totalCount = await query.CountAsync(ct);
@@ -141,7 +141,7 @@ public class ReceiptVoucherService(
             }
 
             var amount = Round(request.Amount);
-            var voucherDate = request.VoucherDate ?? DateTime.UtcNow;
+            var voucherDate = (request.VoucherDate ?? DateTime.UtcNow).AsUtc();
             var voucherNumber = await posting.NumberAsync("PT", ct);
 
             var voucher = new ReceiptVoucher
