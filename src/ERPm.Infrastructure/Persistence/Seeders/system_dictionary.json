@@ -1220,7 +1220,22 @@
     "catalog.vat_0": "0% (Không chịu thuế)",
     "catalog.vat_5": "5%",
     "catalog.vat_8": "8%",
-    "catalog.vat_10": "10%"
+    "catalog.vat_10": "10%",
+    "transfer.import_title": "Nhập dữ liệu từ Excel",
+    "transfer.template_hint": "Tải file mẫu chuẩn trước khi nhập dữ liệu.",
+    "transfer.download_template": "Tải file mẫu",
+    "transfer.choose_file": "Chọn file Excel (.xlsx, .xls) để tải lên",
+    "transfer.invalid_file_type": "Định dạng file không được hỗ trợ.",
+    "transfer.import_failed": "Nhập dữ liệu thất bại.",
+    "transfer.import_action": "Nhập dữ liệu",
+    "transfer.importing": "Đang nhập...",
+    "transfer.total_rows": "Tổng dòng",
+    "transfer.valid_rows": "Hợp lệ",
+    "transfer.error_rows": "Lỗi",
+    "transfer.col_row": "Dòng",
+    "transfer.col_column": "Cột",
+    "transfer.col_message": "Chi tiết lỗi",
+    "transfer.export_excel": "Xuất Excel"
   },
   "en": {
     "common.app_name": "ERPm - Sales & Inventory Management",
@@ -2443,6 +2458,21 @@
     "catalog.vat_0": "0% (Tax exempt)",
     "catalog.vat_5": "5%",
     "catalog.vat_8": "8%",
-    "catalog.vat_10": "10%"
+    "catalog.vat_10": "10%",
+    "transfer.import_title": "Import from Excel",
+    "transfer.template_hint": "Download the standard template before importing.",
+    "transfer.download_template": "Download template",
+    "transfer.choose_file": "Choose an Excel file (.xlsx, .xls) to upload",
+    "transfer.invalid_file_type": "Unsupported file format.",
+    "transfer.import_failed": "Import failed.",
+    "transfer.import_action": "Import",
+    "transfer.importing": "Importing...",
+    "transfer.total_rows": "Total rows",
+    "transfer.valid_rows": "Valid",
+    "transfer.error_rows": "Errors",
+    "transfer.col_row": "Row",
+    "transfer.col_column": "Column",
+    "transfer.col_message": "Error detail",
+    "transfer.export_excel": "Export Excel"
   }
 }
