@@ -9,6 +9,12 @@ public interface IOrderApproval<TDto>
     /// <summary>Rejects an order held back by the credit limit and returns it to Draft; it holds no stock.</summary>
     Task<TDto> RejectCreditAsync(int id, string reason, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Runs the single credit approval (approve = true) or rejection on each order in turn, each in its own transaction,
+    /// so one failed order does not undo the others. Returns one result per order, in request order.
+    /// </summary>
+    Task<List<ERPm.Application.DTOs.Sales.BulkOrderActionResultDto>> DecideCreditManyAsync(IReadOnlyList<int> ids, string reason, bool approve, CancellationToken cancellationToken);
+
     /// <summary>Status change history of an order, oldest first.</summary>
     Task<List<ERPm.Application.DTOs.Sales.SalesOrderStatusAuditDto>> GetStatusHistoryAsync(int id, CancellationToken cancellationToken);
 

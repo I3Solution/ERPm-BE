@@ -111,6 +111,21 @@ public class ApproveCreditRequest
     public string Reason { get; set; } = string.Empty;
 }
 
+/// <summary>Several orders acted on at once with one reason (bulk credit approval or rejection).</summary>
+public class BulkOrderActionRequest
+{
+    public List<int> Ids { get; set; } = [];
+    public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>Outcome for one order of a bulk action; a failed order carries the error code of the single action.</summary>
+public class BulkOrderActionResultDto
+{
+    public int Id { get; set; }
+    public bool Success { get; set; }
+    public string? ErrorCode { get; set; }
+}
+
 public class SalesOrderStatusAuditDto
 {
     public int Id { get; set; }
