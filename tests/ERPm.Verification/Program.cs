@@ -1492,12 +1492,20 @@ try
         Check(httpAudit.RootElement.GetProperty("data").GetArrayLength() >= 5, "GET version audit returns recorded transitions over HTTP");
 
         // S27.5 HTTP IAM permission & Sales/Purchase/Branch scope matrix verification.
-        async Task<string> ProvisionScopedUserAsync(string uname, string[] actions, string scopeMode, int[]? customBranches = null)
+        // Reuse a single login session and swap assigned roles via /api/v1/sys/roles/users/{id}
+        // to stay within the 10/min /api/v1/auth/login rate limit while verifying live IAM cache invalidation.
+        var plActorResp = await http.PostAsJsonAsync("/api/v1/auth/users", new { userName = "pl_actor", displayName = "PriceList Actor", password, role = "None", branchIds = Array.Empty<int>() });
+        Check(plActorResp.IsSuccessStatusCode, "provisioned reusable S27.5 IAM test actor");
+        var plActorId = JsonDocument.Parse(await plActorResp.Content.ReadAsStringAsync()).RootElement.GetProperty("data").GetProperty("id").GetInt32();
+        var plActorToken = await Login("pl_actor");
+
+        async Task<int> CreatePlRoleAsync(string code, string[] actions, string scopeMode, int[]? customBranches = null)
         {
+            http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
             var rResp = await http.PostAsJsonAsync("/api/v1/sys/roles", new
             {
-                code = $"R_{uname.ToUpperInvariant()}",
-                name = $"Role {uname}",
+                code,
+                name = $"Role {code}",
                 policyDocument = new
                 {
                     version = "2026-10",
@@ -1516,27 +1524,27 @@ try
                     }
                 }
             });
-            Check(rResp.IsSuccessStatusCode, $"provisioned role for {uname}");
-            var rId = JsonDocument.Parse(await rResp.Content.ReadAsStringAsync()).RootElement.GetProperty("data").GetProperty("id").GetInt32();
-            var uResp = await http.PostAsJsonAsync("/api/v1/auth/users", new { userName = uname, displayName = uname, password, role = "None", branchIds = Array.Empty<int>() });
-            Check(uResp.IsSuccessStatusCode, $"provisioned user {uname}");
-            var uId = JsonDocument.Parse(await uResp.Content.ReadAsStringAsync()).RootElement.GetProperty("data").GetProperty("id").GetInt32();
-            var assignResp = await http.PutAsJsonAsync($"/api/v1/sys/roles/users/{uId}", new { roles = new[] { new { roleId = rId } } });
-            Check(assignResp.IsSuccessStatusCode, $"assigned role to {uname}");
-            var loginResp = await http.PostAsJsonAsync("/api/v1/auth/login", new { userName = uname, password });
-            Check(loginResp.IsSuccessStatusCode, $"logged in as {uname}");
-            return JsonDocument.Parse(await loginResp.Content.ReadAsStringAsync()).RootElement.GetProperty("accessToken").GetString()!;
+            Check(rResp.IsSuccessStatusCode, $"provisioned role {code}");
+            return JsonDocument.Parse(await rResp.Content.ReadAsStringAsync()).RootElement.GetProperty("data").GetProperty("id").GetInt32();
         }
 
-        var sdEditorToken = await ProvisionScopedUserAsync("pl_sd_edit", ["sd:pricelist:view", "sd:pricelist:create", "sd:pricelist:edit"], "GROUP");
-        var sdSubmitToken = await ProvisionScopedUserAsync("pl_sd_submit", ["sd:pricelist:view", "sd:pricelist:submit", "sd:pricelist:withdraw"], "GROUP");
-        var sdApproveToken = await ProvisionScopedUserAsync("pl_sd_approve", ["sd:pricelist:view", "sd:pricelist:approve", "sd:pricelist:reject"], "GROUP");
-        var sdActivateToken = await ProvisionScopedUserAsync("pl_sd_activate", ["sd:pricelist:view", "sd:pricelist:activate", "sd:pricelist:close", "sd:pricelist:archive"], "GROUP");
-        var purManagerToken = await ProvisionScopedUserAsync("pl_pur_mgr", ["pur:pricelist:view", "pur:pricelist:create", "pur:pricelist:edit", "pur:pricelist:submit", "pur:pricelist:approve", "pur:pricelist:activate", "pur:pricelist:close"], "GROUP");
-        var branchScopedToken = await ProvisionScopedUserAsync("pl_br_only", ["sd:pricelist:view", "sd:pricelist:create", "sd:pricelist:edit", "sd:pricelist:submit", "sd:pricelist:approve", "sd:pricelist:activate", "sd:pricelist:close"], "CUSTOM_BRANCHES", [allowedBranch.Id]);
+        async Task SwitchPlRoleAsync(int roleId, string label)
+        {
+            http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
+            var assignResp = await http.PutAsJsonAsync($"/api/v1/sys/roles/users/{plActorId}", new { roles = new[] { new { roleId } } });
+            Check(assignResp.IsSuccessStatusCode, $"assigned role {label}");
+            http.DefaultRequestHeaders.Authorization = new("Bearer", plActorToken);
+        }
+
+        var sdEditorRoleId = await CreatePlRoleAsync("R_PL_SD_EDIT", ["sd:pricelist:view", "sd:pricelist:create", "sd:pricelist:edit"], "GROUP");
+        var sdSubmitRoleId = await CreatePlRoleAsync("R_PL_SD_SUBMIT", ["sd:pricelist:view", "sd:pricelist:submit", "sd:pricelist:withdraw"], "GROUP");
+        var sdApproveRoleId = await CreatePlRoleAsync("R_PL_SD_APPROVE", ["sd:pricelist:view", "sd:pricelist:approve", "sd:pricelist:reject"], "GROUP");
+        var sdActivateRoleId = await CreatePlRoleAsync("R_PL_SD_ACTIVATE", ["sd:pricelist:view", "sd:pricelist:activate", "sd:pricelist:close", "sd:pricelist:archive"], "GROUP");
+        var purManagerRoleId = await CreatePlRoleAsync("R_PL_PUR_MGR", ["pur:pricelist:view", "pur:pricelist:create", "pur:pricelist:edit", "pur:pricelist:submit", "pur:pricelist:approve", "pur:pricelist:activate", "pur:pricelist:close"], "GROUP");
+        var branchScopedRoleId = await CreatePlRoleAsync("R_PL_BR_ONLY", ["sd:pricelist:view", "sd:pricelist:create", "sd:pricelist:edit", "sd:pricelist:submit", "sd:pricelist:approve", "sd:pricelist:activate", "sd:pricelist:close"], "CUSTOM_BRANCHES", [allowedBranch.Id]);
 
         // Sales Editor creates Sales PL (Draft V1), cannot create Purchase PL, cannot submit/approve/activate.
-        http.DefaultRequestHeaders.Authorization = new("Bearer", sdEditorToken);
+        await SwitchPlRoleAsync(sdEditorRoleId, "sd_editor");
         Check((await http.PostAsJsonAsync("/api/v1/sales/price-lists", new { code = "DENY-PUR", name = "Deny Pur", currency = "VND", type = 2, effectiveFrom = DateTime.UtcNow.AddDays(-1), isActive = true })).StatusCode == HttpStatusCode.Forbidden,
             "Sales-only editor cannot create a Purchase price list");
         Check((await http.GetAsync("/api/v1/sales/price-lists?type=Purchase")).StatusCode == HttpStatusCode.Forbidden,
@@ -1557,29 +1565,29 @@ try
             "Sales editor without workflow verbs gets 403 on submit/approve/activate/close");
 
         // Submitter submits & withdraws; cannot approve/activate.
-        http.DefaultRequestHeaders.Authorization = new("Bearer", sdSubmitToken);
+        await SwitchPlRoleAsync(sdSubmitRoleId, "sd_submit");
         Check((await http.PostAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/submit", null)).IsSuccessStatusCode, "Sales submitter can submit Draft");
         Check((await http.PostAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/approve", null)).StatusCode == HttpStatusCode.Forbidden, "Sales submitter cannot approve");
         Check((await http.PostAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/withdraw", null)).IsSuccessStatusCode, "Sales submitter can withdraw PendingApproval");
         Check((await http.PostAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/submit", null)).IsSuccessStatusCode, "Sales submitter re-submits Draft");
 
         // Approver rejects (returns Draft), submitter re-submits, approver approves; cannot activate.
-        http.DefaultRequestHeaders.Authorization = new("Bearer", sdApproveToken);
+        await SwitchPlRoleAsync(sdApproveRoleId, "sd_approve");
         Check((await http.PostAsJsonAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/reject", new { reason = "Fix margin" })).IsSuccessStatusCode, "Sales approver with reject permission can reject with reason");
-        http.DefaultRequestHeaders.Authorization = new("Bearer", sdSubmitToken);
+        await SwitchPlRoleAsync(sdSubmitRoleId, "sd_submit_again");
         Check((await http.PostAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/submit", null)).IsSuccessStatusCode, "Sales submitter re-submits after rejection");
-        http.DefaultRequestHeaders.Authorization = new("Bearer", sdApproveToken);
+        await SwitchPlRoleAsync(sdApproveRoleId, "sd_approve_again");
         Check((await http.PostAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/approve", null)).IsSuccessStatusCode, "Sales approver can approve PendingApproval");
         Check((await http.PostAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/activate", null)).StatusCode == HttpStatusCode.Forbidden, "Sales approver cannot activate");
 
         // Activator activates -> closes -> archives.
-        http.DefaultRequestHeaders.Authorization = new("Bearer", sdActivateToken);
+        await SwitchPlRoleAsync(sdActivateRoleId, "sd_activate");
         Check((await http.PostAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/activate", null)).IsSuccessStatusCode, "Sales activator can activate Approved version");
         Check((await http.PostAsJsonAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/close", new { reason = "Done promo" })).IsSuccessStatusCode, "Sales closer can close Active version with reason");
         Check((await http.PostAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/archive", null)).IsSuccessStatusCode, "Sales archiver can archive Expired version");
 
         // Purchase-only manager cannot see/touch Sales PL, but can manage Purchase PL.
-        http.DefaultRequestHeaders.Authorization = new("Bearer", purManagerToken);
+        await SwitchPlRoleAsync(purManagerRoleId, "pur_manager");
         Check((await http.GetAsync($"/api/v1/sales/price-lists/{sdListId}")).StatusCode == HttpStatusCode.Forbidden
             && (await http.GetAsync("/api/v1/sales/price-lists?type=Sales")).StatusCode == HttpStatusCode.Forbidden,
             "Purchase-only manager gets 403 accessing Sales price list");
@@ -1595,7 +1603,7 @@ try
             effectiveFrom = DateTime.UtcNow.AddDays(-1), isActive = true
         });
         var globalPlId = JsonDocument.Parse(await globalPlResp.Content.ReadAsStringAsync()).RootElement.GetProperty("data").GetProperty("id").GetInt32();
-        http.DefaultRequestHeaders.Authorization = new("Bearer", branchScopedToken);
+        await SwitchPlRoleAsync(branchScopedRoleId, "branch_scoped");
         Check((await http.GetAsync($"/api/v1/sales/price-lists/{globalPlId}")).IsSuccessStatusCode, "branch-scoped user can view a global price list");
         Check((await http.PutAsJsonAsync($"/api/v1/sales/price-lists/{globalPlId}", new
         {
