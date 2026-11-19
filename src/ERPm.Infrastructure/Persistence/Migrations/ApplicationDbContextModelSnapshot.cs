@@ -3284,6 +3284,47 @@ namespace ERPm.Infrastructure.Persistence.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<DateTime?>("ActivatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("activated_at_utc");
+
+                    b.Property<string>("ActivatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("activated_by");
+
+                    b.Property<DateTime?>("ApprovedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("approved_at_utc");
+
+                    b.Property<string>("ApprovedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("approved_by");
+
+                    b.Property<DateTime?>("ArchivedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("archived_at_utc");
+
+                    b.Property<string>("ArchivedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("archived_by");
+
+                    b.Property<string>("CloseReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("close_reason");
+
+                    b.Property<DateTime?>("ClosedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("closed_at_utc");
+
+                    b.Property<string>("ClosedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("closed_by");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
@@ -3328,9 +3369,32 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("price_list_id");
 
+                    b.Property<string>("RejectReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reject_reason");
+
+                    b.Property<DateTime?>("RejectedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("rejected_at_utc");
+
+                    b.Property<string>("RejectedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("rejected_by");
+
                     b.Property<int>("Status")
                         .HasColumnType("integer")
                         .HasColumnName("status");
+
+                    b.Property<DateTime?>("SubmittedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("submitted_at_utc");
+
+                    b.Property<string>("SubmittedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("submitted_by");
 
                     b.Property<int?>("TenantId")
                         .HasColumnType("integer")
@@ -3363,8 +3427,73 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_tbl_SD_PriceListVersion_Range", "effective_to IS NULL OR effective_to >= effective_from");
 
-                            t.HasCheckConstraint("CK_tbl_SD_PriceListVersion_Status", "status BETWEEN 1 AND 4");
+                            t.HasCheckConstraint("CK_tbl_SD_PriceListVersion_Status", "status BETWEEN 1 AND 6");
                         });
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Sales.PriceListVersionAudit", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("action");
+
+                    b.Property<string>("ActorName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("actor_name");
+
+                    b.Property<string>("ActorUserId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("actor_user_id");
+
+                    b.Property<Guid>("ExternalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("external_id");
+
+                    b.Property<int>("FromStatus")
+                        .HasColumnType("integer")
+                        .HasColumnName("from_status");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at_utc");
+
+                    b.Property<int>("PriceListVersionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("price_list_version_id");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reason");
+
+                    b.Property<int>("ToStatus")
+                        .HasColumnType("integer")
+                        .HasColumnName("to_status");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_sd_price_list_version_audit");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_sd_price_list_version_audit_external_id");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id" });
+
+                    b.HasIndex("PriceListVersionId", "OccurredAtUtc")
+                        .HasDatabaseName("ix_tbl_sd_price_list_version_audit_version_occurred");
+
+                    b.ToTable("tbl_SD_PriceListVersionAudit", (string)null);
                 });
 
             modelBuilder.Entity("ERPm.Domain.Entities.Sales.SalesInvoice", b =>
@@ -6369,6 +6498,18 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     b.Navigation("PriceList");
                 });
 
+            modelBuilder.Entity("ERPm.Domain.Entities.Sales.PriceListVersionAudit", b =>
+                {
+                    b.HasOne("ERPm.Domain.Entities.Sales.PriceListVersion", "PriceListVersion")
+                        .WithMany("AuditLogs")
+                        .HasForeignKey("PriceListVersionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_sd_price_list_version_audit_version_id");
+
+                    b.Navigation("PriceListVersion");
+                });
+
             modelBuilder.Entity("ERPm.Domain.Entities.Sales.SalesInvoice", b =>
                 {
                     b.HasOne("ERPm.Domain.Entities.Accounting.BankAccount", "BankAccount")
@@ -6976,6 +7117,8 @@ namespace ERPm.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("ERPm.Domain.Entities.Sales.PriceListVersion", b =>
                 {
+                    b.Navigation("AuditLogs");
+
                     b.Navigation("Items");
                 });
 

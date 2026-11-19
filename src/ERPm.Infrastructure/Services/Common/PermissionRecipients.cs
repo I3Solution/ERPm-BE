@@ -9,7 +9,8 @@ namespace ERPm.Infrastructure.Services.Common;
 /// <summary>What to announce about one document and which permission decides who may hear it.</summary>
 public sealed record DocumentNotice(
     string Template, string Category, string Severity, string ViewAction,
-    int BranchId, int? DepartmentId, string? CreatedBy, IDictionary<string, object> Parameters, string ActionUrl);
+    int? BranchId, int? DepartmentId, string? CreatedBy, IDictionary<string, object> Parameters, string ActionUrl,
+    bool GlobalReachesAllAllowed = false, string? IdempotencyPrefix = null);
 
 /// <summary>
 /// Finds the people who should hear about a document: active accounts that hold a permission and whose data scope
@@ -18,7 +19,7 @@ public sealed record DocumentNotice(
 /// </summary>
 public sealed class PermissionRecipients(ApplicationDbContext context, IIamService iam)
 {
-    public async Task<List<int>> ForDocumentAsync(string action, int branchId, int? departmentId, string? createdBy, int? excludeUserId, CancellationToken ct)
+    public async Task<List<int>> ForDocumentAsync(string action, int? branchId, int? departmentId, string? createdBy, int? excludeUserId, CancellationToken ct, bool globalReachesAllAllowed = false)
     {
         var userIds = await context.AppUsers.AsNoTracking().Where(u => u.IsActive && !u.IsDeleted && u.Id != excludeUserId).Select(u => u.Id).ToListAsync(ct);
         var recipients = new List<int>();
@@ -29,7 +30,8 @@ public sealed class PermissionRecipients(ApplicationDbContext context, IIamServi
             if (!decision.Allowed) continue;
             var scope = decision.Scope;
             var reaches = scope.Unrestricted
-                || scope.BranchIds.Contains(branchId)
+                || (branchId == null && globalReachesAllAllowed)
+                || (branchId.HasValue && scope.BranchIds.Contains(branchId.Value))
                 || (departmentId.HasValue && scope.DepartmentIds.Contains(departmentId.Value))
                 || (scope.OwnRecords && createdBy != null && createdBy == principal.Context.UserKey);
             if (reaches) recipients.Add(userId);
@@ -45,10 +47,15 @@ public sealed class PermissionRecipients(ApplicationDbContext context, IIamServi
     {
         if (engine == null || iam == null || notice == null) return;
         int? actorId = int.TryParse(actor?.UserId, out var parsed) && parsed != 0 ? parsed : null;
-        var recipients = await new PermissionRecipients(context, iam).ForDocumentAsync(notice.ViewAction, notice.BranchId, notice.DepartmentId, notice.CreatedBy, actorId, ct);
+        var recipients = await new PermissionRecipients(context, iam).ForDocumentAsync(
+            notice.ViewAction, notice.BranchId, notice.DepartmentId, notice.CreatedBy, actorId, ct, notice.GlobalReachesAllAllowed);
         foreach (var userId in recipients)
+        {
+            var idempotencyKey = string.IsNullOrWhiteSpace(notice.IdempotencyPrefix) ? null : $"{notice.IdempotencyPrefix}_U{userId}";
             _ = engine.PublishAsync(new ERPm.Domain.Events.NotificationEvent(
                 notice.Template, notice.Category, notice.Severity, ERPm.Domain.Enums.NotificationTargetType.User,
-                targetId: userId, branchId: notice.BranchId, parameters: notice.Parameters, actionUrl: notice.ActionUrl));
+                targetId: userId, branchId: notice.BranchId, senderUserId: actorId, idempotencyKey: idempotencyKey,
+                parameters: notice.Parameters, actionUrl: notice.ActionUrl));
+        }
     }
 }

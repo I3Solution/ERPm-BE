@@ -60,6 +60,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<SalesOrderItem> SalesOrderItems => Set<SalesOrderItem>();
     public DbSet<PriceList> PriceLists => Set<PriceList>();
     public DbSet<PriceListVersion> PriceListVersions => Set<PriceListVersion>();
+    public DbSet<PriceListVersionAudit> PriceListVersionAudits => Set<PriceListVersionAudit>();
     public DbSet<PriceListItem> PriceListItems => Set<PriceListItem>();
     public DbSet<SalesQuotation> SalesQuotations => Set<SalesQuotation>();
     public DbSet<SalesQuotationItem> SalesQuotationItems => Set<SalesQuotationItem>();
@@ -774,6 +775,14 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.ToTable("tbl_SD_PriceListVersion");
             ConfigureDualKeyAuditable(entity);
             entity.Property(e => e.VersionCode).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.SubmittedBy).HasMaxLength(100);
+            entity.Property(e => e.ApprovedBy).HasMaxLength(100);
+            entity.Property(e => e.RejectedBy).HasMaxLength(100);
+            entity.Property(e => e.RejectReason).HasMaxLength(500);
+            entity.Property(e => e.ActivatedBy).HasMaxLength(100);
+            entity.Property(e => e.ClosedBy).HasMaxLength(100);
+            entity.Property(e => e.CloseReason).HasMaxLength(500);
+            entity.Property(e => e.ArchivedBy).HasMaxLength(100);
 
             entity.HasOne(e => e.PriceList)
                 .WithMany(p => p.Versions)
@@ -785,9 +794,28 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.HasIndex(e => new { e.PriceListId, e.Status });
             entity.ToTable(t =>
             {
-                t.HasCheckConstraint("CK_tbl_SD_PriceListVersion_Status", "status BETWEEN 1 AND 4");
+                t.HasCheckConstraint("CK_tbl_SD_PriceListVersion_Status", "status BETWEEN 1 AND 6");
                 t.HasCheckConstraint("CK_tbl_SD_PriceListVersion_Range", "effective_to IS NULL OR effective_to >= effective_from");
             });
+        });
+
+        modelBuilder.Entity<PriceListVersionAudit>(entity =>
+        {
+            entity.ToTable("tbl_SD_PriceListVersionAudit");
+            ConfigureDualKeyEntity(entity);
+            entity.Property(e => e.Action).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.ActorUserId).HasMaxLength(100);
+            entity.Property(e => e.ActorName).HasMaxLength(255);
+            entity.Property(e => e.Reason).HasMaxLength(500);
+
+            entity.HasOne(e => e.PriceListVersion)
+                .WithMany(v => v.AuditLogs)
+                .HasForeignKey(e => e.PriceListVersionId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("fk_tbl_sd_price_list_version_audit_version_id");
+
+            entity.HasIndex(e => new { e.PriceListVersionId, e.OccurredAtUtc })
+                .HasDatabaseName("ix_tbl_sd_price_list_version_audit_version_occurred");
         });
 
         modelBuilder.Entity<PriceListItem>(entity =>
@@ -1377,6 +1405,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<ReceiptVoucherAllocation>().HasQueryFilter(e => !e.ReceiptVoucher!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.ReceiptVoucher.BranchId)));
         modelBuilder.Entity<PaymentVoucher>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)));
         modelBuilder.Entity<PriceListVersion>().HasQueryFilter(e => !e.IsDeleted && !e.PriceList!.IsDeleted);
+        modelBuilder.Entity<PriceListVersionAudit>().HasQueryFilter(e => !e.PriceListVersion!.IsDeleted && !e.PriceListVersion.PriceList!.IsDeleted);
         modelBuilder.Entity<PriceListItem>().HasQueryFilter(e => !e.PriceListVersion!.IsDeleted && !e.PriceListVersion.PriceList!.IsDeleted);
         modelBuilder.Entity<SalesQuotation>().HasQueryFilter(e => !e.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.BranchId)
             || (e.DepartmentId != null && AllowedDepartmentIds.Contains(e.DepartmentId.Value)) || (OwnRecordsUserId != null && e.CreatedBy == OwnRecordsUserId)));

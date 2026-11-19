@@ -16,8 +16,18 @@ public static class PermissionCatalog
     public const string Confirm = "confirm";
     public const string Cancel = "cancel";
     public const string ApproveCredit = "approve_credit";
+    public const string Submit = "submit";
+    public const string Withdraw = "withdraw";
+    public const string Approve = "approve";
+    public const string Reject = "reject";
+    public const string Activate = "activate";
+    public const string Close = "close";
+    public const string Archive = "archive";
     public const string Broadcast = "broadcast";
     public const string UnlimitedCredit = "unlimited-credit";
+
+    private static readonly string[] PriceListVerbs =
+        [View, Create, Edit, Delete, Submit, Withdraw, Approve, Reject, Activate, Close, Archive];
 
     private static readonly (string Resource, string[] Verbs)[] Resources =
     [
@@ -36,12 +46,13 @@ public static class PermissionCatalog
         ("wms:uom", [View, Create, Edit, Delete]),
         ("wms:stock", [View]),
         ("wms:receipt", [Create]),
-        ("sd:pricelist", [View, Create, Edit, Delete]),
+        ("sd:pricelist", PriceListVerbs),
         ("sd:quotation", [View, Create, Edit, Delete]),
         ("sd:order", [View, Create, Edit, Delete, Confirm, ApproveCredit, Cancel]),
         ("sd:invoice", [View, Create, Cancel]),
         ("sd:return", [View, Create]),
         ("sd:report", [View]),
+        ("pur:pricelist", PriceListVerbs),
         ("pur:order", [View, Create, Edit, Delete, Confirm]),
         ("crm:partner", [View, Create, UnlimitedCredit]),
         ("acc:account", [View, Create, Edit]),
