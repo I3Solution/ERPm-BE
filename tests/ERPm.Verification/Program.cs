@@ -82,7 +82,7 @@ try
         """);
     await db.GetService<IMigrator>().MigrateAsync("20261117024053_AddSalesInvoiceDueDate");
     // Seed a custom role with explicit sd:pricelist:edit before S27.5 migration to verify idempotent role upgrade.
-    await db.Database.ExecuteSqlRawAsync("""
+    await db.Database.ExecuteSqlInterpolatedAsync($$"""
         INSERT INTO "tbl_SYS_Role"
             (code, name, translations, is_system_role, policy_document, is_active, created_at_utc, is_deleted, external_id)
         VALUES
