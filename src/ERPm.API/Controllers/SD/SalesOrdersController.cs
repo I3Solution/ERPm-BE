@@ -53,6 +53,22 @@ public class SalesOrdersController : BaseCrudController<SalesOrder, SalesOrderDt
         return Ok(ApiResponse<SalesOrderDto>.Ok(await _approval.RejectCreditAsync(id, request.Reason, cancellationToken), "common.saved"));
     }
 
+    /// <summary>Approves credit for several pending orders with one reason; each order succeeds or fails on its own.</summary>
+    [RequirePermission(":approve_credit")]
+    [HttpPost("bulk/approve-credit")]
+    public async Task<ActionResult<ApiResponse<List<BulkOrderActionResultDto>>>> BulkApproveCredit([FromBody] BulkOrderActionRequest request, CancellationToken cancellationToken)
+    {
+        return Ok(ApiResponse<List<BulkOrderActionResultDto>>.Ok(await _approval.DecideCreditManyAsync(request.Ids, request.Reason, true, cancellationToken)));
+    }
+
+    /// <summary>Rejects credit for several pending orders with one reason; each order succeeds or fails on its own.</summary>
+    [RequirePermission(":reject_credit")]
+    [HttpPost("bulk/reject-credit")]
+    public async Task<ActionResult<ApiResponse<List<BulkOrderActionResultDto>>>> BulkRejectCredit([FromBody] BulkOrderActionRequest request, CancellationToken cancellationToken)
+    {
+        return Ok(ApiResponse<List<BulkOrderActionResultDto>>.Ok(await _approval.DecideCreditManyAsync(request.Ids, request.Reason, false, cancellationToken)));
+    }
+
     /// <summary>Who changed the order status, when and why, oldest first.</summary>
     [RequirePermission(":view")]
     [HttpGet("{id:int}/status-history")]

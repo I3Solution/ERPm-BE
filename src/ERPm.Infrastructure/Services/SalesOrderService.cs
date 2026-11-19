@@ -190,6 +190,29 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
         return dto;
     }
 
+    /// <summary>Largest number of orders one bulk credit decision may carry.</summary>
+    public const int BulkLimit = 100;
+
+    public async Task<List<BulkOrderActionResultDto>> DecideCreditManyAsync(IReadOnlyList<int> ids, string reason, bool approve, CancellationToken ct)
+    {
+        Require(ids is { Count: > 0 and <= BulkLimit } && ids.Distinct().Count() == ids.Count && !string.IsNullOrWhiteSpace(reason) && reason.Trim().Length <= 500,
+            "error.validation.request");
+        var results = new List<BulkOrderActionResultDto>(ids.Count);
+        foreach (var id in ids)
+        {
+            try
+            {
+                _ = approve ? await ApproveCreditAsync(id, reason, ct) : await RejectCreditAsync(id, reason, ct);
+                results.Add(new BulkOrderActionResultDto { Id = id, Success = true });
+            }
+            catch (BusinessException e)
+            {
+                results.Add(new BulkOrderActionResultDto { Id = id, ErrorCode = e.Code });
+            }
+        }
+        return results;
+    }
+
     public async Task<List<SalesOrderStatusAuditDto>> GetStatusHistoryAsync(int id, CancellationToken ct)
     {
         // The order goes through the scope filter, so an order out of scope is not found rather than forbidden.

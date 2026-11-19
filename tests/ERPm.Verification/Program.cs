@@ -673,6 +673,27 @@ try
     }
     static async Task<string> Outcome(Func<Task> action) { try { await action(); return "ok"; } catch (BusinessException e) { return e.Code; } }
     if ((await orders.GetByIdAsync(contested.Id))!.Status != "Cancelled") await orders.CancelAsync(contested.Id, "concurrency test done", default);
+    // Bulk credit decision: each order runs the single action in its own transaction, so a failed order does not undo the others.
+    var bulkA = await orders.ConfirmAsync((await DraftOrder(poor.Id, 1)).Id, default);
+    var bulkB = await orders.ConfirmAsync((await DraftOrder(poor.Id, 1)).Id, default);
+    var bulkDraft = await DraftOrder(poor.Id, 1);
+    Check(bulkA.Status == "PendingApproval" && bulkB.Status == "PendingApproval", "bulk test orders wait for credit approval");
+    await Reject(async () => await orders.DecideCreditManyAsync([bulkA.Id], " ", false, default), "error.validation.request");
+    await Reject(async () => await orders.DecideCreditManyAsync([], "x", true, default), "error.validation.request");
+    await Reject(async () => await orders.DecideCreditManyAsync([bulkA.Id, bulkA.Id], "x", true, default), "error.validation.request");
+    await Reject(async () => await orders.DecideCreditManyAsync(Enumerable.Range(1, SalesOrderService.BulkLimit + 1).ToList(), "x", true, default), "error.validation.request");
+    var bulkRejected = await orders.DecideCreditManyAsync([bulkA.Id, bulkDraft.Id, 999999], "Bulk refusal", false, default);
+    Check(bulkRejected.Select(r => $"{r.Id}:{r.Success}:{r.ErrorCode}").SequenceEqual([$"{bulkA.Id}:True:", $"{bulkDraft.Id}:False:error.sd.order_invalid_status_for_action", "999999:False:error.order.not_found"])
+        && (await orders.GetByIdAsync(bulkA.Id))!.Status == "Draft" && (await orders.GetStatusHistoryAsync(bulkA.Id, default)).Last() is { Action: "REJECT_CREDIT", Reason: "Bulk refusal" },
+        "bulk reject: the pending order returns to Draft while a wrong-status and a missing order fail on their own");
+    var reservedBeforeBulk = await Reserved();
+    var bulkApproved = await orders.DecideCreditManyAsync([bulkB.Id, bulkA.Id], "Bulk approval", true, default);
+    Check(bulkApproved[0] is { Success: true } && bulkApproved[1] is { Success: false, ErrorCode: "error.sd.order_invalid_status_for_action" }
+        && (await orders.GetByIdAsync(bulkB.Id)) is { Status: "Confirmed", CreditCheckStatus: "Overridden" } && await Reserved() == reservedBeforeBulk + 1,
+        "bulk approve: the pending order is confirmed and reserved; the Draft one is reported, not rolled back with it");
+    await orders.CancelAsync(bulkB.Id, "bulk test done", default);
+    await orders.CancelAsync(bulkA.Id, "bulk test done", default);
+    await orders.CancelAsync(bulkDraft.Id, "bulk test done", default);
 
     var warned = await orders.ConfirmAsync((await DraftOrder(edge.Id, 2, 450)).Id, default);
     Check(warned.Status == "Confirmed" && warned.CreditCheckStatus == "Warning" && await Reserved() == 4, "an order close to the credit limit is confirmed with a warning");
@@ -1660,6 +1681,9 @@ try
         Check((await http.GetAsync("/api/v1/sales/invoices/outstanding?customerId=1")).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without acc:receipt-voucher:create cannot list outstanding invoices");
         Check((await http.PostAsync("/api/v1/sales/quotations/1/send", null)).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without sd:quotation:edit cannot send a quotation");
         Check((await http.PostAsJsonAsync("/api/v1/sales/orders/1/approve-credit", new { reason = "x" })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden && (await http.PostAsJsonAsync("/api/v1/sales/orders/1/cancel", new { reason = "x" })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without the permission cannot approve credit or cancel an order");
+        Check((await http.PostAsJsonAsync("/api/v1/sales/orders/bulk/approve-credit", new { ids = new[] { 1 }, reason = "x" })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden
+            && (await http.PostAsJsonAsync("/api/v1/sales/orders/bulk/reject-credit", new { ids = new[] { 1 }, reason = "x" })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden,
+            "a user without the permission cannot bulk approve or bulk reject credit");
         Check((await http.PostAsJsonAsync("/api/v1/sales/returns", new { branchId = 1, warehouseId = 1, refundMethod = 1, reason = "x", items = Array.Empty<object>() })).StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden, "a user without sd:return:create cannot post a return");
         http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
         http.DefaultRequestHeaders.Authorization = new("Bearer", viewerToken);
