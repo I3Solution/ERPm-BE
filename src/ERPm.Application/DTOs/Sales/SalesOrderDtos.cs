@@ -111,6 +111,18 @@ public class ApproveCreditRequest
     public string Reason { get; set; } = string.Empty;
 }
 
+public class SalesOrderStatusAuditDto
+{
+    public int Id { get; set; }
+    public string Action { get; set; } = string.Empty;
+    public string FromStatus { get; set; } = string.Empty;
+    public string ToStatus { get; set; } = string.Empty;
+    public string? ActorUserId { get; set; }
+    public string? ActorName { get; set; }
+    public string? Reason { get; set; }
+    public DateTime OccurredAtUtc { get; set; }
+}
+
 public class CancelOrderRequest
 {
     public string Reason { get; set; } = string.Empty;

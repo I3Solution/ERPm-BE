@@ -32,7 +32,7 @@ public static class SystemRoles
         ("BRANCH_DIRECTOR", "Branch director", Policy(
             Allow("BranchManagement", ["sd:*", "pur:*", "crm:*", "wms:*:view", "dashboard:*:view", "hrm:*:view"]))),
         ("SALES_STAFF", "Sales staff", Policy(
-            Allow("OwnOrders", ["sd:order:view", "sd:order:create", "sd:order:edit", "crm:partner:view", "wms:item:view"], new IamDataScope { Mode = DataScopeModes.Self }))),
+            Allow("OwnOrders", ["sd:order:view", "sd:order:create", "sd:order:edit", "sd:order:confirm", "sd:order:cancel", "crm:partner:view", "wms:item:view"], new IamDataScope { Mode = DataScopeModes.Self }))),
     ];
 
     public static IamStatement Allow(string sid, string[] actions, IamDataScope? scope = null) =>

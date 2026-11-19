@@ -118,6 +118,7 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
             Require(entity!.Status == SalesOrderStatus.Draft, "error.sd.order_invalid_status_for_action", 409);
 
             entity.CreditCheckStatus = await CheckCreditAsync(entity, ct);
+            var from = entity.Status;
             if (entity.CreditCheckStatus == CreditCheckStatus.PendingApproval)
             {
                 entity.Status = SalesOrderStatus.PendingApproval;
@@ -129,6 +130,7 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
                 entity.Status = SalesOrderStatus.Confirmed;
                 publish = OrderEvent("SD_ORDER_NEW", ERPm.Domain.Enums.NotificationSeverity.INFO, entity, null);
             }
+            RecordStatus(Context, entity, "CONFIRM", from, currentUser?.UserId, null);
             await Context.SaveChangesAsync(ct);
             return await NamedAsync(MapToDto(entity), ct);
         }, ct);
@@ -153,6 +155,7 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
             entity.CreditApprovedBy = currentUser?.UserId;
             entity.CreditApprovedAtUtc = DateTime.UtcNow;
             entity.Status = SalesOrderStatus.Confirmed;
+            RecordStatus(Context, entity, "APPROVE_CREDIT", SalesOrderStatus.PendingApproval, currentUser?.UserId, reason.Trim());
             publish = OrderEvent("SD_ORDER_CREDIT_APPROVED", ERPm.Domain.Enums.NotificationSeverity.INFO, entity, reason.Trim());
             await Context.SaveChangesAsync(ct);
             return await NamedAsync(MapToDto(entity), ct);
@@ -160,6 +163,54 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
         await PublishAsync(publish, ct);
         return dto;
     }
+
+    /// <summary>
+    /// Rejects an order waiting for credit approval: it goes back to Draft for the creator to change and confirm again.
+    /// A pending order holds no stock, so nothing is released; the chosen warehouse is kept.
+    /// </summary>
+    public async Task<SalesOrderDto> RejectCreditAsync(int id, string reason, CancellationToken ct)
+    {
+        Require(!string.IsNullOrWhiteSpace(reason) && reason.Trim().Length <= 500, "error.validation.request");
+        DocumentNotice? publish = null;
+        var dto = await posting.RunAsync(async () =>
+        {
+            await posting.LockAsync($"order:Sales:{id}", ct);
+            var entity = await FindEntityAsync(id, ct);
+            Require(entity != null, "error.order.not_found", 404);
+            Require(entity!.Status == SalesOrderStatus.PendingApproval, "error.sd.order_invalid_status_for_action", 409);
+
+            entity.Status = SalesOrderStatus.Draft;
+            entity.CreditCheckStatus = CreditCheckStatus.Passed;   // checked again on the next confirm
+            RecordStatus(Context, entity, "REJECT_CREDIT", SalesOrderStatus.PendingApproval, currentUser?.UserId, reason.Trim());
+            publish = OrderEvent("SD_ORDER_CREDIT_REJECTED", ERPm.Domain.Enums.NotificationSeverity.WARNING, entity, reason.Trim());
+            await Context.SaveChangesAsync(ct);
+            return await NamedAsync(MapToDto(entity), ct);
+        }, ct);
+        await PublishAsync(publish, ct);
+        return dto;
+    }
+
+    public async Task<List<SalesOrderStatusAuditDto>> GetStatusHistoryAsync(int id, CancellationToken ct)
+    {
+        // The order goes through the scope filter, so an order out of scope is not found rather than forbidden.
+        Require(await Context.SalesOrders.AnyAsync(o => o.Id == id, ct), "error.order.not_found", 404);
+        var rows = await Context.SalesOrderStatusAudits.AsNoTracking().Where(a => a.SalesOrderId == id)
+            .OrderBy(a => a.OccurredAtUtc).ThenBy(a => a.Id).ToListAsync(ct);
+        var ids = rows.Select(r => int.TryParse(r.ActorUserId, out var n) ? n : 0).Where(n => n > 0).Distinct().ToList();
+        var names = await Context.AppUsers.AsNoTracking().IgnoreQueryFilters().Where(u => ids.Contains(u.Id)).ToDictionaryAsync(u => u.Id.ToString(), u => u.DisplayName, ct);
+        return rows.Select(r => new SalesOrderStatusAuditDto
+        {
+            Id = r.Id, Action = r.Action, FromStatus = r.FromStatus, ToStatus = r.ToStatus, ActorUserId = r.ActorUserId,
+            ActorName = r.ActorUserId != null && names.TryGetValue(r.ActorUserId, out var name) ? name : null, Reason = r.Reason, OccurredAtUtc = r.OccurredAtUtc
+        }).ToList();
+    }
+
+    /// <summary>Adds a history row for the status the order has just moved to; saved with the same transaction.</summary>
+    internal static void RecordStatus(ApplicationDbContext context, SalesOrder order, string action, string fromStatus, string? actor, string? reason) =>
+        context.SalesOrderStatusAudits.Add(new SalesOrderStatusAudit
+        {
+            SalesOrderId = order.Id, Action = action, FromStatus = fromStatus, ToStatus = order.Status, ActorUserId = actor, Reason = reason, OccurredAtUtc = DateTime.UtcNow
+        });
 
     public async Task<SalesOrderDto> CancelAsync(int id, string reason, CancellationToken ct)
     {
@@ -174,7 +225,9 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
             Require(entity.Status is SalesOrderStatus.Draft or SalesOrderStatus.PendingApproval or SalesOrderStatus.Confirmed, "error.sd.order_invalid_status_for_action", 409);
 
             await Reservations.ReleaseAsync(entity, ct);
+            var from = entity.Status;
             entity.Status = SalesOrderStatus.Cancelled;
+            RecordStatus(Context, entity, "CANCEL", from, currentUser?.UserId, reason.Trim());
             entity.CancelReason = reason.Trim();
             publish = OrderEvent("SD_ORDER_CANCELLED", ERPm.Domain.Enums.NotificationSeverity.WARNING, entity, reason.Trim());
             await Context.SaveChangesAsync(ct);

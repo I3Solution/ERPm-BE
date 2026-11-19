@@ -4212,6 +4212,70 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     b.ToTable("tbl_SALE_OrderItem", (string)null);
                 });
 
+            modelBuilder.Entity("ERPm.Domain.Entities.Sales.SalesOrderStatusAudit", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("action");
+
+                    b.Property<string>("ActorUserId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("actor_user_id");
+
+                    b.Property<Guid>("ExternalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("external_id");
+
+                    b.Property<string>("FromStatus")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("from_status");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at_utc");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reason");
+
+                    b.Property<int>("SalesOrderId")
+                        .HasColumnType("integer")
+                        .HasColumnName("sales_order_id");
+
+                    b.Property<string>("ToStatus")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("to_status");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_sale_order_status_audit");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_sale_order_status_audit_external_id");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id" });
+
+                    b.HasIndex("SalesOrderId", "OccurredAtUtc")
+                        .HasDatabaseName("ix_tbl_sale_order_status_audit_sales_order_id_occurred_at_utc");
+
+                    b.ToTable("tbl_SALE_OrderStatusAudit", (string)null);
+                });
+
             modelBuilder.Entity("ERPm.Domain.Entities.Sales.SalesQuotation", b =>
                 {
                     b.Property<int>("Id")
@@ -6793,6 +6857,18 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_tbl_sale_order_item_tbl_sale_order_sales_order_id");
 
                     b.Navigation("Item");
+
+                    b.Navigation("SalesOrder");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Sales.SalesOrderStatusAudit", b =>
+                {
+                    b.HasOne("ERPm.Domain.Entities.Sales.SalesOrder", "SalesOrder")
+                        .WithMany()
+                        .HasForeignKey("SalesOrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_sale_order_status_audit_sales_orders_sales_order_id");
 
                     b.Navigation("SalesOrder");
                 });

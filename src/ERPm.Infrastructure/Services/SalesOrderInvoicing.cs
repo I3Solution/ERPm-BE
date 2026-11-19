@@ -46,7 +46,9 @@ public partial class SalesInvoiceService
             var posted = await PostInvoiceAsync(invoiceRequest, Hash(invoiceRequest), order.Id, cancellationToken);
 
             foreach (var line in order.Items) line.InvoicedQuantity = line.Quantity;
+            var from = order.Status;
             order.Status = SalesOrderStatus.Completed;
+            SalesOrderService.RecordStatus(context, order, "INVOICE", from, user?.UserId, null);
 
             publish = new DocumentNotice(
                 "SD_ORDER_INVOICED", ERPm.Domain.Enums.NotificationCategory.SD, ERPm.Domain.Enums.NotificationSeverity.INFO, "sd:order:view",

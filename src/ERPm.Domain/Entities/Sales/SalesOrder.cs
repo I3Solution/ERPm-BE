@@ -79,6 +79,20 @@ public class SalesOrder : BaseAuditableEntity
     public virtual ICollection<SalesOrderItem> Items { get; set; } = new List<SalesOrderItem>();
 }
 
+/// <summary>Immutable history entry written in the same transaction as each status change of a sales order.</summary>
+public class SalesOrderStatusAudit : BaseEntity
+{
+    public int SalesOrderId { get; set; }
+    public string Action { get; set; } = string.Empty;      // CONFIRM, APPROVE_CREDIT, REJECT_CREDIT, CANCEL, INVOICE
+    public string FromStatus { get; set; } = string.Empty;
+    public string ToStatus { get; set; } = string.Empty;
+    public string? ActorUserId { get; set; }
+    public string? Reason { get; set; }
+    public DateTime OccurredAtUtc { get; set; } = DateTime.UtcNow;
+
+    public virtual SalesOrder? SalesOrder { get; set; }
+}
+
 public class SalesOrderItem : BaseEntity
 {
     public int SalesOrderId { get; set; }
