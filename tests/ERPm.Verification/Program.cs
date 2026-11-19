@@ -1521,7 +1521,7 @@ try
             var uResp = await http.PostAsJsonAsync("/api/v1/auth/users", new { userName = uname, displayName = uname, password, role = "None", branchIds = Array.Empty<int>() });
             Check(uResp.IsSuccessStatusCode, $"provisioned user {uname}");
             var uId = JsonDocument.Parse(await uResp.Content.ReadAsStringAsync()).RootElement.GetProperty("data").GetProperty("id").GetInt32();
-            var assignResp = await http.PostAsJsonAsync($"/api/v1/auth/users/{uId}/roles", new { roleId = rId });
+            var assignResp = await http.PutAsJsonAsync($"/api/v1/sys/roles/users/{uId}", new { roles = new[] { new { roleId = rId } } });
             Check(assignResp.IsSuccessStatusCode, $"assigned role to {uname}");
             var loginResp = await http.PostAsJsonAsync("/api/v1/auth/login", new { userName = uname, password });
             Check(loginResp.IsSuccessStatusCode, $"logged in as {uname}");
