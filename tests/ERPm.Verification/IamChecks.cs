@@ -24,6 +24,10 @@ static class IamChecks
 
     public static void Pure(Action<bool, string> check)
     {
+        var staff = SystemRoles.Templates.Single(r => r.Code == "SALES_STAFF").Policy.Statements.Single();
+        check(PermissionCatalog.Contains("sd:order:reject_credit") && staff.Actions.Contains("sd:order:confirm") && staff.Actions.Contains("sd:order:cancel")
+            && !staff.Actions.Contains("sd:order:approve_credit") && !staff.Actions.Contains("sd:order:reject_credit") && staff.DataScope?.Mode == DataScopeModes.Self,
+            "S27.4: sales staff confirm and cancel their own orders; credit approval and rejection stay with approvers");
         check(IamPolicyEvaluator.Matches("*", "sd:order:view") && IamPolicyEvaluator.Matches("sd:*", "sd:order:view")
             && IamPolicyEvaluator.Matches("*:view", "wms:stock:view") && IamPolicyEvaluator.Matches("SD:ORDER:*", "sd:order:edit")
             && !IamPolicyEvaluator.Matches("sd:order:*", "sd:invoice:view") && !IamPolicyEvaluator.Matches("*:view", "sd:order:edit"),
@@ -99,6 +103,23 @@ static class IamChecks
             return await scoped.SalesOrders.Where(o => o.OrderNumber.StartsWith("IAM-")).Select(o => o.OrderNumber).OrderBy(n => n).ToArrayAsync();
         }
         t.Check((await VisibleOrders(orders.Scope)).SequenceEqual(["IAM-HN"]), "BRANCH_TREE query filter shows only the holder's branch subtree");
+        // S27.4: status actions find the order through the same scope filter, so an order out of scope is not found.
+        var scopeUser = new ScopeUser(account.Id, orders.Scope);
+        await using (var scoped = t.Db(scopeUser))
+        {
+            var scopedOrders = new SalesOrderService(scoped, new ERPm.Infrastructure.Services.Common.PostingTransaction(scoped), currentUser: scopeUser);
+            var hcm = await db.SalesOrders.Where(o => o.OrderNumber == "IAM-HCM").Select(o => o.Id).SingleAsync();
+            var hn = await db.SalesOrders.Where(o => o.OrderNumber == "IAM-HN").Select(o => o.Id).SingleAsync();
+            await t.Reject(() => scopedOrders.ConfirmAsync(hcm, default), "error.order.not_found");
+            await t.Reject(() => scopedOrders.RejectCreditAsync(hcm, "x", default), "error.order.not_found");
+            await t.Reject(() => scopedOrders.CancelAsync(hcm, "x", default), "error.order.not_found");
+            await t.Reject(() => scopedOrders.GetStatusHistoryAsync(hcm, default), "error.order.not_found");
+            await t.Reject(() => scopedOrders.RejectCreditAsync(hn, "x", default), "error.sd.order_invalid_status_for_action");
+            await t.Reject(() => scopedOrders.ApproveCreditAsync(hn, "x", default), "error.sd.order_invalid_status_for_action");
+            t.Check((await scopedOrders.CancelAsync(hn, "out of stock", default)).Status == "Cancelled"
+                && (await scopedOrders.GetStatusHistoryAsync(hn, default)).Single() is { Action: "CANCEL", ActorUserId: var actor } && actor == account.Id.ToString(),
+                "an order in scope is cancelled and the history records who did it");
+        }
 
         var roles = new RoleService(db, Iam(db));
         var warehouse = await db.IamRoles.SingleAsync(r => r.CompanyId == null && r.Code == "WAREHOUSE_ACCOUNTANT");

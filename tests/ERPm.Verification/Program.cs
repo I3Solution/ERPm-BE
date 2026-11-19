@@ -645,6 +645,34 @@ try
     Check(approved.Status == "Confirmed" && approved.CreditCheckStatus == "Overridden" && approved.ReservationStatus == "Reserved" && await Reserved() == 2, "approving credit confirms the order and reserves its stock");
     await Reject(async () => await orders.ApproveCreditAsync(held.Id, "again", default), "error.sd.order_invalid_status_for_action");
     await Reject(async () => await orders.ApproveCreditAsync(999999, "x", default), "error.order.not_found");
+    // S27.4: a rejected credit approval returns the order to Draft without touching stock; every change leaves a history row.
+    var refusedCredit = await orders.ConfirmAsync((await DraftOrder(poor.Id, 1)).Id, default);
+    await Reject(async () => await orders.RejectCreditAsync(refusedCredit.Id, " ", default), "error.validation.request");
+    var rejected = await orders.RejectCreditAsync(refusedCredit.Id, "Customer must pay first", default);
+    Check(rejected.Status == "Draft" && rejected.CreditCheckStatus == "Passed" && rejected.ReservationStatus == "None" && await Reserved() == 2, "rejecting credit returns the order to Draft and holds no stock");
+    await Reject(async () => await orders.RejectCreditAsync(refusedCredit.Id, "again", default), "error.sd.order_invalid_status_for_action");
+    await Reject(async () => await orders.RejectCreditAsync(approved.Id, "too late", default), "error.sd.order_invalid_status_for_action");
+    Check((await orders.ConfirmAsync(refusedCredit.Id, default)).Status == "PendingApproval", "a rejected order can be confirmed again and is credit checked again");
+    var heldHistory = await orders.GetStatusHistoryAsync(held.Id, default);
+    Check(heldHistory.Select(h => $"{h.Action}:{h.FromStatus}>{h.ToStatus}").SequenceEqual(["CONFIRM:Draft>PendingApproval", "APPROVE_CREDIT:PendingApproval>Confirmed"])
+        && heldHistory[1].Reason == "Paid in advance", "the status history lists confirm and credit approval with its reason");
+    Check((await orders.GetStatusHistoryAsync(refusedCredit.Id, default)).Select(h => h.Action).SequenceEqual(["CONFIRM", "REJECT_CREDIT", "CONFIRM"])
+        && (await orders.GetStatusHistoryAsync(first.Id, default)).Last() is { Action: "CANCEL", FromStatus: "Confirmed", ToStatus: "Cancelled", Reason: "customer changed mind" },
+        "rejection and cancellation are kept in the status history");
+    await Reject(async () => await orders.GetStatusHistoryAsync(999999, default), "error.order.not_found");
+    await orders.CancelAsync(refusedCredit.Id, "credit refused", default);
+    // Two approvers act on the same pending order at once: the order lock lets one win, the other sees the new status.
+    var contested = await orders.ConfirmAsync((await DraftOrder(poor.Id, 1)).Id, default);
+    await using (var dbA = Db(user)) await using (var dbB = Db(user))
+    {
+        var outcomes = await Task.WhenAll(
+            Outcome(() => new SalesOrderService(dbA, new PostingTransaction(dbA)).ApproveCreditAsync(contested.Id, "approver A", default)),
+            Outcome(() => new SalesOrderService(dbB, new PostingTransaction(dbB)).RejectCreditAsync(contested.Id, "approver B", default)));
+        Check(outcomes.Count(o => o == "ok") == 1 && outcomes.Count(o => o == "error.sd.order_invalid_status_for_action") == 1
+            && (await orders.GetStatusHistoryAsync(contested.Id, default)).Count == 2, "concurrent approve and reject: exactly one wins and one history row is added");
+    }
+    static async Task<string> Outcome(Func<Task> action) { try { await action(); return "ok"; } catch (BusinessException e) { return e.Code; } }
+    if ((await orders.GetByIdAsync(contested.Id))!.Status != "Cancelled") await orders.CancelAsync(contested.Id, "concurrency test done", default);
 
     var warned = await orders.ConfirmAsync((await DraftOrder(edge.Id, 2, 450)).Id, default);
     Check(warned.Status == "Confirmed" && warned.CreditCheckStatus == "Warning" && await Reserved() == 4, "an order close to the credit limit is confirmed with a warning");

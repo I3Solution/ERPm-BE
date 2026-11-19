@@ -58,6 +58,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<StockIssueItem> StockIssueItems => Set<StockIssueItem>();
     public DbSet<SalesOrder> SalesOrders => Set<SalesOrder>();
     public DbSet<SalesOrderItem> SalesOrderItems => Set<SalesOrderItem>();
+    public DbSet<SalesOrderStatusAudit> SalesOrderStatusAudits => Set<SalesOrderStatusAudit>();
     public DbSet<PriceList> PriceLists => Set<PriceList>();
     public DbSet<PriceListVersion> PriceListVersions => Set<PriceListVersion>();
     public DbSet<PriceListVersionAudit> PriceListVersionAudits => Set<PriceListVersionAudit>();
@@ -818,6 +819,19 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
                 .HasDatabaseName("ix_tbl_sd_price_list_version_audit_version_occurred");
         });
 
+        modelBuilder.Entity<SalesOrderStatusAudit>(entity =>
+        {
+            entity.ToTable("tbl_SALE_OrderStatusAudit");
+            ConfigureDualKeyEntity(entity);
+            entity.Property(e => e.Action).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.FromStatus).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.ToStatus).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.ActorUserId).HasMaxLength(100);
+            entity.Property(e => e.Reason).HasMaxLength(500);
+            entity.HasOne(e => e.SalesOrder).WithMany().HasForeignKey(e => e.SalesOrderId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => new { e.SalesOrderId, e.OccurredAtUtc });
+        });
+
         modelBuilder.Entity<PriceListItem>(entity =>
         {
             entity.ToTable("tbl_SD_PriceListItem");
@@ -1416,6 +1430,8 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         modelBuilder.Entity<StockReservation>().HasQueryFilter(e => !e.SalesOrder!.IsDeleted);
         modelBuilder.Entity<SalesQuotationItem>().HasQueryFilter(e => !e.SalesQuotation!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.SalesQuotation.BranchId)
             || (e.SalesQuotation.DepartmentId != null && AllowedDepartmentIds.Contains(e.SalesQuotation.DepartmentId.Value)) || (OwnRecordsUserId != null && e.SalesQuotation.CreatedBy == OwnRecordsUserId)));
+        modelBuilder.Entity<SalesOrderStatusAudit>().HasQueryFilter(e => !e.SalesOrder!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.SalesOrder.BranchId)
+            || (e.SalesOrder.DepartmentId != null && AllowedDepartmentIds.Contains(e.SalesOrder.DepartmentId.Value)) || (OwnRecordsUserId != null && e.SalesOrder.CreatedBy == OwnRecordsUserId)));
         modelBuilder.Entity<SalesOrderItem>().HasQueryFilter(e => !e.SalesOrder!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.SalesOrder.BranchId)
             || (e.SalesOrder.DepartmentId != null && AllowedDepartmentIds.Contains(e.SalesOrder.DepartmentId.Value)) || (OwnRecordsUserId != null && e.SalesOrder.CreatedBy == OwnRecordsUserId)));
         modelBuilder.Entity<PurchaseOrderItem>().HasQueryFilter(e => !e.PurchaseOrder!.IsDeleted && (IsUnrestricted || AllowedBranchIds.Contains(e.PurchaseOrder.BranchId)

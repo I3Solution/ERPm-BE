@@ -44,6 +44,24 @@ public class SalesOrdersController : BaseCrudController<SalesOrder, SalesOrderDt
     }
 
     /// <summary>
+    /// Rejects an order waiting for credit approval and returns it to Draft. A reason is required.
+    /// </summary>
+    [RequirePermission(":reject_credit")]
+    [HttpPost("{id:int}/reject-credit")]
+    public async Task<ActionResult<ApiResponse<SalesOrderDto>>> RejectCredit(int id, [FromBody] ApproveCreditRequest request, CancellationToken cancellationToken)
+    {
+        return Ok(ApiResponse<SalesOrderDto>.Ok(await _approval.RejectCreditAsync(id, request.Reason, cancellationToken), "common.saved"));
+    }
+
+    /// <summary>Who changed the order status, when and why, oldest first.</summary>
+    [RequirePermission(":view")]
+    [HttpGet("{id:int}/status-history")]
+    public async Task<ActionResult<ApiResponse<List<SalesOrderStatusAuditDto>>>> StatusHistory(int id, CancellationToken cancellationToken)
+    {
+        return Ok(ApiResponse<List<SalesOrderStatusAuditDto>>.Ok(await _approval.GetStatusHistoryAsync(id, cancellationToken)));
+    }
+
+    /// <summary>
     /// Cancels an order that has not been invoiced and releases the stock it reserved.
     /// </summary>
     [RequirePermission(":cancel")]
