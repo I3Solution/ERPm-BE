@@ -31,6 +31,18 @@ public class StockController : BaseApiController
         return Ok(ApiResponse<List<StockBalanceDto>>.Ok(result));
     }
 
+    /// <summary>Warehouses a selling branch ships its sales orders from (its own when it has no list).</summary>
+    [RequirePermission("wms:stock:view")]
+    [HttpGet("branches/{branchId:int}/serving-warehouses")]
+    public async Task<ActionResult<ApiResponse<List<ServingWarehouseDto>>>> GetServingWarehouses(int branchId, CancellationToken cancellationToken)
+        => Ok(ApiResponse<List<ServingWarehouseDto>>.Ok(await _stockService.GetServingWarehousesAsync(branchId, cancellationToken)));
+
+    /// <summary>Replaces the branch's list of serving warehouses: same company, active, exactly one default.</summary>
+    [RequirePermission("sys:branch:edit")]
+    [HttpPut("branches/{branchId:int}/serving-warehouses")]
+    public async Task<ActionResult<ApiResponse<List<ServingWarehouseDto>>>> UpdateServingWarehouses(int branchId, [FromBody] UpdateServingWarehousesRequest request, CancellationToken cancellationToken)
+        => Ok(ApiResponse<List<ServingWarehouseDto>>.Ok(await _stockService.UpdateServingWarehousesAsync(branchId, request, cancellationToken)));
+
     [RequirePermission("wms:receipt:create")]
     [HttpPost("receipts")]
     public async Task<ActionResult<ApiResponse<bool>>> CreateStockReceipt([FromBody] CreateStockReceiptRequest request, CancellationToken cancellationToken)

@@ -30,6 +30,7 @@ public interface IApplicationDbContext
 
     // Inventory
     DbSet<Warehouse> Warehouses { get; }
+    DbSet<BranchServingWarehouse> BranchServingWarehouses { get; }
     DbSet<StockBalance> StockBalances { get; }
     DbSet<StockReceipt> StockReceipts { get; }
     DbSet<StockReceiptItem> StockReceiptItems { get; }

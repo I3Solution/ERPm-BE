@@ -1,6 +1,7 @@
 using ERPm.Domain.Common;
 using ERPm.Domain.Entities.Catalog;
 using ERPm.Domain.Entities.HumanResource;
+using ERPm.Domain.Entities.Inventory;
 using ERPm.Domain.Entities.System;
 using PartnerEntity = ERPm.Domain.Entities.Partner.Partner;
 
@@ -67,12 +68,14 @@ public class SalesOrder : BaseAuditableEntity
     public int? QuotationId { get; set; }                  // Quotation this order was converted from
     public int? SalespersonId { get; set; }                // Employee in charge
     public int? PriceListId { get; set; }
+    public int? WarehouseId { get; set; }                  // Shipping warehouse chosen while Draft; null on orders made before it existed
 
     // Navigation
     public virtual Branch? Branch { get; set; }
     public virtual PartnerEntity? Customer { get; set; }
     public virtual SalesQuotation? Quotation { get; set; }
     public virtual Employee? Salesperson { get; set; }
+    public virtual Warehouse? Warehouse { get; set; }
     public virtual ICollection<SalesOrderItem> Items { get; set; } = new List<SalesOrderItem>();
 }
 

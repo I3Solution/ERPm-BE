@@ -10,7 +10,7 @@ namespace ERPm.Infrastructure.Services.Common;
 internal sealed class OrderStockReservations(ApplicationDbContext context, PostingTransaction posting)
 {
     /// <summary>
-    /// Holds the goods of every line in the warehouses of the order's branch (largest available first).
+    /// Holds the goods of every line in the order's shipping warehouse.
     /// All lines are reserved or none: a shortage rejects the whole request.
     /// </summary>
     public async Task ReserveAsync(SalesOrder order, CancellationToken ct)
@@ -20,7 +20,9 @@ internal sealed class OrderStockReservations(ApplicationDbContext context, Posti
         var lines = order.Items.Where(i => goods.Contains(i.ItemId)).ToList();
         if (lines.Count == 0) { order.ReservationStatus = OrderReservationStatus.None; return; }
 
-        var warehouseIds = await context.Warehouses.IgnoreQueryFilters().Where(w => !w.IsDeleted && w.IsActive && w.BranchId == order.BranchId).Select(w => w.Id).OrderBy(w => w).ToListAsync(ct);
+        // The order ships from one warehouse: the one picked while Draft, else the branch default (orders made before S27.1).
+        order.WarehouseId = await ServingWarehouses.ResolveAsync(context, order.BranchId, order.WarehouseId, ct);
+        int[] warehouseIds = [order.WarehouseId.Value];
         var goodsIds = goods.Order().ToArray();
         foreach (var warehouseId in warehouseIds)
             foreach (var itemId in goodsIds) await posting.LockAsync($"stock:{warehouseId}:{itemId}", ct);

@@ -1118,6 +1118,72 @@ try
     var heldBefore = (await InvStock()).QuantityReserved;
     await Reject(async () => await seller3.CreateInvoiceFromOrderAsync(retail.Id, FromOrder(PaymentMethod.Debt)), "error.sales.customer_required");
     Check((await InvStock()).QuantityReserved == heldBefore && (await orders.GetByIdAsync(retail.Id))!.Status == "Confirmed", "a refused invoice leaves the order Confirmed with its stock still held");
+
+    // S27.1: a branch ships orders from a serving warehouse of another branch of its company; the cost is booked there.
+    var stock = new StockService(db, new BranchService(db), Receipts(db));
+    Check((await stock.GetServingWarehousesAsync(branch.Id)) is [{ IsDefault: true, IsConfigured: false } ownDefault] && ownDefault.WarehouseId == warehouse.Id, "a branch without a list ships from its ownDefault default warehouse");
+    var hub = db.Branches.Add(new Branch { Code = "HUB", Name = "Hub branch", ParentId = branch.ParentId ?? branch.Id, CompanyId = branch.CompanyId }).Entity;
+    var foreign = db.Branches.Add(new Branch { Code = "FOREIGN", Name = "Other company", OrgUnitType = OrgUnitType.Company }).Entity;
+    await db.SaveChangesAsync();
+    foreign.CompanyId = foreign.Id;
+    var hubWh = db.Warehouses.Add(new Warehouse { Code = "WH-HUB", Name = "Hub warehouse", BranchId = hub.Id }).Entity;
+    var foreignWh = db.Warehouses.Add(new Warehouse { Code = "WH-FOREIGN", Name = "Foreign warehouse", BranchId = foreign.Id }).Entity;
+    var hubItem = db.Items.Add(new Item { Code = "HUBG", Name = "Hub goods", BaseUomId = uom.Id, SalePrice = 100, CostPrice = 2 }).Entity;
+    await db.SaveChangesAsync();
+    db.StockBalances.AddRange(new StockBalance { WarehouseId = hubWh.Id, ItemId = hubItem.Id, QuantityOnHand = 5, AverageCostPrice = 2, InventoryValue = 10 },
+        new StockBalance { WarehouseId = warehouse.Id, ItemId = hubItem.Id, QuantityOnHand = 100, AverageCostPrice = 2, InventoryValue = 200 },
+        new StockBalance { WarehouseId = foreignWh.Id, ItemId = hubItem.Id, QuantityOnHand = 100, AverageCostPrice = 2, InventoryValue = 200 });
+    await db.SaveChangesAsync();
+    async Task<StockBalance> HubStock(int warehouseId) => await db.StockBalances.AsNoTracking().SingleAsync(b => b.ItemId == hubItem.Id && b.WarehouseId == warehouseId);
+    UpdateServingWarehousesRequest Serving(params (int Id, bool IsDefault)[] lines) => new() { Warehouses = lines.Select(l => new ServingWarehouseLine { WarehouseId = l.Id, IsDefault = l.IsDefault }).ToList() };
+    await Reject(async () => await stock.UpdateServingWarehousesAsync(branch.Id, Serving((foreignWh.Id, true))), "error.sd.warehouse_not_serving");
+    await Reject(async () => await stock.UpdateServingWarehousesAsync(branch.Id, Serving((warehouse.Id, true), (hubWh.Id, true))), "error.validation.request");
+    await stock.UpdateServingWarehousesAsync(branch.Id, Serving((hubWh.Id, true), (warehouse.Id, false)));
+    var servingList = await stock.UpdateServingWarehousesAsync(branch.Id, Serving((warehouse.Id, true), (hubWh.Id, false)));
+    Check(servingList.Count == 2 && servingList[0].WarehouseId == warehouse.Id && servingList.All(w => w.IsConfigured) && servingList.Single(w => w.WarehouseId == hubWh.Id).BranchId == hub.Id,
+        "a branch lists a warehouse of another branch of its company and can move its default");
+    async Task<SalesOrderDto> HubOrder(decimal quantity, int? warehouseId) => await orders.CreateAsync(new CreateSalesOrderRequest
+    { BranchId = branch.Id, CustomerId = rich.Id, WarehouseId = warehouseId, Items = [new() { ItemId = hubItem.Id, Quantity = quantity, UnitPrice = 100 }] });
+    await Reject(async () => await HubOrder(1, foreignWh.Id), "error.sd.warehouse_not_serving");
+    await Reject(async () => await stock.GetAvailabilityAsync(branch.Id, foreignWh.Id, [hubItem.Id]), "error.sd.warehouse_not_serving");
+
+    var hubShipped = await orders.ConfirmAsync((await HubOrder(3, hubWh.Id)).Id, default);
+    Check(hubShipped.BranchId == branch.Id && hubShipped.WarehouseId == hubWh.Id && hubShipped.ReservationStatus == "Reserved" && (await HubStock(hubWh.Id)).QuantityReserved == 3 && (await HubStock(warehouse.Id)).QuantityReserved == 0
+        && await db.StockReservations.AsNoTracking().AllAsync(r => r.SalesOrderId != hubShipped.Id || r.WarehouseId == hubWh.Id), "an order of branch A holds its stock in serving warehouse B only");
+    Check((await stock.GetAvailabilityAsync(branch.Id, hubWh.Id, [hubItem.Id])).Single().QuantityAvailable == 2, "availability in the serving warehouse is on hand less held");
+    var tooMany = await HubOrder(3, hubWh.Id);
+    await Reject(async () => await orders.ConfirmAsync(tooMany.Id, default), "error.sd.insufficient_available_stock");
+    db.ChangeTracker.Clear();   // a request drops its context after a refusal; this shared one must not save the rolled-back holds later
+    Check((await orders.GetByIdAsync(tooMany.Id))!.Status == "Draft" && (await HubStock(hubWh.Id)).QuantityReserved == 3, "an order short of stock in its warehouse stays Draft though another warehouse has plenty");
+    // Two orders race for the last two units: one wins, nothing is oversold.
+    var hubRaceA = await HubOrder(2, hubWh.Id); var hubRaceB = await HubOrder(2, hubWh.Id);
+    async Task<bool> RaceConfirm(int id)
+    {
+        await using var raceDb = Db();
+        try { await new SalesOrderService(raceDb, new PostingTransaction(raceDb)).ConfirmAsync(id, default); return true; }
+        catch (BusinessException e) when (e.Code == "error.sd.insufficient_available_stock") { return false; }
+    }
+    var raced = await Task.WhenAll(RaceConfirm(hubRaceA.Id), RaceConfirm(hubRaceB.Id));
+    Check(raced.Count(won => won) == 1 && (await HubStock(hubWh.Id)).QuantityReserved == 5, "two orders racing for the same stock never oversell");
+    var raceWinner = raced[0] ? hubRaceA : hubRaceB;
+    var released = await orders.CancelAsync(raceWinner.Id, "customer left", default);
+    Check(released.ReservationStatus == "Released" && (await HubStock(hubWh.Id)).QuantityReserved == 3 && (await HubStock(warehouse.Id)).QuantityReserved == 0, "cancelling gives the stock back to the warehouse that held it");
+    var legacyDraft = await HubOrder(1, null);
+    var legacyConfirmed = await orders.ConfirmAsync(legacyDraft.Id, default);
+    Check(legacyConfirmed.WarehouseId == warehouse.Id && (await HubStock(warehouse.Id)).QuantityReserved == 1, "an order naming no warehouse ships from the branch default");
+
+    await Reject(async () => await seller3.CreateInvoiceFromOrderAsync(hubShipped.Id, FromOrder()), "error.sd.warehouse_not_serving");
+    var crossInvoice = await seller3.CreateInvoiceFromOrderAsync(hubShipped.Id, new CreateInvoiceFromOrderRequest { PaymentMethod = (int)PaymentMethod.Cash, TenderedAmount = 300 });
+    var crossSaved = await db.SalesInvoices.AsNoTracking().Include(i => i.StockIssue).Include(i => i.JournalEntry).ThenInclude(j => j!.Lines).SingleAsync(i => i.Id == crossInvoice.Id);
+    var costEntry = await db.JournalEntries.AsNoTracking().Include(j => j.Lines).SingleAsync(j => j.VoucherType == "STOCK_ISSUE" && j.Description == crossSaved.InvoiceNumber + " " + crossSaved.StockIssue!.Code);
+    var hubAfter = await HubStock(hubWh.Id);
+    Check(crossSaved.BranchId == branch.Id && crossSaved.WarehouseId == hubWh.Id && crossSaved.StockIssue!.BranchId == hub.Id && hubAfter.QuantityOnHand == 2 && hubAfter.QuantityReserved == 0,
+        "the invoice stays with selling branch A while the goods leave warehouse B under branch B");
+    Check(crossSaved.JournalEntry!.BranchId == branch.Id && crossSaved.JournalEntry.Lines.Sum(l => l.DebitAmount) == 300 && crossSaved.JournalEntry.Lines.Sum(l => l.CreditAmount) == 300
+        && costEntry.BranchId == hub.Id && costEntry.Lines.Sum(l => l.DebitAmount) == 6 && costEntry.Lines.Sum(l => l.CreditAmount) == 6, "revenue is booked at A and the cost of goods at B, each entry balanced");
+    await Reject(async () => await Sales(db).CreateInvoiceAsync(new CreateSalesInvoiceRequest { RequestId = Guid.NewGuid(), BranchId = branch.Id, WarehouseId = hubWh.Id, PaidAmount = 100, Items = [new() { ItemId = hubItem.Id, Quantity = 1, UnitPrice = 100 }] }), "error.inventory.branch_mismatch");
+    Check((await stock.UpdateServingWarehousesAsync(branch.Id, Serving())) is [{ IsConfigured: false } back] && back.WarehouseId == warehouse.Id, "an empty list sends the branch back to its ownDefault warehouses");
+    await orders.CancelAsync(legacyConfirmed.Id, "cleanup", default);
     (await db.Accounts.SingleAsync(a => a.Code == "511")).IsActive = false; await db.SaveChangesAsync();   // restore the state the next checks expect
     // Quotation notifications follow the customer's answer and the conversion, and only for changes that were saved.
     // Who hears about it: accounts that may view quotations within a scope reaching this one, never the person acting.

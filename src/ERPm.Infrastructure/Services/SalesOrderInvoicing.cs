@@ -14,7 +14,7 @@ public partial class SalesInvoiceService
     /// </summary>
     public async Task<SalesInvoiceDto> CreateInvoiceFromOrderAsync(int orderId, CreateInvoiceFromOrderRequest request, CancellationToken cancellationToken = default)
     {
-        Require(request.WarehouseId > 0 && Enum.IsDefined((PaymentMethod)request.PaymentMethod), "error.validation.payment_method");
+        Require(request.WarehouseId >= 0 && Enum.IsDefined((PaymentMethod)request.PaymentMethod), "error.validation.payment_method");
         ValidateNumber(request.TenderedAmount);
         DocumentNotice? publish = null;
 
@@ -25,12 +25,16 @@ public partial class SalesInvoiceService
             Require(order != null, "error.order.not_found", 404);
             Require(order!.Status is SalesOrderStatus.Confirmed or SalesOrderStatus.Processing && order.Items.All(i => i.InvoicedQuantity == 0), "error.sd.order_invalid_status_for_action", 409);
             Require(order.TaxAmount == 0, "error.sd.order_tax_not_supported", 409);
+            // The goods leave the warehouse the order holds them in. An order made before S27.1 names none: the caller picks one.
+            Require(order.WarehouseId == null || request.WarehouseId is 0 || request.WarehouseId == order.WarehouseId, "error.sd.warehouse_not_serving", 409);
+            var warehouseId = order.WarehouseId ?? request.WarehouseId;
+            Require(warehouseId > 0, "error.validation.request");
 
             // Order discounts become one invoice discount so the invoice total equals the order total exactly.
             var invoiceRequest = new CreateSalesInvoiceRequest
             {
                 RequestId = Guid.NewGuid(), BranchId = order.BranchId, DepartmentId = order.DepartmentId, CustomerId = order.CustomerId, CustomerName = order.CustomerName,
-                WarehouseId = request.WarehouseId, PaymentMethod = (PaymentMethod)request.PaymentMethod, PaidAmount = request.TenderedAmount,
+                WarehouseId = warehouseId, PaymentMethod = (PaymentMethod)request.PaymentMethod, PaidAmount = request.TenderedAmount,
                 DiscountAmount = order.Items.Sum(i => i.DiscountAmount) + order.DiscountAmount,
                 Notes = string.IsNullOrWhiteSpace(request.Notes) ? order.OrderNumber : $"{order.OrderNumber}: {request.Notes.Trim()}",
                 Items = order.Items.Select(i => new SalesInvoiceItemRequest { ItemId = i.ItemId, Quantity = i.Quantity, UnitPrice = i.UnitPrice }).ToList()

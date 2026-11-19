@@ -22,6 +22,8 @@ public class SalesOrderDto
     public string OrderNumber { get; set; } = string.Empty;
     public DateTime OrderDate { get; set; }
     public int BranchId { get; set; }
+    public int? WarehouseId { get; set; }                  // Shipping warehouse; may belong to another branch of the company
+    public string? WarehouseName { get; set; }
     public int? DepartmentId { get; set; }
     public int? CustomerId { get; set; }
     public string CustomerName { get; set; } = string.Empty;
@@ -76,6 +78,8 @@ public class CreateSalesOrderRequest
     public string? OrderNumber { get; set; }
     public DateTime? OrderDate { get; set; }
     public int BranchId { get; set; }
+    /// <summary>Shipping warehouse, one the branch may ship from. Left empty, the branch default is taken on confirmation.</summary>
+    public int? WarehouseId { get; set; }
     public int? DepartmentId { get; set; }
     public int? CustomerId { get; set; }
     public string CustomerName { get; set; } = "Khách lẻ";
@@ -114,6 +118,7 @@ public class CancelOrderRequest
 
 public class CreateInvoiceFromOrderRequest
 {
+    /// <summary>Optional: the order's own warehouse is used. A different one is rejected.</summary>
     public int WarehouseId { get; set; }
     /// <summary>1 = Cash, 2 = BankTransfer, 3 = Debt.</summary>
     public int PaymentMethod { get; set; }
