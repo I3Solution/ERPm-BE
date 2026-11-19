@@ -23,7 +23,7 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
     // A list row needs no lines: they are what makes the order list heavy, so a summary request does not load them.
     protected override IQueryable<SalesOrder> PrepareSummaryQuery(IQueryable<SalesOrder> query) => query.Include(o => o.Salesperson).Include(o => o.Quotation);
     protected override IQueryable<SalesOrder> PrepareQuery(IQueryable<SalesOrder> query) => query.Include(o => o.Items).Include(o => o.Salesperson).Include(o => o.Quotation).Include(o => o.Warehouse);
-    protected override Task<SalesOrder?> FindEntityAsync(int id, CancellationToken ct) => Context.Set<SalesOrder>().Include(o => o.Items).Include(o => o.Salesperson).Include(o => o.Quotation).SingleOrDefaultAsync(o => o.Id == id, ct);
+    protected override Task<SalesOrder?> FindEntityAsync(int id, CancellationToken ct) => Context.Set<SalesOrder>().Include(o => o.Items).Include(o => o.Salesperson).Include(o => o.Quotation).Include(o => o.Warehouse).SingleOrDefaultAsync(o => o.Id == id, ct);
     protected override IQueryable<SalesOrder> ApplyFilters(IQueryable<SalesOrder> query, BaseFilterQuery filter)
     {
         query = base.ApplyFilters(query, filter);
