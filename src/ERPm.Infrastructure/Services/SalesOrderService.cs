@@ -22,8 +22,8 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
 
     // A list row needs no lines: they are what makes the order list heavy, so a summary request does not load them.
     protected override IQueryable<SalesOrder> PrepareSummaryQuery(IQueryable<SalesOrder> query) => query.Include(o => o.Salesperson).Include(o => o.Quotation);
-    protected override IQueryable<SalesOrder> PrepareQuery(IQueryable<SalesOrder> query) => query.Include(o => o.Items).Include(o => o.Salesperson).Include(o => o.Quotation);
-    protected override Task<SalesOrder?> FindEntityAsync(int id, CancellationToken ct) => Context.Set<SalesOrder>().Include(o => o.Items).Include(o => o.Salesperson).Include(o => o.Quotation).SingleOrDefaultAsync(o => o.Id == id, ct);
+    protected override IQueryable<SalesOrder> PrepareQuery(IQueryable<SalesOrder> query) => query.Include(o => o.Items).Include(o => o.Salesperson).Include(o => o.Quotation).Include(o => o.Warehouse);
+    protected override Task<SalesOrder?> FindEntityAsync(int id, CancellationToken ct) => Context.Set<SalesOrder>().Include(o => o.Items).Include(o => o.Salesperson).Include(o => o.Quotation).Include(o => o.Warehouse).SingleOrDefaultAsync(o => o.Id == id, ct);
     protected override IQueryable<SalesOrder> ApplyFilters(IQueryable<SalesOrder> query, BaseFilterQuery filter)
     {
         query = base.ApplyFilters(query, filter);
@@ -32,7 +32,7 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
     }
     protected override SalesOrderDto MapToDto(SalesOrder o) => new()
     {
-        Id = o.Id, OrderNumber = o.OrderNumber, OrderDate = o.OrderDate, BranchId = o.BranchId, DepartmentId = o.DepartmentId,
+        Id = o.Id, OrderNumber = o.OrderNumber, OrderDate = o.OrderDate, BranchId = o.BranchId, DepartmentId = o.DepartmentId, WarehouseId = o.WarehouseId, WarehouseName = o.Warehouse?.Name,
         CustomerId = o.CustomerId, CustomerName = o.CustomerName,
         SubTotal = o.SubTotal, DiscountAmount = o.DiscountAmount, TaxAmount = o.TaxAmount, TotalAmount = o.TotalAmount, PaidAmount = o.PaidAmount,
         Status = o.Status, CreditCheckStatus = o.CreditCheckStatus, ReservationStatus = o.ReservationStatus, CreditApprovalReason = o.CreditApprovalReason, CreditApprovedBy = o.CreditApprovedBy, CreditApprovedAtUtc = o.CreditApprovedAtUtc, Notes = o.Notes,
@@ -347,6 +347,8 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
             return new SalesOrderItem { ItemId = item.Id, ItemCode = item.Code, ItemName = item.Name, UnitName = item.BaseUom?.Name, Quantity = line.Quantity, UnitPrice = line.UnitPrice, DiscountAmount = discount, LineTotal = amount,
                 VatRate = line.VatRate, TaxAmount = Round(amount * line.VatRate / 100m) };
         }).ToList();
+        if (request.WarehouseId is int warehouseId) await ServingWarehouses.RequireAsync(Context, request.BranchId, warehouseId, ct);
+        entity.WarehouseId = request.WarehouseId;
         entity.BranchId = request.BranchId; entity.DepartmentId = request.DepartmentId; entity.CustomerId = partner?.Id; entity.CustomerName = partner?.Name ?? request.CustomerName.Trim();
         entity.ExpectedDeliveryDate = request.ExpectedDeliveryDate; entity.QuotationId = request.QuotationId; entity.SalespersonId = request.SalespersonId;
         entity.DeliveryAddress = string.IsNullOrWhiteSpace(request.DeliveryAddress) ? partner?.Address : request.DeliveryAddress.Trim();

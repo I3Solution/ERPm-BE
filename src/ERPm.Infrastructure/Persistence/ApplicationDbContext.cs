@@ -51,6 +51,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<Partner> Partners => Set<Partner>();
     public DbSet<PartnerDeliveryAddress> PartnerDeliveryAddresses => Set<PartnerDeliveryAddress>();
     public DbSet<Warehouse> Warehouses => Set<Warehouse>();
+    public DbSet<BranchServingWarehouse> BranchServingWarehouses => Set<BranchServingWarehouse>();
     public DbSet<StockBalance> StockBalances => Set<StockBalance>();
     public DbSet<StockReceipt> StockReceipts => Set<StockReceipt>();
     public DbSet<StockReceiptItem> StockReceiptItems => Set<StockReceiptItem>();
@@ -547,6 +548,17 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
+        modelBuilder.Entity<BranchServingWarehouse>(entity =>
+        {
+            entity.ToTable("tbl_WMS_BranchServingWarehouse");
+            ConfigureDualKeyAuditable(entity);
+            entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Warehouse).WithMany().HasForeignKey(e => e.WarehouseId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.BranchId, e.WarehouseId }).IsUnique().HasFilter("is_deleted = false");
+            entity.HasIndex(e => e.BranchId).IsUnique().HasFilter("is_default = true AND is_deleted = false").HasDatabaseName("ux_branch_serving_warehouse_default");
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
         modelBuilder.Entity<StockBalance>(entity =>
         {
             entity.ToTable("tbl_WMS_StockBalance");
@@ -1007,6 +1019,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.HasOne(e => e.Salesperson).WithMany().HasForeignKey(e => e.SalespersonId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Quotation).WithMany().HasForeignKey(e => e.QuotationId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<PriceList>().WithMany().HasForeignKey(e => e.PriceListId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.Warehouse).WithMany().HasForeignKey(e => e.WarehouseId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<PartnerDeliveryAddress>().WithMany().HasForeignKey(e => e.DeliveryAddressId).OnDelete(DeleteBehavior.SetNull);
             entity.HasIndex(e => e.DeliveryAddressId);
             entity.HasIndex(e => e.QuotationId);

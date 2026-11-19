@@ -5,6 +5,7 @@ using ERPm.Application.Features.Inventory;
 using ERPm.Application.Features.System;
 using ERPm.Domain.Entities.Accounting;
 using ERPm.Domain.Entities.Inventory;
+using ERPm.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
 namespace ERPm.Infrastructure.Services;
@@ -93,4 +94,52 @@ public class StockService : IStockService
 
     public Task<bool> CreateStockReceiptAsync(CreateStockReceiptRequest request, CancellationToken cancellationToken = default)
         => _receipts.CreateAsync(request, cancellationToken);
+
+    public Task<List<ServingWarehouseDto>> GetServingWarehousesAsync(int branchId, CancellationToken cancellationToken = default)
+        => ServingWarehouses.ForBranchAsync(_context, branchId, cancellationToken);
+
+    public Task<List<ServingWarehouseDto>> UpdateServingWarehousesAsync(int branchId, UpdateServingWarehousesRequest request, CancellationToken cancellationToken = default)
+    {
+        var lines = request.Warehouses ?? [];
+        PostingTransaction.Require(lines.Count <= 100 && lines.Select(l => l.WarehouseId).Distinct().Count() == lines.Count
+            && (lines.Count == 0 || lines.Count(l => l.IsDefault) == 1), "error.validation.request");
+        var db = (ApplicationDbContext)_context;
+        var posting = new PostingTransaction(db);
+        return posting.RunAsync(async () =>
+        {
+            await posting.LockAsync($"serving:{branchId}", cancellationToken);
+            var branch = await db.Branches.IgnoreQueryFilters().SingleOrDefaultAsync(b => b.Id == branchId && !b.IsDeleted && b.IsActive, cancellationToken);
+            PostingTransaction.Require(branch != null, "error.validation.request", 404);
+            var ids = lines.Select(l => l.WarehouseId).ToArray();
+            var valid = await db.Warehouses.IgnoreQueryFilters().CountAsync(w => ids.Contains(w.Id) && !w.IsDeleted && w.IsActive
+                && !w.Branch!.IsDeleted && w.Branch.IsActive && w.Branch.CompanyId == branch!.CompanyId, cancellationToken);
+            PostingTransaction.Require(valid == ids.Length, "error.sd.warehouse_not_serving", 409);
+
+            var current = await db.BranchServingWarehouses.Where(s => s.BranchId == branchId).ToListAsync(cancellationToken);
+            // Clear the old default first: the one-default index is checked row by row.
+            foreach (var row in current) { row.IsDefault = false; if (!ids.Contains(row.WarehouseId)) row.IsDeleted = true; }
+            await db.SaveChangesAsync(cancellationToken);
+            foreach (var line in lines)
+            {
+                var row = current.FirstOrDefault(r => r.WarehouseId == line.WarehouseId && !r.IsDeleted);
+                if (row == null) db.BranchServingWarehouses.Add(row = new BranchServingWarehouse { BranchId = branchId, WarehouseId = line.WarehouseId });
+                row.IsDefault = line.IsDefault;
+            }
+            await db.SaveChangesAsync(cancellationToken);
+            return await ServingWarehouses.ForBranchAsync(db, branchId, cancellationToken);
+        }, cancellationToken);
+    }
+
+    public async Task<List<StockAvailabilityDto>> GetAvailabilityAsync(int branchId, int warehouseId, IReadOnlyCollection<int> itemIds, CancellationToken cancellationToken = default)
+    {
+        PostingTransaction.Require(itemIds.Count is > 0 and <= 200, "error.validation.request");
+        await ServingWarehouses.RequireAsync(_context, branchId, warehouseId, cancellationToken);
+        var balances = await _context.StockBalances.IgnoreQueryFilters().AsNoTracking()
+            .Where(b => !b.IsDeleted && b.WarehouseId == warehouseId && itemIds.Contains(b.ItemId))
+            .ToDictionaryAsync(b => b.ItemId, cancellationToken);
+        // An item never received in the warehouse has no balance row and nothing available.
+        return itemIds.Distinct().Select(id => balances.TryGetValue(id, out var b)
+            ? new StockAvailabilityDto { ItemId = id, QuantityOnHand = b.QuantityOnHand, QuantityReserved = b.QuantityReserved, QuantityAvailable = b.QuantityOnHand - b.QuantityReserved }
+            : new StockAvailabilityDto { ItemId = id }).ToList();
+    }
 }
