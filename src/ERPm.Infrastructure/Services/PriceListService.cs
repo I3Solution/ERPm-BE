@@ -1,7 +1,13 @@
+using ERPm.Application.Common;
 using ERPm.Application.Common.Crud;
+using ERPm.Application.Common.Interfaces;
+using ERPm.Application.Common.Notifications;
 using ERPm.Application.DTOs.Sales;
+using ERPm.Application.Features.System;
 using ERPm.Domain.Entities.Partner;
 using ERPm.Domain.Entities.Sales;
+using ERPm.Domain.Enums;
+using ERPm.Domain.Services.Iam;
 using ERPm.Domain.Services.Sales;
 using ERPm.Infrastructure.Persistence;
 using ERPm.Infrastructure.Services.Common;
@@ -10,10 +16,19 @@ using static ERPm.Infrastructure.Services.Common.PostingTransaction;
 
 namespace ERPm.Infrastructure.Services;
 
-public sealed class PriceListService(ApplicationDbContext context)
+public sealed class PriceListService(
+    ApplicationDbContext context,
+    PostingTransaction? posting = null,
+    ICurrentUser? currentUser = null,
+    IIamService? iam = null,
+    INotificationEngine? notificationEngine = null)
     : BaseCrudService<PriceList, PriceListDetailDto, CreatePriceListRequest, UpdatePriceListRequest>(context), IPricingService
 {
     private const int MaxLines = 1000;
+    private const int MaxReasonLength = 500;
+
+    private PostingTransaction Tx => posting ?? new PostingTransaction(Context);
+    private bool IsBypassUser => currentUser == null || currentUser.IsSystem || currentUser.IsAdmin;
 
     protected override IQueryable<PriceList> PrepareQuery(IQueryable<PriceList> query) => query.Include(p => p.Branch);
 
@@ -28,6 +43,70 @@ public sealed class PriceListService(ApplicationDbContext context)
         return query;
     }
 
+    public override async Task<PagedResult<PriceListDetailDto>> GetPagedAsync(BaseFilterQuery query, CancellationToken cancellationToken = default)
+    {
+        if (IsBypassUser) return await base.GetPagedAsync(query, cancellationToken);
+
+        var principal = await ResolvePrincipalAsync(cancellationToken);
+        var sales = principal.Evaluate(ActionFor(PriceListType.Sales, PermissionCatalog.View));
+        var purchase = principal.Evaluate(ActionFor(PriceListType.Purchase, PermissionCatalog.View));
+
+        if (query is PriceListFilterQuery { Type: { } requestedType })
+        {
+            Require(Enum.IsDefined(requestedType), "error.validation.request");
+            var allowed = requestedType == PriceListType.Purchase ? purchase.Allowed : sales.Allowed;
+            if (!allowed) throw new BusinessException("error.auth.forbidden", 403);
+        }
+        else if (!sales.Allowed && !purchase.Allowed)
+        {
+            throw new BusinessException("error.auth.forbidden", 403);
+        }
+
+        var salesAllowed = sales.Allowed;
+        var salesUnrestricted = sales.Scope.Unrestricted;
+        var salesBranches = sales.Scope.BranchIds.ToArray();
+        var salesOwn = sales.Scope.OwnRecords;
+
+        var purchaseAllowed = purchase.Allowed;
+        var purchaseUnrestricted = purchase.Scope.Unrestricted;
+        var purchaseBranches = purchase.Scope.BranchIds.ToArray();
+        var purchaseOwn = purchase.Scope.OwnRecords;
+
+        var userKey = principal.Context.UserKey;
+
+        var queryable = (query.Summary ? PrepareSummaryQuery(DbSet.AsNoTracking()) : PrepareQuery(DbSet.AsNoTracking()))
+            .Where(p => !p.IsDeleted)
+            .Where(p =>
+                (p.Type == PriceListType.Sales && salesAllowed &&
+                    (salesUnrestricted || p.BranchId == null || salesBranches.Contains(p.BranchId.Value) || (salesOwn && userKey != null && p.CreatedBy == userKey)))
+                || (p.Type == PriceListType.Purchase && purchaseAllowed &&
+                    (purchaseUnrestricted || p.BranchId == null || purchaseBranches.Contains(p.BranchId.Value) || (purchaseOwn && userKey != null && p.CreatedBy == userKey))));
+
+        queryable = ApplyFilters(queryable, query);
+        var totalCount = await queryable.CountAsync(cancellationToken);
+        queryable = ApplySorting(queryable, query);
+
+        var pageIndex = Math.Clamp(query.PageIndex, 1, 1000000);
+        var pageSize = Math.Clamp(query.PageSize, 1, 200);
+        var items = await queryable.Skip((pageIndex - 1) * pageSize).Take(pageSize).ToListAsync(cancellationToken);
+
+        return new PagedResult<PriceListDetailDto>
+        {
+            Items = items.Select(MapToDto).ToList(),
+            TotalCount = totalCount,
+            PageIndex = pageIndex,
+            PageSize = pageSize
+        };
+    }
+
+    public override async Task<PriceListDetailDto?> GetByIdAsync(int id, CancellationToken cancellationToken = default)
+    {
+        var entity = await FindEntityAsync(id, cancellationToken);
+        if (entity == null) return null;
+        await AuthorizeAsync(entity.Type, [PermissionCatalog.View], entity.BranchId, isRead: true, entity.CreatedBy, cancellationToken);
+        return MapToDto(entity);
+    }
+
     protected override Task<PriceList?> FindEntityAsync(int id, CancellationToken ct) => Context.PriceLists
         .Include(p => p.Branch)
         .Include(p => p.Versions).ThenInclude(v => v.Items).ThenInclude(i => i.Uom)
@@ -38,14 +117,6 @@ public sealed class PriceListService(ApplicationDbContext context)
         .Where(v => v.Status == PriceListVersionStatus.Active)
         .OrderByDescending(v => v.EffectiveFrom).ThenByDescending(v => v.Id)
         .FirstOrDefault();
-
-    private static PriceListVersion NewDefaultVersion(PriceList list) => new()
-    {
-        VersionCode = "V1",
-        Status = PriceListVersionStatus.Active,
-        EffectiveFrom = list.EffectiveFrom,
-        EffectiveTo = list.EffectiveTo
-    };
 
     protected override PriceListDetailDto MapToDto(PriceList entity) => new()
     {
@@ -90,9 +161,37 @@ public sealed class PriceListService(ApplicationDbContext context)
         EffectiveTo = version.EffectiveTo,
         Status = version.Status,
         ItemCount = version.Items.Count,
+        SubmittedBy = version.SubmittedBy,
+        SubmittedAtUtc = version.SubmittedAtUtc,
+        ApprovedBy = version.ApprovedBy,
+        ApprovedAtUtc = version.ApprovedAtUtc,
+        RejectedBy = version.RejectedBy,
+        RejectedAtUtc = version.RejectedAtUtc,
+        RejectReason = version.RejectReason,
+        ActivatedBy = version.ActivatedBy,
+        ActivatedAtUtc = version.ActivatedAtUtc,
+        ClosedBy = version.ClosedBy,
+        ClosedAtUtc = version.ClosedAtUtc,
+        CloseReason = version.CloseReason,
+        ArchivedBy = version.ArchivedBy,
+        ArchivedAtUtc = version.ArchivedAtUtc,
         Items = version.Items.OrderBy(i => i.Item?.Code).ThenBy(i => i.MinQuantity).Select(MapLine).ToList()
     };
 
+    private static PriceListVersionAuditDto MapAudit(PriceListVersionAudit audit) => new()
+    {
+        Id = audit.Id,
+        PriceListVersionId = audit.PriceListVersionId,
+        Action = audit.Action,
+        FromStatus = audit.FromStatus,
+        ToStatus = audit.ToStatus,
+        ActorUserId = audit.ActorUserId,
+        ActorName = audit.ActorName,
+        Reason = audit.Reason,
+        OccurredAtUtc = audit.OccurredAtUtc
+    };
+
+    // New price lists always initialize V1 in Draft so prices must go through Submit -> Approve -> Activate.
     protected override PriceList MapToEntity(CreatePriceListRequest request) => new()
     {
         Versions =
@@ -100,62 +199,49 @@ public sealed class PriceListService(ApplicationDbContext context)
             new PriceListVersion
             {
                 VersionCode = "V1",
-                Status = PriceListVersionStatus.Active,
-                Items = request.Items.Select(l => new PriceListItem { ItemId = l.ItemId, UnitPrice = l.UnitPrice, MinQuantity = l.MinQuantity, DiscountPercent = l.DiscountPercent }).ToList()
+                Status = PriceListVersionStatus.Draft,
+                Items = (request.Items ?? []).Select(l => new PriceListItem
+                {
+                    ItemId = l.ItemId,
+                    UnitPrice = l.UnitPrice,
+                    MinQuantity = l.MinQuantity,
+                    DiscountPercent = l.DiscountPercent
+                }).ToList()
             }
         }
     };
 
     protected override async Task BeforeCreateAsync(PriceList entity, CreatePriceListRequest request, CancellationToken ct)
     {
-        await ValidateAsync(request, null, ct);
+        await ValidateHeaderAsync(request, null, ct);
+        await ValidateLinesAsync(request.Items ?? [], ct);
+        await AuthorizeAsync(request.Type, [PermissionCatalog.Create], request.BranchId, isRead: false, currentUser?.UserId, ct);
         ApplyHeader(request, entity);
-        SyncVersionDates(entity);
+        var initial = entity.Versions.FirstOrDefault();
+        if (initial != null)
+        {
+            initial.EffectiveFrom = entity.EffectiveFrom;
+            initial.EffectiveTo = entity.EffectiveTo;
+        }
     }
 
+    // Header updates never mutate active version lines or dates; price edits must go through a Draft version.
     protected override async Task BeforeUpdateAsync(PriceList entity, UpdatePriceListRequest request, CancellationToken ct)
     {
-        await ValidateAsync(request, entity.Id, ct);
-        var version = CurrentVersion(entity);
-        if (version == null)
-        {
-            version = NewDefaultVersion(entity);
-            entity.Versions.Add(version);
-        }
-
-        var wanted = request.Items.ToDictionary(l => (l.ItemId, l.MinQuantity));
-        foreach (var existing in version.Items.ToList())
-        {
-            if (wanted.Remove((existing.ItemId, existing.MinQuantity), out var line))
-            {
-                existing.UnitPrice = line.UnitPrice;
-                existing.DiscountPercent = line.DiscountPercent;
-            }
-            else
-            {
-                Context.PriceListItems.Remove(existing);
-            }
-        }
-        foreach (var line in wanted.Values)
-            version.Items.Add(new PriceListItem { ItemId = line.ItemId, UnitPrice = line.UnitPrice, MinQuantity = line.MinQuantity, DiscountPercent = line.DiscountPercent });
+        await AuthorizeAsync(entity.Type, [PermissionCatalog.Edit], entity.BranchId, isRead: false, entity.CreatedBy, ct);
+        await ValidateHeaderAsync(request, entity.Id, ct);
+        if (request.Type != entity.Type || request.BranchId != entity.BranchId)
+            await AuthorizeAsync(request.Type, [PermissionCatalog.Edit], request.BranchId, isRead: false, entity.CreatedBy, ct);
     }
 
     protected override void MapUpdateToEntity(UpdatePriceListRequest request, PriceList entity)
     {
         ApplyHeader(request, entity);
-        SyncVersionDates(entity);
-    }
-
-    private static void SyncVersionDates(PriceList entity)
-    {
-        var version = CurrentVersion(entity);
-        if (version == null) return;
-        version.EffectiveFrom = entity.EffectiveFrom;
-        version.EffectiveTo = entity.EffectiveTo;
     }
 
     protected override async Task BeforeDeleteAsync(PriceList entity, CancellationToken ct)
     {
+        await AuthorizeAsync(entity.Type, [PermissionCatalog.Delete], entity.BranchId, isRead: false, entity.CreatedBy, ct);
         var inUse = await Context.Partners.IgnoreQueryFilters().AnyAsync(p => !p.IsDeleted && p.PriceListId == entity.Id, ct)
             || await Context.SalesOrders.IgnoreQueryFilters().AnyAsync(o => !o.IsDeleted && o.PriceListId == entity.Id, ct);
         Require(!inUse, "error.sd.pricelist_in_use", 409);
@@ -271,7 +357,9 @@ public sealed class PriceListService(ApplicationDbContext context)
 
     public async Task<List<PriceListVersionDto>> GetVersionsAsync(int priceListId, CancellationToken ct = default)
     {
-        Require(await Context.PriceLists.AnyAsync(p => p.Id == priceListId, ct), "error.validation.reference", 404);
+        var priceList = await LoadPriceListOrNotFoundAsync(priceListId, ct);
+        await AuthorizeAsync(priceList.Type, [PermissionCatalog.View], priceList.BranchId, isRead: true, priceList.CreatedBy, ct);
+
         return await Context.PriceListVersions
             .AsNoTracking()
             .Where(v => v.PriceListId == priceListId)
@@ -285,7 +373,21 @@ public sealed class PriceListService(ApplicationDbContext context)
                 EffectiveFrom = v.EffectiveFrom,
                 EffectiveTo = v.EffectiveTo,
                 Status = v.Status,
-                ItemCount = v.Items.Count
+                ItemCount = v.Items.Count,
+                SubmittedBy = v.SubmittedBy,
+                SubmittedAtUtc = v.SubmittedAtUtc,
+                ApprovedBy = v.ApprovedBy,
+                ApprovedAtUtc = v.ApprovedAtUtc,
+                RejectedBy = v.RejectedBy,
+                RejectedAtUtc = v.RejectedAtUtc,
+                RejectReason = v.RejectReason,
+                ActivatedBy = v.ActivatedBy,
+                ActivatedAtUtc = v.ActivatedAtUtc,
+                ClosedBy = v.ClosedBy,
+                ClosedAtUtc = v.ClosedAtUtc,
+                CloseReason = v.CloseReason,
+                ArchivedBy = v.ArchivedBy,
+                ArchivedAtUtc = v.ArchivedAtUtc
             })
             .ToListAsync(ct);
     }
@@ -294,11 +396,31 @@ public sealed class PriceListService(ApplicationDbContext context)
     {
         var version = await Context.PriceListVersions
             .AsNoTracking()
+            .Include(v => v.PriceList)
             .Include(v => v.Items).ThenInclude(i => i.Uom)
             .Include(v => v.Items).ThenInclude(i => i.Item).ThenInclude(i => i!.BaseUom)
             .SingleOrDefaultAsync(v => v.Id == versionId && v.PriceListId == priceListId, ct);
-        Require(version != null, "error.validation.reference", 404);
-        return MapVersion(version!);
+        Require(version != null && version.PriceList != null, "error.validation.reference", 404);
+        await AuthorizeAsync(version!.PriceList!.Type, [PermissionCatalog.View], version.PriceList.BranchId, isRead: true, version.PriceList.CreatedBy, ct);
+        return MapVersion(version);
+    }
+
+    public async Task<List<PriceListVersionAuditDto>> GetVersionAuditAsync(int priceListId, int versionId, CancellationToken ct = default)
+    {
+        var version = await Context.PriceListVersions
+            .AsNoTracking()
+            .Include(v => v.PriceList)
+            .SingleOrDefaultAsync(v => v.Id == versionId && v.PriceListId == priceListId, ct);
+        Require(version != null && version.PriceList != null, "error.validation.reference", 404);
+        await AuthorizeAsync(version!.PriceList!.Type, [PermissionCatalog.View], version.PriceList.BranchId, isRead: true, version.PriceList.CreatedBy, ct);
+
+        var logs = await Context.PriceListVersionAudits
+            .AsNoTracking()
+            .Where(a => a.PriceListVersionId == versionId)
+            .OrderByDescending(a => a.OccurredAtUtc)
+            .ThenByDescending(a => a.Id)
+            .ToListAsync(ct);
+        return logs.Select(MapAudit).ToList();
     }
 
     public async Task<PriceListVersionDto> CreateVersionAsync(int priceListId, CreatePriceListVersionRequest request, CancellationToken ct = default)
@@ -306,169 +428,433 @@ public sealed class PriceListService(ApplicationDbContext context)
         var code = NormalizeAndValidateVersionMetadata(request.VersionCode, request.EffectiveFrom, request.EffectiveTo);
         var lines = request.Items ?? [];
         await ValidateLinesAsync(lines, ct);
-        Require(await Context.PriceLists.AnyAsync(p => p.Id == priceListId, ct), "error.validation.reference", 404);
-        await EnsureVersionCodeUniqueAsync(priceListId, code, null, ct);
 
-        var version = new PriceListVersion
+        var createdId = await RunInLockAsync(priceListId, async () =>
         {
-            PriceListId = priceListId,
-            VersionCode = code,
-            EffectiveFrom = request.EffectiveFrom,
-            EffectiveTo = request.EffectiveTo,
-            Status = PriceListVersionStatus.Draft,
-            Items = lines.Select(l => new PriceListItem
-            {
-                ItemId = l.ItemId,
-                UnitPrice = l.UnitPrice,
-                MinQuantity = l.MinQuantity,
-                DiscountPercent = l.DiscountPercent
-            }).ToList()
-        };
+            var priceList = await LoadPriceListOrNotFoundAsync(priceListId, ct);
+            await AuthorizeAsync(priceList.Type, [PermissionCatalog.Edit], priceList.BranchId, isRead: false, priceList.CreatedBy, ct);
+            await EnsureVersionCodeUniqueAsync(priceListId, code, null, ct);
 
-        Context.PriceListVersions.Add(version);
-        await Context.SaveChangesAsync(ct);
+            var version = new PriceListVersion
+            {
+                PriceListId = priceListId,
+                VersionCode = code,
+                EffectiveFrom = request.EffectiveFrom,
+                EffectiveTo = request.EffectiveTo,
+                Status = PriceListVersionStatus.Draft,
+                Items = lines.Select(l => new PriceListItem
+                {
+                    ItemId = l.ItemId,
+                    UnitPrice = l.UnitPrice,
+                    MinQuantity = l.MinQuantity,
+                    DiscountPercent = l.DiscountPercent
+                }).ToList()
+            };
+
+            Context.PriceListVersions.Add(version);
+            await Context.SaveChangesAsync(ct);
+            return version.Id;
+        }, ct);
+
         Context.ChangeTracker.Clear();
-        return await GetVersionAsync(priceListId, version.Id, ct);
+        return await LoadVersionDtoNoAuthAsync(priceListId, createdId, ct);
     }
 
     public async Task<PriceListVersionDto> UpdateVersionAsync(int priceListId, int versionId, UpdatePriceListVersionRequest request, CancellationToken ct = default)
     {
         var code = NormalizeAndValidateVersionMetadata(request.VersionCode, request.EffectiveFrom, request.EffectiveTo);
-        var version = await FindVersionForDraftEditAsync(priceListId, versionId, ct);
-        await EnsureVersionCodeUniqueAsync(priceListId, code, versionId, ct);
 
-        version.VersionCode = code;
-        version.EffectiveFrom = request.EffectiveFrom;
-        version.EffectiveTo = request.EffectiveTo;
-        version.LastModifiedAtUtc = DateTime.UtcNow;
+        await RunInLockAsync(priceListId, async () =>
+        {
+            var version = await FindVersionForDraftEditAsync(priceListId, versionId, ct);
+            await EnsureVersionCodeUniqueAsync(priceListId, code, versionId, ct);
 
-        await Context.SaveChangesAsync(ct);
+            version.VersionCode = code;
+            version.EffectiveFrom = request.EffectiveFrom;
+            version.EffectiveTo = request.EffectiveTo;
+            version.LastModifiedAtUtc = DateTime.UtcNow;
+            return true;
+        }, ct);
+
         Context.ChangeTracker.Clear();
-        return await GetVersionAsync(priceListId, versionId, ct);
+        return await LoadVersionDtoNoAuthAsync(priceListId, versionId, ct);
     }
 
-    public async Task<PriceListVersionDto> ActivateVersionAsync(int priceListId, int versionId, CancellationToken ct = default)
+    public async Task DeleteVersionAsync(int priceListId, int versionId, CancellationToken ct = default)
     {
-        var version = await FindVersionForTransitionAsync(priceListId, versionId, PriceListVersionStatus.Draft, ct);
-        // Effective windows are inclusive (pricing uses <= / >=), so windows that only touch on one day also overlap.
-        var from = version.EffectiveFrom;
-        var to = version.EffectiveTo;
-        var overlapping = await Context.PriceListVersions
-            .Where(v => v.PriceListId == priceListId && v.Id != versionId && v.Status == PriceListVersionStatus.Active
-                && (to == null || v.EffectiveFrom <= to) && (v.EffectiveTo == null || v.EffectiveTo >= from))
-            .OrderBy(v => v.EffectiveFrom).FirstOrDefaultAsync(ct);
-        if (overlapping != null)
-            throw new ERPm.Application.Common.BusinessException("error.sd.pricelist_version_overlap", 409, new Dictionary<string, string>
+        await RunInLockAsync(priceListId, async () =>
+        {
+            var version = await Context.PriceListVersions
+                .Include(v => v.PriceList)
+                .SingleOrDefaultAsync(v => v.Id == versionId && v.PriceListId == priceListId, ct);
+            Require(version != null && version.PriceList != null, "error.validation.reference", 404);
+            await AuthorizeAsync(version!.PriceList!.Type, [PermissionCatalog.Delete], version.PriceList.BranchId, isRead: false, version.PriceList.CreatedBy, ct);
+            Require(version.Status == PriceListVersionStatus.Draft, "error.sd.pricelist_version_not_draft", 409);
+
+            version.IsDeleted = true;
+            version.DeletedAtUtc = DateTime.UtcNow;
+            version.DeletedBy = currentUser?.UserId;
+            return true;
+        }, ct);
+    }
+
+    public async Task<PriceListVersionDto> SubmitVersionAsync(int priceListId, int versionId, PriceListVersionTransitionRequest? request = null, CancellationToken ct = default)
+    {
+        var reason = NormalizeOptionalReason(request?.Reason);
+        DocumentNotice? notice = null;
+
+        await RunInLockAsync(priceListId, async () =>
+        {
+            var version = await LoadVersionWithPriceListAndItemsAsync(priceListId, versionId, ct);
+            await AuthorizeAsync(version.PriceList!.Type, [PermissionCatalog.Submit], version.PriceList.BranchId, isRead: false, version.PriceList.CreatedBy, ct);
+            Require(version.Status == PriceListVersionStatus.Draft, "error.sd.pricelist_version_invalid_status", 409);
+            Require(version.Items.Count > 0, "error.sd.pricelist_version_empty", 400);
+
+            var now = DateTime.UtcNow;
+            var (actorId, actorName) = await ResolveActorAsync(ct);
+            var fromStatus = version.Status;
+
+            version.Status = PriceListVersionStatus.PendingApproval;
+            version.SubmittedBy = actorId;
+            version.SubmittedAtUtc = now;
+            version.RejectReason = null;
+            version.LastModifiedAtUtc = now;
+
+            RecordAudit(version, "SUBMIT", fromStatus, version.Status, actorId, actorName, reason, now);
+            notice = BuildNotice("SD_PRICELIST_SUBMITTED", NotificationSeverity.INFO, version.PriceList, version,
+                ActionFor(version.PriceList.Type, PermissionCatalog.Approve), reason, globalReachesAllAllowed: false, $"SD_PL_SUBMIT_{version.Id}_{now.Ticks}");
+            return true;
+        }, ct);
+
+        await PublishAsync(notice, ct);
+        Context.ChangeTracker.Clear();
+        return await LoadVersionDtoNoAuthAsync(priceListId, versionId, ct);
+    }
+
+    public async Task<PriceListVersionDto> WithdrawVersionAsync(int priceListId, int versionId, PriceListVersionTransitionRequest? request = null, CancellationToken ct = default)
+    {
+        var reason = NormalizeOptionalReason(request?.Reason);
+
+        await RunInLockAsync(priceListId, async () =>
+        {
+            var version = await LoadVersionWithPriceListAsync(priceListId, versionId, ct);
+            await AuthorizeAsync(version.PriceList!.Type, [PermissionCatalog.Withdraw], version.PriceList.BranchId, isRead: false, version.PriceList.CreatedBy, ct);
+            Require(version.Status is PriceListVersionStatus.PendingApproval or PriceListVersionStatus.Approved,
+                "error.sd.pricelist_version_invalid_status", 409);
+
+            var now = DateTime.UtcNow;
+            var (actorId, actorName) = await ResolveActorAsync(ct);
+            var fromStatus = version.Status;
+
+            version.Status = PriceListVersionStatus.Draft;
+            version.LastModifiedAtUtc = now;
+
+            RecordAudit(version, "WITHDRAW", fromStatus, version.Status, actorId, actorName, reason, now);
+            return true;
+        }, ct);
+
+        Context.ChangeTracker.Clear();
+        return await LoadVersionDtoNoAuthAsync(priceListId, versionId, ct);
+    }
+
+    public async Task<PriceListVersionDto> ApproveVersionAsync(int priceListId, int versionId, PriceListVersionTransitionRequest? request = null, CancellationToken ct = default)
+    {
+        var reason = NormalizeOptionalReason(request?.Reason);
+        DocumentNotice? notice = null;
+
+        await RunInLockAsync(priceListId, async () =>
+        {
+            var version = await LoadVersionWithPriceListAsync(priceListId, versionId, ct);
+            await AuthorizeAsync(version.PriceList!.Type, [PermissionCatalog.Approve], version.PriceList.BranchId, isRead: false, version.PriceList.CreatedBy, ct);
+            Require(version.Status == PriceListVersionStatus.PendingApproval, "error.sd.pricelist_version_invalid_status", 409);
+
+            var now = DateTime.UtcNow;
+            var (actorId, actorName) = await ResolveActorAsync(ct);
+            var fromStatus = version.Status;
+
+            version.Status = PriceListVersionStatus.Approved;
+            version.ApprovedBy = actorId;
+            version.ApprovedAtUtc = now;
+            version.LastModifiedAtUtc = now;
+
+            RecordAudit(version, "APPROVE", fromStatus, version.Status, actorId, actorName, reason, now);
+            notice = BuildNotice("SD_PRICELIST_APPROVED", NotificationSeverity.SUCCESS, version.PriceList, version,
+                ActionFor(version.PriceList.Type, PermissionCatalog.Activate), reason, globalReachesAllAllowed: false, $"SD_PL_APPROVE_{version.Id}_{now.Ticks}");
+            return true;
+        }, ct);
+
+        await PublishAsync(notice, ct);
+        Context.ChangeTracker.Clear();
+        return await LoadVersionDtoNoAuthAsync(priceListId, versionId, ct);
+    }
+
+    public async Task<PriceListVersionDto> RejectVersionAsync(int priceListId, int versionId, PriceListVersionTransitionRequest request, CancellationToken ct = default)
+    {
+        var reason = NormalizeRequiredReason(request?.Reason);
+        DocumentNotice? notice = null;
+
+        await RunInLockAsync(priceListId, async () =>
+        {
+            var version = await LoadVersionWithPriceListAsync(priceListId, versionId, ct);
+            await AuthorizeAsync(version.PriceList!.Type, [PermissionCatalog.Reject], version.PriceList.BranchId, isRead: false, version.PriceList.CreatedBy, ct);
+            Require(version.Status == PriceListVersionStatus.PendingApproval, "error.sd.pricelist_version_invalid_status", 409);
+
+            var now = DateTime.UtcNow;
+            var (actorId, actorName) = await ResolveActorAsync(ct);
+            var fromStatus = version.Status;
+
+            version.Status = PriceListVersionStatus.Draft;
+            version.RejectedBy = actorId;
+            version.RejectedAtUtc = now;
+            version.RejectReason = reason;
+            version.LastModifiedAtUtc = now;
+
+            RecordAudit(version, "REJECT", fromStatus, version.Status, actorId, actorName, reason, now);
+            notice = BuildNotice("SD_PRICELIST_REJECTED", NotificationSeverity.WARNING, version.PriceList, version,
+                ActionFor(version.PriceList.Type, PermissionCatalog.Edit), reason, globalReachesAllAllowed: false, $"SD_PL_REJECT_{version.Id}_{now.Ticks}",
+                ownerOverride: version.SubmittedBy ?? version.CreatedBy);
+            return true;
+        }, ct);
+
+        await PublishAsync(notice, ct);
+        Context.ChangeTracker.Clear();
+        return await LoadVersionDtoNoAuthAsync(priceListId, versionId, ct);
+    }
+
+    public async Task<PriceListVersionDto> ActivateVersionAsync(int priceListId, int versionId, PriceListVersionTransitionRequest? request = null, CancellationToken ct = default)
+    {
+        var reason = NormalizeOptionalReason(request?.Reason);
+        DocumentNotice? notice = null;
+
+        await RunInLockAsync(priceListId, async () =>
+        {
+            var version = await LoadVersionWithPriceListAndItemsAsync(priceListId, versionId, ct);
+            var priceList = version.PriceList!;
+            await AuthorizeAsync(priceList.Type, [PermissionCatalog.Activate], priceList.BranchId, isRead: false, priceList.CreatedBy, ct);
+            Require(version.Status == PriceListVersionStatus.Approved, "error.sd.pricelist_version_invalid_status", 409);
+            Require(priceList.IsActive, "error.sd.pricelist_inactive", 409);
+            if (priceList.BranchId.HasValue)
             {
-                ["code"] = overlapping.VersionCode,
-                ["from"] = overlapping.EffectiveFrom.ToString("dd/MM/yyyy"),
-                ["to"] = overlapping.EffectiveTo?.ToString("dd/MM/yyyy") ?? "\u221e"
-            });
-        version.Status = PriceListVersionStatus.Active;
-        version.LastModifiedAtUtc = DateTime.UtcNow;
-        await Context.SaveChangesAsync(ct);
+                var branchActive = await Context.Branches.IgnoreQueryFilters()
+                    .AnyAsync(b => !b.IsDeleted && b.Id == priceList.BranchId.Value && b.IsActive, ct);
+                Require(branchActive, "error.validation.reference");
+            }
+            Require(version.Items.Count > 0, "error.sd.pricelist_version_empty", 400);
+
+            var now = DateTime.UtcNow;
+            // Reject activation when the version or its parent price list has already passed EffectiveTo.
+            if ((version.EffectiveTo.HasValue && version.EffectiveTo.Value < now)
+                || (priceList.EffectiveTo.HasValue && priceList.EffectiveTo.Value < now))
+                throw new BusinessException("error.sd.pricelist_version_expired", 409);
+
+            // Reject activation when the version window extends outside the parent price list effective range.
+            if (version.EffectiveFrom < priceList.EffectiveFrom
+                || (priceList.EffectiveTo.HasValue && (!version.EffectiveTo.HasValue || version.EffectiveTo.Value > priceList.EffectiveTo.Value)))
+                throw new BusinessException("error.sd.pricelist_version_outside_header_range", 409);
+
+            // Effective windows are inclusive (pricing uses <= / >=), so windows touching on one day also overlap.
+            var from = version.EffectiveFrom;
+            var to = version.EffectiveTo;
+            var overlapping = await Context.PriceListVersions
+                .Where(v => v.PriceListId == priceListId && v.Id != versionId && v.Status == PriceListVersionStatus.Active
+                    && (to == null || v.EffectiveFrom <= to) && (v.EffectiveTo == null || v.EffectiveTo >= from))
+                .OrderBy(v => v.EffectiveFrom).FirstOrDefaultAsync(ct);
+            if (overlapping != null)
+                throw new BusinessException("error.sd.pricelist_version_overlap", 409, new Dictionary<string, string>
+                {
+                    ["code"] = overlapping.VersionCode,
+                    ["from"] = overlapping.EffectiveFrom.ToString("dd/MM/yyyy"),
+                    ["to"] = overlapping.EffectiveTo?.ToString("dd/MM/yyyy") ?? "\u221e"
+                });
+
+            var (actorId, actorName) = await ResolveActorAsync(ct);
+            var fromStatus = version.Status;
+
+            version.Status = PriceListVersionStatus.Active;
+            version.ActivatedBy = actorId;
+            version.ActivatedAtUtc = now;
+            version.LastModifiedAtUtc = now;
+
+            RecordAudit(version, "ACTIVATE", fromStatus, version.Status, actorId, actorName, reason, now);
+            notice = BuildNotice("SD_PRICELIST_ACTIVATED", NotificationSeverity.SUCCESS, priceList, version,
+                ActionFor(priceList.Type, PermissionCatalog.View), reason, globalReachesAllAllowed: true, $"SD_PL_ACTIVATE_{version.Id}_{now.Ticks}");
+            return true;
+        }, ct);
+
+        await PublishAsync(notice, ct);
         Context.ChangeTracker.Clear();
-        return await GetVersionAsync(priceListId, versionId, ct);
+        return await LoadVersionDtoNoAuthAsync(priceListId, versionId, ct);
     }
 
-    public async Task<PriceListVersionDto> CloseVersionAsync(int priceListId, int versionId, CancellationToken ct = default)
+    public async Task<PriceListVersionDto> CloseVersionAsync(int priceListId, int versionId, PriceListVersionTransitionRequest request, CancellationToken ct = default)
     {
-        var version = await FindVersionForTransitionAsync(priceListId, versionId, PriceListVersionStatus.Active, ct);
-        version.Status = PriceListVersionStatus.Expired;
-        version.LastModifiedAtUtc = DateTime.UtcNow;
-        await Context.SaveChangesAsync(ct);
+        var reason = NormalizeRequiredReason(request?.Reason);
+        DocumentNotice? notice = null;
+
+        await RunInLockAsync(priceListId, async () =>
+        {
+            var version = await LoadVersionWithPriceListAsync(priceListId, versionId, ct);
+            await AuthorizeAsync(version.PriceList!.Type, [PermissionCatalog.Close], version.PriceList.BranchId, isRead: false, version.PriceList.CreatedBy, ct);
+            Require(version.Status == PriceListVersionStatus.Active, "error.sd.pricelist_version_invalid_status", 409);
+
+            var now = DateTime.UtcNow;
+            var (actorId, actorName) = await ResolveActorAsync(ct);
+            var fromStatus = version.Status;
+
+            // Keep original EffectiveTo intact so scheduled future versions do not violate effective_to >= effective_from.
+            version.Status = PriceListVersionStatus.Expired;
+            version.ClosedBy = actorId;
+            version.ClosedAtUtc = now;
+            version.CloseReason = reason;
+            version.LastModifiedAtUtc = now;
+
+            RecordAudit(version, "CLOSE", fromStatus, version.Status, actorId, actorName, reason, now);
+            notice = BuildNotice("SD_PRICELIST_CLOSED", NotificationSeverity.WARNING, version.PriceList, version,
+                ActionFor(version.PriceList.Type, PermissionCatalog.View), reason, globalReachesAllAllowed: true, $"SD_PL_CLOSE_{version.Id}_{now.Ticks}");
+            return true;
+        }, ct);
+
+        await PublishAsync(notice, ct);
         Context.ChangeTracker.Clear();
-        return await GetVersionAsync(priceListId, versionId, ct);
+        return await LoadVersionDtoNoAuthAsync(priceListId, versionId, ct);
+    }
+
+    public async Task<PriceListVersionDto> ArchiveVersionAsync(int priceListId, int versionId, PriceListVersionTransitionRequest? request = null, CancellationToken ct = default)
+    {
+        var reason = NormalizeOptionalReason(request?.Reason);
+
+        await RunInLockAsync(priceListId, async () =>
+        {
+            var version = await LoadVersionWithPriceListAsync(priceListId, versionId, ct);
+            await AuthorizeAsync(version.PriceList!.Type, [PermissionCatalog.Archive], version.PriceList.BranchId, isRead: false, version.PriceList.CreatedBy, ct);
+            Require(version.Status == PriceListVersionStatus.Expired, "error.sd.pricelist_version_invalid_status", 409);
+
+            var now = DateTime.UtcNow;
+            var (actorId, actorName) = await ResolveActorAsync(ct);
+            var fromStatus = version.Status;
+
+            version.Status = PriceListVersionStatus.Archived;
+            version.ArchivedBy = actorId;
+            version.ArchivedAtUtc = now;
+            version.LastModifiedAtUtc = now;
+
+            RecordAudit(version, "ARCHIVE", fromStatus, version.Status, actorId, actorName, reason, now);
+            return true;
+        }, ct);
+
+        Context.ChangeTracker.Clear();
+        return await LoadVersionDtoNoAuthAsync(priceListId, versionId, ct);
     }
 
     public async Task<PriceListItemDto> AddVersionItemAsync(int priceListId, int versionId, CreatePriceListItemRequest request, CancellationToken ct = default)
     {
         ValidateLineValues(request.UnitPrice, request.MinQuantity, request.DiscountPercent);
-        var version = await FindVersionForDraftEditAsync(priceListId, versionId, ct);
-        Require(await Context.PriceListItems.CountAsync(i => i.PriceListVersionId == versionId, ct) < MaxLines, "error.validation.request");
-        await EnsureItemAndUomValidAsync(request.ItemId, request.UomId, ct);
-        await EnsureNoDuplicateVersionLineAsync(versionId, request.ItemId, request.UomId, request.MinQuantity, null, ct);
 
-        var line = new PriceListItem
+        var lineId = await RunInLockAsync(priceListId, async () =>
         {
-            PriceListVersionId = versionId,
-            ItemId = request.ItemId,
-            UomId = request.UomId,
-            UnitPrice = request.UnitPrice,
-            MinQuantity = request.MinQuantity,
-            DiscountPercent = request.DiscountPercent
-        };
+            var version = await FindVersionForDraftEditAsync(priceListId, versionId, ct);
+            Require(await Context.PriceListItems.CountAsync(i => i.PriceListVersionId == versionId, ct) < MaxLines, "error.validation.request");
+            await EnsureItemAndUomValidAsync(request.ItemId, request.UomId, ct);
+            await EnsureNoDuplicateVersionLineAsync(versionId, request.ItemId, request.UomId, request.MinQuantity, null, ct);
 
-        Context.PriceListItems.Add(line);
-        version.LastModifiedAtUtc = DateTime.UtcNow;
-        await Context.SaveChangesAsync(ct);
+            var line = new PriceListItem
+            {
+                PriceListVersionId = versionId,
+                ItemId = request.ItemId,
+                UomId = request.UomId,
+                UnitPrice = request.UnitPrice,
+                MinQuantity = request.MinQuantity,
+                DiscountPercent = request.DiscountPercent
+            };
+
+            Context.PriceListItems.Add(line);
+            version.LastModifiedAtUtc = DateTime.UtcNow;
+            await Context.SaveChangesAsync(ct);
+            return line.Id;
+        }, ct);
+
         Context.ChangeTracker.Clear();
-        return await LoadVersionItemDtoAsync(line.Id, ct);
+        return await LoadVersionItemDtoAsync(lineId, ct);
     }
 
     public async Task<PriceListItemDto> UpdateVersionItemAsync(int priceListId, int versionId, int itemId, UpdatePriceListItemRequest request, CancellationToken ct = default)
     {
         ValidateLineValues(request.UnitPrice, request.MinQuantity, request.DiscountPercent);
-        var version = await FindVersionForDraftEditAsync(priceListId, versionId, ct);
-        var line = await Context.PriceListItems.SingleOrDefaultAsync(i => i.Id == itemId && i.PriceListVersionId == versionId, ct);
-        Require(line != null, "error.validation.reference", 404);
 
-        var targetItemId = request.ItemId ?? line!.ItemId;
-        await EnsureItemAndUomValidAsync(targetItemId, request.UomId, ct);
-        await EnsureNoDuplicateVersionLineAsync(versionId, targetItemId, request.UomId, request.MinQuantity, line!.Id, ct);
+        await RunInLockAsync(priceListId, async () =>
+        {
+            var version = await FindVersionForDraftEditAsync(priceListId, versionId, ct);
+            var line = await Context.PriceListItems.SingleOrDefaultAsync(i => i.Id == itemId && i.PriceListVersionId == versionId, ct);
+            Require(line != null, "error.validation.reference", 404);
 
-        line.ItemId = targetItemId;
-        line.UomId = request.UomId;
-        line.UnitPrice = request.UnitPrice;
-        line.MinQuantity = request.MinQuantity;
-        line.DiscountPercent = request.DiscountPercent;
-        version.LastModifiedAtUtc = DateTime.UtcNow;
+            var targetItemId = request.ItemId ?? line!.ItemId;
+            await EnsureItemAndUomValidAsync(targetItemId, request.UomId, ct);
+            await EnsureNoDuplicateVersionLineAsync(versionId, targetItemId, request.UomId, request.MinQuantity, line!.Id, ct);
 
-        await Context.SaveChangesAsync(ct);
+            line.ItemId = targetItemId;
+            line.UomId = request.UomId;
+            line.UnitPrice = request.UnitPrice;
+            line.MinQuantity = request.MinQuantity;
+            line.DiscountPercent = request.DiscountPercent;
+            version.LastModifiedAtUtc = DateTime.UtcNow;
+            return true;
+        }, ct);
+
         Context.ChangeTracker.Clear();
-        return await LoadVersionItemDtoAsync(line.Id, ct);
+        return await LoadVersionItemDtoAsync(itemId, ct);
     }
 
     public async Task DeleteVersionItemAsync(int priceListId, int versionId, int itemId, CancellationToken ct = default)
     {
-        var version = await FindVersionForDraftEditAsync(priceListId, versionId, ct);
-        var line = await Context.PriceListItems.SingleOrDefaultAsync(i => i.Id == itemId && i.PriceListVersionId == versionId, ct);
-        Require(line != null, "error.validation.reference", 404);
+        await RunInLockAsync(priceListId, async () =>
+        {
+            var version = await FindVersionForDraftEditAsync(priceListId, versionId, ct);
+            var line = await Context.PriceListItems.SingleOrDefaultAsync(i => i.Id == itemId && i.PriceListVersionId == versionId, ct);
+            Require(line != null, "error.validation.reference", 404);
 
-        Context.PriceListItems.Remove(line!);
-        version.LastModifiedAtUtc = DateTime.UtcNow;
-        await Context.SaveChangesAsync(ct);
+            Context.PriceListItems.Remove(line!);
+            version.LastModifiedAtUtc = DateTime.UtcNow;
+            return true;
+        }, ct);
     }
 
     public async Task<PriceListVersionDto> CloneVersionAsync(int priceListId, ClonePriceListVersionRequest request, CancellationToken ct = default)
     {
         var code = NormalizeAndValidateVersionMetadata(request.VersionCode, request.EffectiveFrom, request.EffectiveTo);
-        var source = await Context.PriceListVersions
-            .Include(v => v.Items)
-            .SingleOrDefaultAsync(v => v.Id == request.SourceVersionId && v.PriceListId == priceListId, ct);
-        Require(source != null && source.Status != PriceListVersionStatus.Archived, "error.validation.reference", 404);
-        await EnsureVersionCodeUniqueAsync(priceListId, code, null, ct);
 
-        var clone = new PriceListVersion
+        var cloneId = await RunInLockAsync(priceListId, async () =>
         {
-            PriceListId = priceListId,
-            VersionCode = code,
-            EffectiveFrom = request.EffectiveFrom,
-            EffectiveTo = request.EffectiveTo,
-            Status = PriceListVersionStatus.Draft,
-            Items = source!.Items.Select(i => new PriceListItem
+            var source = await Context.PriceListVersions
+                .Include(v => v.PriceList)
+                .Include(v => v.Items)
+                .SingleOrDefaultAsync(v => v.Id == request.SourceVersionId && v.PriceListId == priceListId, ct);
+            Require(source != null && source.PriceList != null && source.Status != PriceListVersionStatus.Archived, "error.validation.reference", 404);
+            await AuthorizeAsync(source!.PriceList!.Type, [PermissionCatalog.Create, PermissionCatalog.Edit], source.PriceList.BranchId, isRead: false, source.PriceList.CreatedBy, ct);
+            await EnsureVersionCodeUniqueAsync(priceListId, code, null, ct);
+
+            var clone = new PriceListVersion
             {
-                ItemId = i.ItemId,
-                UomId = i.UomId,
-                UnitPrice = i.UnitPrice,
-                MinQuantity = i.MinQuantity,
-                DiscountPercent = i.DiscountPercent
-            }).ToList()
-        };
-        Context.PriceListVersions.Add(clone);
-        await Context.SaveChangesAsync(ct);
+                PriceListId = priceListId,
+                VersionCode = code,
+                EffectiveFrom = request.EffectiveFrom,
+                EffectiveTo = request.EffectiveTo,
+                Status = PriceListVersionStatus.Draft,
+                Items = source.Items.Select(i => new PriceListItem
+                {
+                    ItemId = i.ItemId,
+                    UomId = i.UomId,
+                    UnitPrice = i.UnitPrice,
+                    MinQuantity = i.MinQuantity,
+                    DiscountPercent = i.DiscountPercent
+                }).ToList()
+            };
+            Context.PriceListVersions.Add(clone);
+            await Context.SaveChangesAsync(ct);
+            return clone.Id;
+        }, ct);
+
         Context.ChangeTracker.Clear();
-        return await GetVersionAsync(priceListId, clone.Id, ct);
+        return await LoadVersionDtoNoAuthAsync(priceListId, cloneId, ct);
     }
 
     public async Task<BulkPriceAdjustmentResponse> BulkAdjustVersionAsync(int priceListId, int versionId, BulkPriceAdjustmentRequest request, CancellationToken ct = default)
@@ -477,34 +863,210 @@ public sealed class PriceListService(ApplicationDbContext context)
             && request.Value is >= -100000m and <= 100000m
             && request.RoundingIncrement is > 0m and <= 1000000m,
             "error.validation.request");
-        var version = await Context.PriceListVersions
-            .Include(v => v.Items)
-            .SingleOrDefaultAsync(v => v.Id == versionId && v.PriceListId == priceListId, ct);
-        Require(version != null, "error.validation.reference", 404);
-        Require(version!.Status == PriceListVersionStatus.Draft, "error.sd.pricelist_version_not_draft", 409);
 
-        foreach (var line in version.Items)
+        return await RunInLockAsync(priceListId, async () =>
         {
-            var adjusted = request.AdjustmentType switch
+            var version = await LoadVersionWithPriceListAndItemsAsync(priceListId, versionId, ct);
+            await AuthorizeAsync(version.PriceList!.Type, [PermissionCatalog.Edit], version.PriceList.BranchId, isRead: false, version.PriceList.CreatedBy, ct);
+            Require(version.Status == PriceListVersionStatus.Draft, "error.sd.pricelist_version_not_draft", 409);
+
+            foreach (var line in version.Items)
             {
-                PriceAdjustmentType.Percentage => line.UnitPrice * (1m + request.Value / 100m),
-                PriceAdjustmentType.FixedAmount => line.UnitPrice + request.Value,
-                _ => throw new InvalidOperationException("Unsupported price adjustment type.")
+                var adjusted = request.AdjustmentType switch
+                {
+                    PriceAdjustmentType.Percentage => line.UnitPrice * (1m + request.Value / 100m),
+                    PriceAdjustmentType.FixedAmount => line.UnitPrice + request.Value,
+                    _ => throw new InvalidOperationException("Unsupported price adjustment type.")
+                };
+                Require(adjusted >= 0m, "error.validation.number");
+                line.UnitPrice = decimal.Round(
+                    decimal.Round(adjusted / request.RoundingIncrement, 0, MidpointRounding.AwayFromZero) * request.RoundingIncrement,
+                    4,
+                    MidpointRounding.AwayFromZero);
+            }
+
+            version.LastModifiedAtUtc = DateTime.UtcNow;
+            return new BulkPriceAdjustmentResponse
+            {
+                PriceListVersionId = version.Id,
+                AdjustedLineCount = version.Items.Count,
+                RoundingIncrement = request.RoundingIncrement
             };
-            Require(adjusted >= 0m, "error.validation.number");
-            line.UnitPrice = decimal.Round(
-                decimal.Round(adjusted / request.RoundingIncrement, 0, MidpointRounding.AwayFromZero) * request.RoundingIncrement,
-                4,
-                MidpointRounding.AwayFromZero);
+        }, ct);
+    }
+
+    private async Task<T> RunInLockAsync<T>(int priceListId, Func<Task<T>> action, CancellationToken ct)
+    {
+        if (!Context.Database.IsRelational())
+        {
+            var result = await action();
+            await Context.SaveChangesAsync(ct);
+            return result;
+        }
+        return await Tx.RunAsync(async () =>
+        {
+            if (Context.Database.IsNpgsql())
+                await Tx.LockAsync($"pricelist:{priceListId}", ct);
+            return await action();
+        }, ct);
+    }
+
+    private static string ActionFor(PriceListType type, string verb) =>
+        (type == PriceListType.Purchase ? "pur:pricelist:" : "sd:pricelist:") + verb;
+
+    private async Task<IamPrincipal> ResolvePrincipalAsync(CancellationToken ct)
+    {
+        if (iam == null || !int.TryParse(currentUser?.UserId, out var userId))
+            throw new BusinessException("error.auth.forbidden", 403);
+        return await iam.GetPrincipalAsync(userId, ct);
+    }
+
+    private async Task AuthorizeAsync(PriceListType type, string[] verbs, int? branchId, bool isRead, string? createdBy, CancellationToken ct)
+    {
+        if (IsBypassUser) return;
+
+        var principal = await ResolvePrincipalAsync(ct);
+        var allowed = false;
+        var scope = EffectiveDataScope.None;
+        foreach (var verb in verbs)
+        {
+            var decision = principal.Evaluate(ActionFor(type, verb));
+            if (!decision.Allowed) continue;
+            allowed = true;
+            scope = scope.Union(decision.Scope);
         }
 
-        await Context.SaveChangesAsync(ct);
-        return new BulkPriceAdjustmentResponse
+        if (!allowed) throw new BusinessException("error.auth.forbidden", 403);
+        if (scope.Unrestricted) return;
+
+        var ownsRecord = scope.OwnRecords && createdBy != null && createdBy == principal.Context.UserKey;
+        if (isRead)
+        {
+            var reachesRead = branchId == null || scope.BranchIds.Contains(branchId.Value) || ownsRecord;
+            if (!reachesRead) throw new BusinessException("error.auth.forbidden", 403);
+            return;
+        }
+
+        // System-wide price lists (BranchId == null) require unrestricted (Group) scope for write/lifecycle actions.
+        if (branchId == null) throw new BusinessException("error.auth.forbidden", 403);
+        var reachesWrite = scope.BranchIds.Contains(branchId.Value) || ownsRecord;
+        if (!reachesWrite) throw new BusinessException("error.auth.forbidden", 403);
+    }
+
+    private async Task<(string? UserId, string? DisplayName)> ResolveActorAsync(CancellationToken ct)
+    {
+        var userId = currentUser?.UserId;
+        if (string.IsNullOrWhiteSpace(userId) || !int.TryParse(userId, out var parsedId))
+            return (userId, null);
+        var displayName = await Context.AppUsers.AsNoTracking()
+            .Where(u => u.Id == parsedId)
+            .Select(u => u.DisplayName)
+            .SingleOrDefaultAsync(ct);
+        return (userId, displayName);
+    }
+
+    private void RecordAudit(
+        PriceListVersion version,
+        string action,
+        PriceListVersionStatus fromStatus,
+        PriceListVersionStatus toStatus,
+        string? actorId,
+        string? actorName,
+        string? reason,
+        DateTime occurredAtUtc)
+    {
+        Context.PriceListVersionAudits.Add(new PriceListVersionAudit
         {
             PriceListVersionId = version.Id,
-            AdjustedLineCount = version.Items.Count,
-            RoundingIncrement = request.RoundingIncrement
-        };
+            Action = action,
+            FromStatus = fromStatus,
+            ToStatus = toStatus,
+            ActorUserId = actorId,
+            ActorName = actorName,
+            Reason = reason,
+            OccurredAtUtc = occurredAtUtc
+        });
+    }
+
+    private static DocumentNotice BuildNotice(
+        string template,
+        string severity,
+        PriceList priceList,
+        PriceListVersion version,
+        string recipientAction,
+        string? reason,
+        bool globalReachesAllAllowed,
+        string idempotencyPrefix,
+        string? ownerOverride = null) => new(
+        template,
+        priceList.Type == PriceListType.Purchase ? NotificationCategory.PUR : NotificationCategory.SD,
+        severity,
+        recipientAction,
+        priceList.BranchId,
+        null,
+        ownerOverride ?? version.CreatedBy ?? priceList.CreatedBy,
+        new Dictionary<string, object>
+        {
+            ["pricelist_code"] = priceList.Code,
+            ["pricelist_name"] = priceList.Name,
+            ["version_code"] = version.VersionCode,
+            ["reason"] = reason ?? string.Empty
+        },
+        $"/sales/price-lists/{priceList.Id}",
+        globalReachesAllAllowed,
+        idempotencyPrefix);
+
+    private Task PublishAsync(DocumentNotice? notice, CancellationToken ct) =>
+        PermissionRecipients.PublishAsync(Context, iam, notificationEngine, currentUser, notice, ct);
+
+    private static string? NormalizeOptionalReason(string? reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason)) return null;
+        var trimmed = reason.Trim();
+        Require(trimmed.Length <= MaxReasonLength, "error.validation.request");
+        return trimmed;
+    }
+
+    private static string NormalizeRequiredReason(string? reason)
+    {
+        Require(!string.IsNullOrWhiteSpace(reason) && reason.Trim().Length <= MaxReasonLength, "error.validation.request");
+        return reason!.Trim();
+    }
+
+    private async Task<PriceList> LoadPriceListOrNotFoundAsync(int priceListId, CancellationToken ct)
+    {
+        var priceList = await Context.PriceLists.SingleOrDefaultAsync(p => p.Id == priceListId, ct);
+        Require(priceList != null, "error.validation.reference", 404);
+        return priceList!;
+    }
+
+    private async Task<PriceListVersion> LoadVersionWithPriceListAsync(int priceListId, int versionId, CancellationToken ct)
+    {
+        var version = await Context.PriceListVersions
+            .Include(v => v.PriceList)
+            .SingleOrDefaultAsync(v => v.Id == versionId && v.PriceListId == priceListId, ct);
+        Require(version != null && version.PriceList != null, "error.validation.reference", 404);
+        return version!;
+    }
+
+    private async Task<PriceListVersion> LoadVersionWithPriceListAndItemsAsync(int priceListId, int versionId, CancellationToken ct)
+    {
+        var version = await Context.PriceListVersions
+            .Include(v => v.PriceList)
+            .Include(v => v.Items)
+            .SingleOrDefaultAsync(v => v.Id == versionId && v.PriceListId == priceListId, ct);
+        Require(version != null && version.PriceList != null, "error.validation.reference", 404);
+        return version!;
+    }
+
+    private async Task<PriceListVersionDto> LoadVersionDtoNoAuthAsync(int priceListId, int versionId, CancellationToken ct)
+    {
+        var version = await Context.PriceListVersions
+            .AsNoTracking()
+            .Include(v => v.Items).ThenInclude(i => i.Uom)
+            .Include(v => v.Items).ThenInclude(i => i.Item).ThenInclude(i => i!.BaseUom)
+            .SingleAsync(v => v.Id == versionId && v.PriceListId == priceListId, ct);
+        return MapVersion(version);
     }
 
     private static void ApplyHeader(CreatePriceListRequest request, PriceList entity)
@@ -521,7 +1083,7 @@ public sealed class PriceListService(ApplicationDbContext context)
         entity.Notes = request.Notes;
     }
 
-    private async Task ValidateAsync(CreatePriceListRequest request, int? selfId, CancellationToken ct)
+    private async Task ValidateHeaderAsync(CreatePriceListRequest request, int? selfId, CancellationToken ct)
     {
         var code = request.Code?.Trim() ?? string.Empty;
         Require(code.Length is > 0 and <= 50 && !string.IsNullOrWhiteSpace(request.Name) && request.Name.Trim().Length <= 255, "error.validation.request");
@@ -530,8 +1092,6 @@ public sealed class PriceListService(ApplicationDbContext context)
         Require(request.BranchId == null || await Context.Branches.IgnoreQueryFilters().AnyAsync(b => !b.IsDeleted && b.Id == request.BranchId && b.IsActive, ct), "error.validation.reference");
         var normalized = code.ToUpperInvariant();
         Require(!await Context.PriceLists.AnyAsync(p => p.Code == normalized && p.Id != selfId, ct), "error.sd.pricelist_duplicate_code", 409);
-
-        await ValidateLinesAsync(request.Items, ct);
     }
 
     private static string NormalizeAndValidateVersionMetadata(string? versionCode, DateTime effectiveFrom, DateTime? effectiveTo)
@@ -554,17 +1114,9 @@ public sealed class PriceListService(ApplicationDbContext context)
 
     private async Task<PriceListVersion> FindVersionForDraftEditAsync(int priceListId, int versionId, CancellationToken ct)
     {
-        var version = await Context.PriceListVersions.SingleOrDefaultAsync(v => v.Id == versionId && v.PriceListId == priceListId, ct);
-        Require(version != null, "error.validation.reference", 404);
-        Require(version!.Status == PriceListVersionStatus.Draft, "error.sd.pricelist_version_not_draft", 409);
-        return version;
-    }
-
-    private async Task<PriceListVersion> FindVersionForTransitionAsync(int priceListId, int versionId, PriceListVersionStatus requiredStatus, CancellationToken ct)
-    {
-        var version = await Context.PriceListVersions.SingleOrDefaultAsync(v => v.Id == versionId && v.PriceListId == priceListId, ct);
-        Require(version != null, "error.validation.reference", 404);
-        Require(version!.Status == requiredStatus, "error.sd.pricelist_version_invalid_status", 409);
+        var version = await LoadVersionWithPriceListAsync(priceListId, versionId, ct);
+        await AuthorizeAsync(version.PriceList!.Type, [PermissionCatalog.Edit], version.PriceList.BranchId, isRead: false, version.PriceList.CreatedBy, ct);
+        Require(version.Status == PriceListVersionStatus.Draft, "error.sd.pricelist_version_not_draft", 409);
         return version;
     }
 

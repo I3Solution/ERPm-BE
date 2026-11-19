@@ -80,8 +80,27 @@ try
         INSERT INTO items ("Id","Code","Name","Translations","ItemType","BaseUomId","SalePrice","CostPrice","MinStockAlert","MaxStockAlert","IsActive","CreatedAtUtc","IsDeleted")
         VALUES ({{legacyItem}},'LEGACY_ITEM','Legacy item','{}'::jsonb,1,{{legacyUnit}},1,1,0,0,true,NOW(),false);
         """);
+    await db.GetService<IMigrator>().MigrateAsync("20261117024053_AddSalesInvoiceDueDate");
+    // Seed a custom role with explicit sd:pricelist:edit before S27.5 migration to verify idempotent role upgrade.
+    await db.Database.ExecuteSqlInterpolatedAsync($$"""
+        INSERT INTO "tbl_SYS_Role"
+            (code, name, translations, is_system_role, policy_document, is_active, created_at_utc, is_deleted, external_id)
+        VALUES
+            ('CUSTOM_PL_EDITOR', 'Custom PL Editor', '{}'::jsonb, false,
+             '{"Version":"2026-10","Statements":[{"Sid":"AllowEdit","Effect":"Allow","Actions":["sd:pricelist:view","sd:pricelist:edit"],"Resources":["*"]},{"Sid":"DenyDelete","Effect":"Deny","Actions":["sd:pricelist:delete"],"Resources":["*"]}]}'::jsonb,
+             true, NOW(), false, gen_random_uuid());
+        """);
     await db.Database.MigrateAsync();
     await EssentialDataSeeder.SeedAsync(db);
+    var upgradedRole = await db.IamRoles.AsNoTracking().SingleAsync(r => r.Code == "CUSTOM_PL_EDITOR");
+    var allowActions = upgradedRole.PolicyDocument.Statements.Single(s => s.Sid == "AllowEdit").Actions;
+    var denyActions = upgradedRole.PolicyDocument.Statements.Single(s => s.Sid == "DenyDelete").Actions;
+    Check(allowActions.Contains("sd:pricelist:edit") && allowActions.Contains("sd:pricelist:submit")
+        && allowActions.Contains("sd:pricelist:approve") && allowActions.Contains("sd:pricelist:activate")
+        && allowActions.Contains("sd:pricelist:close") && !allowActions.Contains("sd:pricelist:delete")
+        && denyActions.SequenceEqual(["sd:pricelist:delete"]),
+        "S27.5 migration upgrades custom Allow statements with sd:pricelist:edit without touching Deny statements");
+    await db.IamRoles.Where(r => r.Code == "CUSTOM_PL_EDITOR").ExecuteDeleteAsync();
     Check(await db.Items.AnyAsync(i => i.ExternalId == legacyItem && i.BaseUom!.ExternalId == legacyUnit), "legacy UUID rows and foreign keys survive upgrade");
     Check(!await db.Database.HasPendingModelChangesAsyncCompat(), "migration matches current model");
     var branch = await db.Branches.SingleAsync();
@@ -214,14 +233,37 @@ try
     Check(inclusive.UnitPrice == 100 && inclusive.TaxAmount == 10 && inclusive.TotalWithTax == 110 && inclusive.IsTaxInclusive, "tax-inclusive prices are decomposed into net and VAT");
     var exclusive = PricingEngine.Price(100, 1, [L(4, false, false, T(0, 100))], 10);
     Check(exclusive.UnitPrice == 100 && exclusive.TaxAmount == 10 && exclusive.TotalWithTax == 110 && !exclusive.IsTaxInclusive, "tax-exclusive prices add VAT to the net amount");
-    Check(PermissionCatalog.Contains("sd:pricelist:view") && PermissionCatalog.Contains("sd:pricelist:edit") && PermissionCatalog.Contains("sd:pricelist:delete"), "price list permissions are in the catalog");
+    Check(PermissionCatalog.Contains("sd:pricelist:view") && PermissionCatalog.Contains("sd:pricelist:edit")
+        && PermissionCatalog.Contains("sd:pricelist:submit") && PermissionCatalog.Contains("sd:pricelist:withdraw")
+        && PermissionCatalog.Contains("sd:pricelist:approve") && PermissionCatalog.Contains("sd:pricelist:reject")
+        && PermissionCatalog.Contains("sd:pricelist:activate") && PermissionCatalog.Contains("sd:pricelist:close")
+        && PermissionCatalog.Contains("sd:pricelist:archive") && PermissionCatalog.Contains("pur:pricelist:view")
+        && PermissionCatalog.Contains("pur:pricelist:activate") && PermissionCatalog.Contains("pur:pricelist:close"),
+        "all Sales and Purchase price list workflow permissions are in the catalog");
 
     var lists = new PriceListService(db);
     var from = DateTime.UtcNow.AddDays(-1);
+    async Task<PriceListVersionDto> ActivateVersionThroughWorkflowAsync(int listId, int verId)
+    {
+        await lists.SubmitVersionAsync(listId, verId);
+        await lists.ApproveVersionAsync(listId, verId);
+        return await lists.ActivateVersionAsync(listId, verId);
+    }
+    async Task<PriceListVersionDto> ActivateDefaultV1Async(int listId)
+    {
+        var v1 = (await lists.GetVersionsAsync(listId)).Single(v => v.VersionCode == "V1");
+        return await ActivateVersionThroughWorkflowAsync(listId, v1.Id);
+    }
     CreatePriceListRequest ListRequest(string code, decimal price, int? branchId = null, bool active = true, DateTime? to = null) =>
         new() { Code = code, Name = code, Currency = "vnd", EffectiveFrom = from, EffectiveTo = to, BranchId = branchId, IsActive = active, Items = [new() { ItemId = item.Id, UnitPrice = price }] };
     var wholesale = await lists.CreateAsync(ListRequest("wholesale", 70));
-    Check(wholesale.Code == "WHOLESALE" && wholesale.Currency == "VND" && wholesale.Items.Single().ItemCode == "ITEM" && wholesale.Items.Single().UnitName != null, "price list is created normalized and returns its lines");
+    var wholesaleV1 = (await lists.GetVersionsAsync(wholesale.Id)).Single();
+    Check(wholesale.Code == "WHOLESALE" && wholesale.Currency == "VND" && wholesale.Items.Count == 0
+        && wholesaleV1.Status == PriceListVersionStatus.Draft && wholesaleV1.ItemCount == 1,
+        "new price list initializes V1 in Draft so prices are not active until approved and activated");
+    await ActivateVersionThroughWorkflowAsync(wholesale.Id, wholesaleV1.Id);
+    wholesale = (await lists.GetByIdAsync(wholesale.Id))!;
+    Check(wholesale.Items.Single().ItemCode == "ITEM" && wholesale.Items.Single().UnitName != null, "activated price list exposes active version lines");
     await Reject(async () => await lists.CreateAsync(ListRequest("Wholesale", 1)), "error.sd.pricelist_duplicate_code");
     var bad = ListRequest("BAD", 1); bad.Items[0].DiscountPercent = 101;
     await Reject(async () => await lists.CreateAsync(bad), "error.validation.number");
@@ -230,8 +272,17 @@ try
     var backwards = ListRequest("BACK", 1, to: from.AddDays(-1));
     await Reject(async () => await lists.CreateAsync(backwards), "error.validation.request");
     var vip = await lists.CreateAsync(ListRequest("VIP", 60, branch.Id));
-    await lists.CreateAsync(ListRequest("OFF", 10, active: false));
-    await lists.CreateAsync(ListRequest("OLD", 5, to: from.AddHours(1)));
+    await ActivateDefaultV1Async(vip.Id);
+    var offList = await lists.CreateAsync(ListRequest("OFF", 10, active: false));
+    var offV1 = (await lists.GetVersionsAsync(offList.Id)).Single();
+    await lists.SubmitVersionAsync(offList.Id, offV1.Id);
+    await lists.ApproveVersionAsync(offList.Id, offV1.Id);
+    await Reject(async () => await lists.ActivateVersionAsync(offList.Id, offV1.Id), "error.sd.pricelist_inactive");
+    var oldList = await lists.CreateAsync(ListRequest("OLD", 5, to: from.AddHours(1)));
+    var oldV1 = (await lists.GetVersionsAsync(oldList.Id)).Single();
+    await lists.SubmitVersionAsync(oldList.Id, oldV1.Id);
+    await lists.ApproveVersionAsync(oldList.Id, oldV1.Id);
+    await Reject(async () => await lists.ActivateVersionAsync(oldList.Id, oldV1.Id), "error.sd.pricelist_version_expired");
     var paged = await lists.GetPagedAsync(new BaseFilterQuery { Keyword = "vip" });
     Check(paged.TotalCount == 1 && paged.Items.Single().BranchName == branch.Name && paged.Items.Single().Items.Count == 0, "price list page returns headers without lines");
 
@@ -245,12 +296,12 @@ try
     await Reject(async () => await pricing.CalculateAsync(Quote(supplier.Id)), "error.sales.customer");
     await Reject(async () => await pricing.CalculateAsync(Quote(null, 0)), "error.validation.number");
 
+    // Header PUT must never mutate lines of an Active version.
     var edit = ListRequest("WHOLESALE", 65); edit.Items.Add(new() { ItemId = item.Id, UnitPrice = 55, MinQuantity = 10 });
     var keptLine = wholesale.Items.Single().Id;
     var edited = await lists.UpdateAsync(wholesale.Id, new UpdatePriceListRequest { Code = edit.Code, Name = "Wholesale 2", Currency = "VND", EffectiveFrom = from, IsActive = true, Items = edit.Items });
-    Check(edited!.Name == "Wholesale 2" && edited.Items.Count == 2 && edited.Items.Any(i => i.Id == keptLine && i.UnitPrice == 65), "updating a price list keeps unchanged lines and adds new tiers");
-    var shrunk = await lists.UpdateAsync(wholesale.Id, new UpdatePriceListRequest { Code = "WHOLESALE", Name = "Wholesale 2", Currency = "VND", EffectiveFrom = from, IsActive = true, Items = [new() { ItemId = item.Id, UnitPrice = 65 }] });
-    Check(shrunk!.Items.Count == 1, "updating a price list removes dropped tiers");
+    Check(edited!.Name == "Wholesale 2" && edited.Items.Count == 1 && edited.Items.Single().Id == keptLine && edited.Items.Single().UnitPrice == 70,
+        "updating a price list header never mutates lines of an Active version");
     var sourceVersion = await db.PriceListVersions.SingleAsync(v => v.PriceListId == wholesale.Id);
     var clonedVersion = await lists.CloneVersionAsync(wholesale.Id, new ClonePriceListVersionRequest
     {
@@ -258,7 +309,8 @@ try
         VersionCode = "V2",
         EffectiveFrom = from.AddDays(5)
     });
-    Check(clonedVersion.Status == PriceListVersionStatus.Draft && clonedVersion.ItemCount == 1 && clonedVersion.Items.Single().UnitPrice == 65, "cloning a price list version copies its price tiers into a Draft version");
+    Check(clonedVersion.Status == PriceListVersionStatus.Draft && clonedVersion.ItemCount == 1 && clonedVersion.Items.Single().UnitPrice == 70, "cloning a price list version copies its price tiers into a Draft version");
+    await lists.UpdateVersionItemAsync(wholesale.Id, clonedVersion.Id, clonedVersion.Items.Single().Id!.Value, new UpdatePriceListItemRequest { UnitPrice = 65, MinQuantity = 0, DiscountPercent = 0 });
     var adjusted = await lists.BulkAdjustVersionAsync(wholesale.Id, clonedVersion.Id, new BulkPriceAdjustmentRequest
     {
         AdjustmentType = PriceAdjustmentType.Percentage,
@@ -282,13 +334,14 @@ try
     await Reject(async () => await lists.GetVersionsAsync(999999), "error.validation.reference");
     await Reject(async () => await lists.GetVersionAsync(wholesale.Id, 999999), "error.validation.reference");
     await db.PriceListVersions.Where(v => v.Id == sourceVersion.Id).ExecuteUpdateAsync(v => v.SetProperty(x => x.EffectiveTo, from.AddDays(4)));
-    await db.PriceListVersions.Where(v => v.Id == clonedVersion.Id).ExecuteUpdateAsync(v => v.SetProperty(x => x.Status, PriceListVersionStatus.Active));
+    await ActivateVersionThroughWorkflowAsync(wholesale.Id, clonedVersion.Id);
     var beforeVersion = (await lists.CalculateAsync(new CalculatePriceRequest { CustomerId = customer.Id, BranchId = branch.Id, DocumentDate = from.AddDays(2), Items = [new() { ItemId = item.Id, Quantity = 1 }] })).Items.Single();
     var afterVersion = (await lists.CalculateAsync(new CalculatePriceRequest { CustomerId = customer.Id, BranchId = branch.Id, DocumentDate = from.AddDays(6), Items = [new() { ItemId = item.Id, Quantity = 1 }] })).Items.Single();
     Check(beforeVersion.AppliedVersionCode == "V1" && afterVersion.AppliedVersionCode == "V2" && afterVersion.UnitPrice == 72m, "pricing selects the Active version effective on the document date");
     await Reject(async () => await lists.BulkAdjustVersionAsync(wholesale.Id, sourceVersion.Id, new BulkPriceAdjustmentRequest { AdjustmentType = PriceAdjustmentType.FixedAmount, Value = 1 }), "error.sd.pricelist_version_not_draft");
 
-    // S25.2b: type filter, version lifecycle (Draft -> Active -> Expired) and Draft item CRUD.
+    // S25.2b + S27.5: type filter, full version lifecycle (Draft -> PendingApproval -> Approved -> Active -> Expired -> Archived),
+    // withdraw, reject with reason, audit log, delete draft, EffectiveTo guard and concurrent activation lock.
     var vendorList = await lists.CreateAsync(new CreatePriceListRequest { Code = "VENDOR-BASE", Name = "Vendor Base", Currency = "VND", Type = PriceListType.Purchase, EffectiveFrom = from, IsActive = true });
     var salesFiltered = await lists.GetPagedAsync(new PriceListFilterQuery { Type = PriceListType.Sales, PageSize = 50 });
     var purchaseFiltered = await lists.GetPagedAsync(new PriceListFilterQuery { Type = PriceListType.Purchase, PageSize = 50 });
@@ -304,6 +357,7 @@ try
     await Reject(async () => await lists.CreateVersionAsync(wholesale.Id, new CreatePriceListVersionRequest { VersionCode = "V3", EffectiveFrom = from.AddDays(10), EffectiveTo = from.AddDays(9) }), "error.validation.request");
     var draftV3 = await lists.CreateVersionAsync(wholesale.Id, new CreatePriceListVersionRequest { VersionCode = "v3", EffectiveFrom = from.AddDays(10) });
     Check(draftV3.VersionCode == "V3" && draftV3.Status == PriceListVersionStatus.Draft && draftV3.Items.Count == 0, "creating a price list version starts it in Draft status");
+    await Reject(async () => await lists.SubmitVersionAsync(wholesale.Id, draftV3.Id), "error.sd.pricelist_version_empty");
     var updatedV3 = await lists.UpdateVersionAsync(wholesale.Id, draftV3.Id, new UpdatePriceListVersionRequest { VersionCode = "v3-edit", EffectiveFrom = from.AddDays(10), EffectiveTo = from.AddDays(20) });
     Check(updatedV3.VersionCode == "V3-EDIT" && updatedV3.EffectiveTo.HasValue && Math.Abs((updatedV3.EffectiveTo.Value - from.AddDays(20)).TotalMilliseconds) < 1, "updating a Draft version updates its code and effective window");
     await Reject(async () => await lists.UpdateVersionAsync(wholesale.Id, draftV3.Id, new UpdatePriceListVersionRequest { VersionCode = "V2", EffectiveFrom = from.AddDays(10) }), "error.sd.pricelist_duplicate_version");
@@ -330,7 +384,26 @@ try
 
     var whileDraft = (await lists.CalculateAsync(new CalculatePriceRequest { CustomerId = customer.Id, BranchId = branch.Id, DocumentDate = from.AddDays(12), Items = [new() { ItemId = item.Id, Quantity = 1 }] })).Items.Single();
     Check(whileDraft.AppliedVersionCode == "V2" && whileDraft.UnitPrice == 72m, "Draft version does not take effect until activated");
-    await Reject(async () => await lists.CloseVersionAsync(wholesale.Id, draftV3.Id), "error.sd.pricelist_version_invalid_status");
+    await Reject(async () => await lists.CloseVersionAsync(wholesale.Id, draftV3.Id, new PriceListVersionTransitionRequest { Reason = "not active" }), "error.sd.pricelist_version_invalid_status");
+    await Reject(async () => await lists.ActivateVersionAsync(wholesale.Id, draftV3.Id), "error.sd.pricelist_version_invalid_status");
+
+    // Submit -> Withdraw -> Submit -> Reject (reason required) -> Submit -> Approve -> Withdraw -> Submit -> Approve
+    var submittedV3 = await lists.SubmitVersionAsync(wholesale.Id, draftV3.Id);
+    Check(submittedV3.Status == PriceListVersionStatus.PendingApproval && submittedV3.SubmittedAtUtc.HasValue, "submitting a Draft version transitions it to PendingApproval");
+    await Reject(async () => await lists.UpdateVersionAsync(wholesale.Id, draftV3.Id, new UpdatePriceListVersionRequest { VersionCode = "V3-LOCKED", EffectiveFrom = from.AddDays(10) }), "error.sd.pricelist_version_not_draft");
+    var withdrawnPending = await lists.WithdrawVersionAsync(wholesale.Id, draftV3.Id, new PriceListVersionTransitionRequest { Reason = "recheck price" });
+    Check(withdrawnPending.Status == PriceListVersionStatus.Draft, "withdrawing PendingApproval returns version to Draft");
+    await lists.SubmitVersionAsync(wholesale.Id, draftV3.Id);
+    await Reject(async () => await lists.RejectVersionAsync(wholesale.Id, draftV3.Id, new PriceListVersionTransitionRequest { Reason = "  " }), "error.validation.request");
+    var rejectedV3 = await lists.RejectVersionAsync(wholesale.Id, draftV3.Id, new PriceListVersionTransitionRequest { Reason = "Margin too low" });
+    Check(rejectedV3.Status == PriceListVersionStatus.Draft && rejectedV3.RejectReason == "Margin too low", "rejecting PendingApproval requires a reason and returns version to Draft");
+    await lists.SubmitVersionAsync(wholesale.Id, draftV3.Id);
+    var approvedV3 = await lists.ApproveVersionAsync(wholesale.Id, draftV3.Id);
+    Check(approvedV3.Status == PriceListVersionStatus.Approved && approvedV3.ApprovedAtUtc.HasValue, "approving PendingApproval transitions version to Approved");
+    var withdrawnApproved = await lists.WithdrawVersionAsync(wholesale.Id, draftV3.Id, new PriceListVersionTransitionRequest { Reason = "adjust before launch" });
+    Check(withdrawnApproved.Status == PriceListVersionStatus.Draft, "withdrawing Approved returns version to Draft");
+    await lists.SubmitVersionAsync(wholesale.Id, draftV3.Id);
+    await lists.ApproveVersionAsync(wholesale.Id, draftV3.Id);
 
     // Activation is blocked while another Active version of the same list overlaps the window (inclusive on both ends).
     try { await lists.ActivateVersionAsync(wholesale.Id, draftV3.Id); Check(false, "activating a version that overlaps an Active one is rejected"); }
@@ -342,9 +415,9 @@ try
     await db.PriceListVersions.Where(v => v.Id == clonedVersion.Id).ExecuteUpdateAsync(v => v.SetProperty(x => x.EffectiveTo, from.AddDays(10)));
     await Reject(async () => await lists.ActivateVersionAsync(wholesale.Id, draftV3.Id), "error.sd.pricelist_version_overlap");
     await db.PriceListVersions.Where(v => v.Id == clonedVersion.Id).ExecuteUpdateAsync(v => v.SetProperty(x => x.EffectiveTo, from.AddDays(9)));
-    Check((await lists.GetVersionAsync(wholesale.Id, draftV3.Id)).Status == PriceListVersionStatus.Draft, "a rejected activation leaves the version in Draft");
+    Check((await lists.GetVersionAsync(wholesale.Id, draftV3.Id)).Status == PriceListVersionStatus.Approved, "a rejected activation leaves the version in Approved");
     var activatedV3 = await lists.ActivateVersionAsync(wholesale.Id, draftV3.Id);
-    Check(activatedV3.Status == PriceListVersionStatus.Active, "activating a Draft version transitions it to Active");
+    Check(activatedV3.Status == PriceListVersionStatus.Active && activatedV3.ActivatedAtUtc.HasValue, "activating an Approved version transitions it to Active");
     var whileActive = (await lists.CalculateAsync(new CalculatePriceRequest { CustomerId = customer.Id, BranchId = branch.Id, DocumentDate = from.AddDays(12), Items = [new() { ItemId = item.Id, Quantity = 1 }] })).Items.Single();
     Check(whileActive.AppliedVersionCode == "V3-EDIT" && whileActive.UnitPrice == 69m && whileActive.DiscountAmount == 3.45m && whileActive.LineTotal == 65.55m, "activated version takes effect immediately for matching document dates");
     await Reject(async () => await lists.ActivateVersionAsync(wholesale.Id, draftV3.Id), "error.sd.pricelist_version_invalid_status");
@@ -352,23 +425,81 @@ try
     await Reject(async () => await lists.AddVersionItemAsync(wholesale.Id, draftV3.Id, new CreatePriceListItemRequest { ItemId = item.Id, UnitPrice = 50, MinQuantity = 5 }), "error.sd.pricelist_version_not_draft");
     await Reject(async () => await lists.UpdateVersionItemAsync(wholesale.Id, draftV3.Id, addedLine1.Id!.Value, new UpdatePriceListItemRequest { UnitPrice = 50, MinQuantity = 1 }), "error.sd.pricelist_version_not_draft");
     await Reject(async () => await lists.DeleteVersionItemAsync(wholesale.Id, draftV3.Id, addedLine1.Id!.Value), "error.sd.pricelist_version_not_draft");
+    await Reject(async () => await lists.DeleteVersionAsync(wholesale.Id, draftV3.Id), "error.sd.pricelist_version_not_draft");
 
-    var closedV3 = await lists.CloseVersionAsync(wholesale.Id, draftV3.Id);
-    Check(closedV3.Status == PriceListVersionStatus.Expired, "closing an Active version transitions it to Expired");
+    await Reject(async () => await lists.CloseVersionAsync(wholesale.Id, draftV3.Id, new PriceListVersionTransitionRequest { Reason = "" }), "error.validation.request");
+    var closedV3 = await lists.CloseVersionAsync(wholesale.Id, draftV3.Id, new PriceListVersionTransitionRequest { Reason = "Superseded by promo" });
+    Check(closedV3.Status == PriceListVersionStatus.Expired && closedV3.CloseReason == "Superseded by promo" && closedV3.ClosedAtUtc.HasValue,
+        "closing an Active version with reason transitions it to Expired and records audit fields");
     await db.PriceListVersions.Where(v => v.Id == clonedVersion.Id).ExecuteUpdateAsync(v => v.SetProperty(x => x.EffectiveTo, (DateTime?)null));
     var afterClose = (await lists.CalculateAsync(new CalculatePriceRequest { CustomerId = customer.Id, BranchId = branch.Id, DocumentDate = from.AddDays(12), Items = [new() { ItemId = item.Id, Quantity = 1 }] })).Items.Single();
     Check(afterClose.AppliedVersionCode == "V2" && afterClose.UnitPrice == 72m, "closing a version removes it from active pricing");
-    await Reject(async () => await lists.CloseVersionAsync(wholesale.Id, draftV3.Id), "error.sd.pricelist_version_invalid_status");
+    await Reject(async () => await lists.CloseVersionAsync(wholesale.Id, draftV3.Id, new PriceListVersionTransitionRequest { Reason = "again" }), "error.sd.pricelist_version_invalid_status");
     await Reject(async () => await lists.ActivateVersionAsync(wholesale.Id, draftV3.Id), "error.sd.pricelist_version_invalid_status");
     await Reject(async () => await lists.UpdateVersionAsync(wholesale.Id, draftV3.Id, new UpdatePriceListVersionRequest { VersionCode = "V3-EXP", EffectiveFrom = from.AddDays(10) }), "error.sd.pricelist_version_not_draft");
     await Reject(async () => await lists.AddVersionItemAsync(wholesale.Id, draftV3.Id, new CreatePriceListItemRequest { ItemId = item.Id, UnitPrice = 50, MinQuantity = 5 }), "error.sd.pricelist_version_not_draft");
 
-    var archivedV4 = await lists.CreateVersionAsync(wholesale.Id, new CreatePriceListVersionRequest { VersionCode = "V4", EffectiveFrom = from.AddDays(30) });
-    await db.PriceListVersions.Where(v => v.Id == archivedV4.Id).ExecuteUpdateAsync(v => v.SetProperty(x => x.Status, PriceListVersionStatus.Archived));
-    await Reject(async () => await lists.UpdateVersionAsync(wholesale.Id, archivedV4.Id, new UpdatePriceListVersionRequest { VersionCode = "V4-EDIT", EffectiveFrom = from.AddDays(30) }), "error.sd.pricelist_version_not_draft");
-    await Reject(async () => await lists.ActivateVersionAsync(wholesale.Id, archivedV4.Id), "error.sd.pricelist_version_invalid_status");
-    await Reject(async () => await lists.CloseVersionAsync(wholesale.Id, archivedV4.Id), "error.sd.pricelist_version_invalid_status");
-    await Reject(async () => await lists.AddVersionItemAsync(wholesale.Id, archivedV4.Id, new CreatePriceListItemRequest { ItemId = item.Id, UnitPrice = 10, MinQuantity = 1 }), "error.sd.pricelist_version_not_draft");
+    // Archive Expired -> Archived + verify full audit trail
+    var archivedV3 = await lists.ArchiveVersionAsync(wholesale.Id, draftV3.Id, new PriceListVersionTransitionRequest { Reason = "End of season" });
+    Check(archivedV3.Status == PriceListVersionStatus.Archived && archivedV3.ArchivedAtUtc.HasValue, "archiving an Expired version transitions it to Archived");
+    var v3Audit = await lists.GetVersionAuditAsync(wholesale.Id, draftV3.Id);
+    Check(v3Audit.Count >= 9 && v3Audit.Any(a => a.Action == "REJECT" && a.Reason == "Margin too low")
+        && v3Audit.Any(a => a.Action == "CLOSE" && a.Reason == "Superseded by promo")
+        && v3Audit.Any(a => a.Action == "ARCHIVE"), "version audit history preserves every transition and reason");
+
+    // Delete Draft version works and leaves non-draft untouched; Archived rejects edits/transitions.
+    var tempDraft = await lists.CreateVersionAsync(wholesale.Id, new CreatePriceListVersionRequest { VersionCode = "V-TEMP-DEL", EffectiveFrom = from.AddDays(40) });
+    await lists.DeleteVersionAsync(wholesale.Id, tempDraft.Id);
+    await Reject(async () => await lists.GetVersionAsync(wholesale.Id, tempDraft.Id), "error.validation.reference");
+    await Reject(async () => await lists.UpdateVersionAsync(wholesale.Id, archivedV3.Id, new UpdatePriceListVersionRequest { VersionCode = "V4-EDIT", EffectiveFrom = from.AddDays(30) }), "error.sd.pricelist_version_not_draft");
+    await Reject(async () => await lists.ActivateVersionAsync(wholesale.Id, archivedV3.Id), "error.sd.pricelist_version_invalid_status");
+    await Reject(async () => await lists.CloseVersionAsync(wholesale.Id, archivedV3.Id, new PriceListVersionTransitionRequest { Reason = "x" }), "error.sd.pricelist_version_invalid_status");
+    await Reject(async () => await lists.AddVersionItemAsync(wholesale.Id, archivedV3.Id, new CreatePriceListItemRequest { ItemId = item.Id, UnitPrice = 10, MinQuantity = 1 }), "error.sd.pricelist_version_not_draft");
+
+    // EffectiveTo range guard (outside header range) & concurrent overlapping activation race test.
+    var boundedPl = await lists.CreateAsync(new CreatePriceListRequest
+    {
+        Code = "BOUNDED-PL", Name = "Bounded PL", Currency = "VND", EffectiveFrom = from, EffectiveTo = from.AddDays(15), IsActive = true,
+        Items = [new() { ItemId = item.Id, UnitPrice = 50 }]
+    });
+    var outsideVer = await lists.CreateVersionAsync(boundedPl.Id, new CreatePriceListVersionRequest
+    {
+        VersionCode = "OUTSIDE", EffectiveFrom = from, EffectiveTo = from.AddDays(25),
+        Items = [new() { ItemId = item.Id, UnitPrice = 45 }]
+    });
+    await lists.SubmitVersionAsync(boundedPl.Id, outsideVer.Id);
+    await lists.ApproveVersionAsync(boundedPl.Id, outsideVer.Id);
+    await Reject(async () => await lists.ActivateVersionAsync(boundedPl.Id, outsideVer.Id), "error.sd.pricelist_version_outside_header_range");
+
+    var raceA = await lists.CreateVersionAsync(boundedPl.Id, new CreatePriceListVersionRequest
+    {
+        VersionCode = "RACE-A", EffectiveFrom = from.AddDays(2), EffectiveTo = from.AddDays(10),
+        Items = [new() { ItemId = item.Id, UnitPrice = 48 }]
+    });
+    var raceB = await lists.CreateVersionAsync(boundedPl.Id, new CreatePriceListVersionRequest
+    {
+        VersionCode = "RACE-B", EffectiveFrom = from.AddDays(5), EffectiveTo = from.AddDays(12),
+        Items = [new() { ItemId = item.Id, UnitPrice = 49 }]
+    });
+    await lists.SubmitVersionAsync(boundedPl.Id, raceA.Id); await lists.ApproveVersionAsync(boundedPl.Id, raceA.Id);
+    await lists.SubmitVersionAsync(boundedPl.Id, raceB.Id); await lists.ApproveVersionAsync(boundedPl.Id, raceB.Id);
+    var raceResults = await Task.WhenAll(
+        Task.Run(async () =>
+        {
+            await using var c1 = Db(user);
+            try { await new PriceListService(c1, new PostingTransaction(c1)).ActivateVersionAsync(boundedPl.Id, raceA.Id); return "OK"; }
+            catch (BusinessException ex) { return ex.Code; }
+        }),
+        Task.Run(async () =>
+        {
+            await using var c2 = Db(user);
+            try { await new PriceListService(c2, new PostingTransaction(c2)).ActivateVersionAsync(boundedPl.Id, raceB.Id); return "OK"; }
+            catch (BusinessException ex) { return ex.Code; }
+        }));
+    Check(raceResults.Count(r => r == "OK") == 1 && raceResults.Count(r => r == "error.sd.pricelist_version_overlap") == 1,
+        "concurrent overlapping activations allow exactly one winner under advisory lock");
+    Check(await lists.DeleteAsync(boundedPl.Id), "bounded race-test price list is cleaned up");
+
     Check(await lists.UpdateAsync(999999, new UpdatePriceListRequest { Code = "X", Name = "X", Currency = "VND", EffectiveFrom = from }) == null, "updating a missing price list returns nothing");
     await Reject(async () => await lists.DeleteAsync(wholesale.Id), "error.sd.pricelist_in_use");
     await db.Partners.Where(p => p.Id == customer.Id).ExecuteUpdateAsync(p => p.SetProperty(c => c.PriceListId, (int?)null));
@@ -780,8 +911,10 @@ try
     Check(sameKey.Items.Select(o => o.Id).Intersect(sameKeyNext.Items.Select(o => o.Id)).Count() == 0, "sorting on a column with equal values never repeats a row across pages");
     await db.SalesOrderItems.Where(i => i.SalesOrderId == warned.Id).ExecuteUpdateAsync(i => i.SetProperty(x => x.InvoicedQuantity, 1m));
     await Reject(async () => await orders.CancelAsync(warned.Id, "too late", default), "error.sd.cannot_cancel_invoiced_order");
-    // Tester findings: F1 pricing outside the data scope, F2 deleting a list used by an order, F3 order state errors.
+    // Tester findings: F1 pricing outside the data scope, F2 deleting a list used by an order, F3 order state errors,
+    // plus S27.5 snapshot preservation when an Active price list version is closed after SO confirmation & invoicing.
     var fixList = await lists.CreateAsync(ListRequest("FIXPL", 80));
+    var fixV1 = await ActivateDefaultV1Async(fixList.Id);
     await using (var outsider = Db(new TestUser(false, [999999])))
     {
         var scoped = await new PriceListService(outsider).CalculateAsync(new CalculatePriceRequest { BranchId = branch.Id, Items = [new() { ItemId = item.Id, Quantity = 1 }] });
@@ -790,6 +923,13 @@ try
     var listedQuote = QuoteRequest(); listedQuote.PriceListId = fixList.Id;
     var listedOrder = await quotes.ConvertToOrderAsync((await quotes.CreateAsync(listedQuote)).Id);
     Check((await db.SalesOrders.AsNoTracking().SingleAsync(o => o.Id == listedOrder.SalesOrderId)).PriceListId == fixList.Id, "an order converted from a quotation keeps its price list");
+    var snapOrderBefore = await db.SalesOrders.Include(o => o.Items).AsNoTracking().SingleAsync(o => o.Id == listedOrder.SalesOrderId);
+    await lists.CloseVersionAsync(fixList.Id, fixV1.Id, new PriceListVersionTransitionRequest { Reason = "Snapshot check" });
+    var snapOrderAfter = await db.SalesOrders.Include(o => o.Items).AsNoTracking().SingleAsync(o => o.Id == listedOrder.SalesOrderId);
+    Check(snapOrderAfter.TotalAmount == snapOrderBefore.TotalAmount
+        && snapOrderAfter.Items.Single().UnitPrice == snapOrderBefore.Items.Single().UnitPrice
+        && snapOrderAfter.Items.Single().DiscountAmount == snapOrderBefore.Items.Single().DiscountAmount,
+        "closing a price list version preserves saved SO line price snapshots");
     await Reject(async () => await lists.DeleteAsync(fixList.Id), "error.sd.pricelist_in_use");
     await Reject(async () => await orders.ConfirmAsync(approved.Id, default), "error.sd.order_invalid_status_for_action");
     await Reject(async () => await orders.UpdateAsync(approved.Id, new UpdateSalesOrderRequest { BranchId = branch.Id, Items = [new() { ItemId = rsv.Id, Quantity = 1, UnitPrice = 100 }] }), "error.sd.order_invalid_status_for_action");
@@ -1297,18 +1437,31 @@ try
         Check((await http.DeleteAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions/{httpVersionId}/items/{httpItemLine2Id}")).StatusCode == HttpStatusCode.NoContent,
             "DELETE version items removes a Draft item over HTTP");
 
+        // Activate V1 through the full workflow first so overlap can be verified over HTTP.
+        using var httpVersionList = JsonDocument.Parse(await http.GetStringAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions"));
+        var blockingId = httpVersionList.RootElement.GetProperty("data").EnumerateArray().Single(v => v.GetProperty("versionCode").GetString() == "V1").GetProperty("id").GetInt32();
+        Check((await http.PostAsJsonAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions/{blockingId}/items", new { itemId = 1, unitPrice = 95, minQuantity = 1, discountPercent = 0 })).StatusCode == HttpStatusCode.Created,
+            "adding an item to Draft V1 over HTTP succeeds");
+        Check((await http.PostAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions/{blockingId}/submit", null)).IsSuccessStatusCode
+            && (await http.PostAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions/{blockingId}/approve", null)).IsSuccessStatusCode
+            && (await http.PostAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions/{blockingId}/activate", null)).IsSuccessStatusCode,
+            "V1 transitions Draft -> PendingApproval -> Approved -> Active over HTTP");
+
+        // Submit -> Approve HTTP-V2, then verify overlap rejection against Active V1.
+        Check((await http.PostAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions/{httpVersionId}/submit", null)).IsSuccessStatusCode
+            && (await http.PostAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions/{httpVersionId}/approve", null)).IsSuccessStatusCode,
+            "POST submit and approve transition Draft -> PendingApproval -> Approved over HTTP");
         using var httpOverlap = await http.PostAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions/{httpVersionId}/activate", null);
         using var httpOverlapJson = JsonDocument.Parse(await httpOverlap.Content.ReadAsStringAsync());
         var overlapMessage = httpOverlapJson.RootElement.GetProperty("message").GetString() ?? "";
         Check(httpOverlap.StatusCode == HttpStatusCode.Conflict && httpOverlapJson.RootElement.GetProperty("errorCode").GetString() == "error.sd.pricelist_version_overlap"
             && overlapMessage.Contains("V1") && !overlapMessage.Contains('{'), "POST activate over HTTP is blocked with a localized message naming the overlapping version");
-        using var httpVersionList = JsonDocument.Parse(await http.GetStringAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions"));
-        var blockingId = httpVersionList.RootElement.GetProperty("data").EnumerateArray().Single(v => v.GetProperty("versionCode").GetString() == "V1").GetProperty("id").GetInt32();
-        Check((await http.PostAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions/{blockingId}/close", null)).IsSuccessStatusCode, "closing the blocking version over HTTP succeeds");
+        Check((await http.PostAsJsonAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions/{blockingId}/close", new { reason = "Replaced by HTTP-V2" })).IsSuccessStatusCode,
+            "closing the blocking version with reason over HTTP succeeds");
 
         using var httpActivate = await http.PostAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions/{httpVersionId}/activate", null);
         Check(httpActivate.IsSuccessStatusCode && JsonDocument.Parse(await httpActivate.Content.ReadAsStringAsync()).RootElement.GetProperty("data").GetProperty("status").GetInt32() == 2,
-            "POST activate transitions a Draft version to Active over HTTP");
+            "POST activate transitions an Approved version to Active over HTTP");
 
         using var editActiveDenied = await http.PutAsJsonAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions/{httpVersionId}/items/{httpItemLineId}", new { unitPrice = 90, minQuantity = 1, discountPercent = 0 });
         var editActiveBody = await editActiveDenied.Content.ReadAsStringAsync();
@@ -1325,12 +1478,145 @@ try
             && activateAgainJson.RootElement.GetProperty("message").GetString() != "error.sd.pricelist_version_invalid_status",
             "activating an already Active version returns 409 with localized invalid-status message");
 
-        using var httpClose = await http.PostAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions/{httpVersionId}/close", null);
+        Check((await http.PostAsJsonAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions/{httpVersionId}/close", new { reason = "" })).StatusCode == HttpStatusCode.BadRequest,
+            "POST close without reason returns 400 over HTTP");
+        using var httpClose = await http.PostAsJsonAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions/{httpVersionId}/close", new { reason = "End of cycle" });
         Check(httpClose.IsSuccessStatusCode && JsonDocument.Parse(await httpClose.Content.ReadAsStringAsync()).RootElement.GetProperty("data").GetProperty("status").GetInt32() == 3,
             "POST close transitions an Active version to Expired over HTTP");
-        Check((await http.PostAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions/{httpVersionId}/close", null)).StatusCode == HttpStatusCode.Conflict,
+        Check((await http.PostAsJsonAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions/{httpVersionId}/close", new { reason = "duplicate" })).StatusCode == HttpStatusCode.Conflict,
             "closing an Expired version is rejected with 409");
-        Check((await http.DeleteAsync($"/api/v1/sales/price-lists/{purchasePlId}")).IsSuccessStatusCode, "temporary HTTP Purchase price list is cleaned up");
+        using var httpArchive = await http.PostAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions/{httpVersionId}/archive", null);
+        Check(httpArchive.IsSuccessStatusCode && JsonDocument.Parse(await httpArchive.Content.ReadAsStringAsync()).RootElement.GetProperty("data").GetProperty("status").GetInt32() == 4,
+            "POST archive transitions an Expired version to Archived over HTTP");
+        using var httpAudit = JsonDocument.Parse(await http.GetStringAsync($"/api/v1/sales/price-lists/{purchasePlId}/versions/{httpVersionId}/audit"));
+        Check(httpAudit.RootElement.GetProperty("data").GetArrayLength() >= 5, "GET version audit returns recorded transitions over HTTP");
+
+        // S27.5 HTTP IAM permission & Sales/Purchase/Branch scope matrix verification.
+        // Reuse a single login session and swap assigned roles via /api/v1/sys/roles/users/{id}
+        // to stay within the 10/min /api/v1/auth/login rate limit while verifying live IAM cache invalidation.
+        var plActorResp = await http.PostAsJsonAsync("/api/v1/auth/users", new { userName = "pl_actor", displayName = "PriceList Actor", password, role = "None", branchIds = Array.Empty<int>() });
+        Check(plActorResp.IsSuccessStatusCode, "provisioned reusable S27.5 IAM test actor");
+        var plActorId = JsonDocument.Parse(await plActorResp.Content.ReadAsStringAsync()).RootElement.GetProperty("data").GetProperty("id").GetInt32();
+        var plActorToken = await Login("pl_actor");
+
+        async Task<int> CreatePlRoleAsync(string code, string[] actions, string scopeMode, int[]? customBranches = null)
+        {
+            http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
+            var rResp = await http.PostAsJsonAsync("/api/v1/sys/roles", new
+            {
+                code,
+                name = $"Role {code}",
+                policyDocument = new
+                {
+                    version = "2026-10",
+                    statements = new[]
+                    {
+                        new
+                        {
+                            sid = "Allow",
+                            effect = "Allow",
+                            actions,
+                            resources = new[] { "*" },
+                            dataScope = customBranches != null
+                                ? (object)new { mode = scopeMode, customBranchIds = customBranches, includeDescendants = false }
+                                : new { mode = scopeMode }
+                        }
+                    }
+                }
+            });
+            Check(rResp.IsSuccessStatusCode, $"provisioned role {code}");
+            return JsonDocument.Parse(await rResp.Content.ReadAsStringAsync()).RootElement.GetProperty("data").GetProperty("id").GetInt32();
+        }
+
+        async Task SwitchPlRoleAsync(int roleId, string label)
+        {
+            http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
+            var assignResp = await http.PutAsJsonAsync($"/api/v1/sys/roles/users/{plActorId}", new { roles = new[] { new { roleId } } });
+            Check(assignResp.IsSuccessStatusCode, $"assigned role {label}");
+            http.DefaultRequestHeaders.Authorization = new("Bearer", plActorToken);
+        }
+
+        var sdEditorRoleId = await CreatePlRoleAsync("R_PL_SD_EDIT", ["sd:pricelist:view", "sd:pricelist:create", "sd:pricelist:edit"], "GROUP");
+        var sdSubmitRoleId = await CreatePlRoleAsync("R_PL_SD_SUBMIT", ["sd:pricelist:view", "sd:pricelist:submit", "sd:pricelist:withdraw"], "GROUP");
+        var sdApproveRoleId = await CreatePlRoleAsync("R_PL_SD_APPROVE", ["sd:pricelist:view", "sd:pricelist:approve", "sd:pricelist:reject"], "GROUP");
+        var sdActivateRoleId = await CreatePlRoleAsync("R_PL_SD_ACTIVATE", ["sd:pricelist:view", "sd:pricelist:activate", "sd:pricelist:close", "sd:pricelist:archive"], "GROUP");
+        var purManagerRoleId = await CreatePlRoleAsync("R_PL_PUR_MGR", ["pur:pricelist:view", "pur:pricelist:create", "pur:pricelist:edit", "pur:pricelist:submit", "pur:pricelist:approve", "pur:pricelist:activate", "pur:pricelist:close"], "GROUP");
+        var branchScopedRoleId = await CreatePlRoleAsync("R_PL_BR_ONLY", ["sd:pricelist:view", "sd:pricelist:create", "sd:pricelist:edit", "sd:pricelist:submit", "sd:pricelist:approve", "sd:pricelist:activate", "sd:pricelist:close"], "CUSTOM_BRANCHES", [allowedBranch.Id]);
+
+        // Sales Editor creates Sales PL (Draft V1), cannot create Purchase PL, cannot submit/approve/activate.
+        await SwitchPlRoleAsync(sdEditorRoleId, "sd_editor");
+        Check((await http.PostAsJsonAsync("/api/v1/sales/price-lists", new { code = "DENY-PUR", name = "Deny Pur", currency = "VND", type = 2, effectiveFrom = DateTime.UtcNow.AddDays(-1), isActive = true })).StatusCode == HttpStatusCode.Forbidden,
+            "Sales-only editor cannot create a Purchase price list");
+        Check((await http.GetAsync("/api/v1/sales/price-lists?type=Purchase")).StatusCode == HttpStatusCode.Forbidden,
+            "Sales-only editor receives 403 when querying Purchase price lists");
+        using var sdListResp = await http.PostAsJsonAsync("/api/v1/sales/price-lists", new
+        {
+            code = "SD-WF-TEST", name = "SD Workflow Test", currency = "VND", type = 1, branchId = allowedBranch.Id,
+            effectiveFrom = DateTime.UtcNow.AddDays(-1), isActive = true,
+            items = new[] { new { itemId = 1, unitPrice = 50, minQuantity = 1, discountPercent = 0 } }
+        });
+        Check(sdListResp.IsSuccessStatusCode, "Sales editor creates a Sales price list");
+        var sdListId = JsonDocument.Parse(await sdListResp.Content.ReadAsStringAsync()).RootElement.GetProperty("data").GetProperty("id").GetInt32();
+        var sdV1Id = JsonDocument.Parse(await http.GetStringAsync($"/api/v1/sales/price-lists/{sdListId}/versions")).RootElement.GetProperty("data")[0].GetProperty("id").GetInt32();
+        Check((await http.PostAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/submit", null)).StatusCode == HttpStatusCode.Forbidden
+            && (await http.PostAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/approve", null)).StatusCode == HttpStatusCode.Forbidden
+            && (await http.PostAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/activate", null)).StatusCode == HttpStatusCode.Forbidden
+            && (await http.PostAsJsonAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/close", new { reason = "x" })).StatusCode == HttpStatusCode.Forbidden,
+            "Sales editor without workflow verbs gets 403 on submit/approve/activate/close");
+
+        // Submitter submits & withdraws; cannot approve/activate.
+        await SwitchPlRoleAsync(sdSubmitRoleId, "sd_submit");
+        Check((await http.PostAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/submit", null)).IsSuccessStatusCode, "Sales submitter can submit Draft");
+        Check((await http.PostAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/approve", null)).StatusCode == HttpStatusCode.Forbidden, "Sales submitter cannot approve");
+        Check((await http.PostAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/withdraw", null)).IsSuccessStatusCode, "Sales submitter can withdraw PendingApproval");
+        Check((await http.PostAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/submit", null)).IsSuccessStatusCode, "Sales submitter re-submits Draft");
+
+        // Approver rejects (returns Draft), submitter re-submits, approver approves; cannot activate.
+        await SwitchPlRoleAsync(sdApproveRoleId, "sd_approve");
+        Check((await http.PostAsJsonAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/reject", new { reason = "Fix margin" })).IsSuccessStatusCode, "Sales approver with reject permission can reject with reason");
+        await SwitchPlRoleAsync(sdSubmitRoleId, "sd_submit_again");
+        Check((await http.PostAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/submit", null)).IsSuccessStatusCode, "Sales submitter re-submits after rejection");
+        await SwitchPlRoleAsync(sdApproveRoleId, "sd_approve_again");
+        Check((await http.PostAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/approve", null)).IsSuccessStatusCode, "Sales approver can approve PendingApproval");
+        Check((await http.PostAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/activate", null)).StatusCode == HttpStatusCode.Forbidden, "Sales approver cannot activate");
+
+        // Activator activates -> closes -> archives.
+        await SwitchPlRoleAsync(sdActivateRoleId, "sd_activate");
+        Check((await http.PostAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/activate", null)).IsSuccessStatusCode, "Sales activator can activate Approved version");
+        Check((await http.PostAsJsonAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/close", new { reason = "Done promo" })).IsSuccessStatusCode, "Sales closer can close Active version with reason");
+        Check((await http.PostAsync($"/api/v1/sales/price-lists/{sdListId}/versions/{sdV1Id}/archive", null)).IsSuccessStatusCode, "Sales archiver can archive Expired version");
+
+        // Purchase-only manager cannot see/touch Sales PL, but can manage Purchase PL.
+        await SwitchPlRoleAsync(purManagerRoleId, "pur_manager");
+        Check((await http.GetAsync($"/api/v1/sales/price-lists/{sdListId}")).StatusCode == HttpStatusCode.Forbidden
+            && (await http.GetAsync("/api/v1/sales/price-lists?type=Sales")).StatusCode == HttpStatusCode.Forbidden,
+            "Purchase-only manager gets 403 accessing Sales price list");
+        using var purOnlyList = JsonDocument.Parse(await http.GetStringAsync("/api/v1/sales/price-lists"));
+        Check(purOnlyList.RootElement.GetProperty("data").GetProperty("items").EnumerateArray().All(x => x.GetProperty("type").GetInt32() == 2),
+            "unfiltered price-lists endpoint returns only Purchase lists for Purchase-only manager");
+
+        // Branch-scoped user can view global PL, gets 403 editing global PL (BranchId == null) or another branch's PL.
+        http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
+        using var globalPlResp = await http.PostAsJsonAsync("/api/v1/sales/price-lists", new
+        {
+            code = "GLOBAL-SCOPE", name = "Global Scope", currency = "VND", type = 1, branchId = (int?)null,
+            effectiveFrom = DateTime.UtcNow.AddDays(-1), isActive = true
+        });
+        var globalPlId = JsonDocument.Parse(await globalPlResp.Content.ReadAsStringAsync()).RootElement.GetProperty("data").GetProperty("id").GetInt32();
+        await SwitchPlRoleAsync(branchScopedRoleId, "branch_scoped");
+        Check((await http.GetAsync($"/api/v1/sales/price-lists/{globalPlId}")).IsSuccessStatusCode, "branch-scoped user can view a global price list");
+        Check((await http.PutAsJsonAsync($"/api/v1/sales/price-lists/{globalPlId}", new
+        {
+            code = "GLOBAL-SCOPE", name = "Tampered", currency = "VND", type = 1, branchId = (int?)null,
+            effectiveFrom = DateTime.UtcNow.AddDays(-1), isActive = true
+        })).StatusCode == HttpStatusCode.Forbidden, "branch-scoped user gets 403 modifying a global price list");
+        Check((await http.GetAsync($"/api/v1/sales/price-lists/{sdListId}")).IsSuccessStatusCode, "branch-scoped user can access a price list in their allowed branch");
+
+        http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
+        Check((await http.DeleteAsync($"/api/v1/sales/price-lists/{globalPlId}")).IsSuccessStatusCode
+            && (await http.DeleteAsync($"/api/v1/sales/price-lists/{sdListId}")).IsSuccessStatusCode
+            && (await http.DeleteAsync($"/api/v1/sales/price-lists/{purchasePlId}")).IsSuccessStatusCode,
+            "temporary HTTP S27.5 price lists are cleaned up");
         Check((await http.GetAsync("/api/v1/sales/quotations")).IsSuccessStatusCode, "admin reads the quotation page over HTTP");
         Check((await http.PostAsync("/api/v1/sales/quotations/999999/convert-to-order", null)).StatusCode == HttpStatusCode.NotFound, "converting a missing quotation answers not found");
         Check((await http.PostAsJsonAsync("/api/v1/sales/orders/999999/cancel", new { reason = "x" })).StatusCode == HttpStatusCode.NotFound, "cancelling a missing order answers not found");

@@ -114,7 +114,39 @@ public class PriceListVersionDto
     public DateTime? EffectiveTo { get; set; }
     public PriceListVersionStatus Status { get; set; }
     public int ItemCount { get; set; }
+    public string? SubmittedBy { get; set; }
+    public DateTime? SubmittedAtUtc { get; set; }
+    public string? ApprovedBy { get; set; }
+    public DateTime? ApprovedAtUtc { get; set; }
+    public string? RejectedBy { get; set; }
+    public DateTime? RejectedAtUtc { get; set; }
+    public string? RejectReason { get; set; }
+    public string? ActivatedBy { get; set; }
+    public DateTime? ActivatedAtUtc { get; set; }
+    public string? ClosedBy { get; set; }
+    public DateTime? ClosedAtUtc { get; set; }
+    public string? CloseReason { get; set; }
+    public string? ArchivedBy { get; set; }
+    public DateTime? ArchivedAtUtc { get; set; }
     public List<PriceListItemDto> Items { get; set; } = new();
+}
+
+public class PriceListVersionTransitionRequest
+{
+    public string? Reason { get; set; }
+}
+
+public class PriceListVersionAuditDto
+{
+    public int Id { get; set; }
+    public int PriceListVersionId { get; set; }
+    public string Action { get; set; } = string.Empty;
+    public PriceListVersionStatus FromStatus { get; set; }
+    public PriceListVersionStatus ToStatus { get; set; }
+    public string? ActorUserId { get; set; }
+    public string? ActorName { get; set; }
+    public string? Reason { get; set; }
+    public DateTime OccurredAtUtc { get; set; }
 }
 
 public class CreatePriceListVersionRequest

@@ -11,13 +11,15 @@ public enum PriceListType
     Purchase = 2
 }
 
-/// <summary>Lifecycle of one price list version. Stored as integer.</summary>
+/// <summary>Lifecycle of one price list version. Stored as integer; existing values 1..4 remain immutable.</summary>
 public enum PriceListVersionStatus
 {
     Draft = 1,
     Active = 2,
     Expired = 3,
-    Archived = 4
+    Archived = 4,
+    PendingApproval = 5,
+    Approved = 6
 }
 
 /// <summary>
@@ -58,9 +60,42 @@ public class PriceListVersion : BaseAuditableEntity
     public DateTime? EffectiveTo { get; set; }              // Open-ended when null
     public PriceListVersionStatus Status { get; set; } = PriceListVersionStatus.Draft;
 
+    // Workflow audit snapshot fields
+    public string? SubmittedBy { get; set; }
+    public DateTime? SubmittedAtUtc { get; set; }
+    public string? ApprovedBy { get; set; }
+    public DateTime? ApprovedAtUtc { get; set; }
+    public string? RejectedBy { get; set; }
+    public DateTime? RejectedAtUtc { get; set; }
+    public string? RejectReason { get; set; }
+    public string? ActivatedBy { get; set; }
+    public DateTime? ActivatedAtUtc { get; set; }
+    public string? ClosedBy { get; set; }
+    public DateTime? ClosedAtUtc { get; set; }
+    public string? CloseReason { get; set; }
+    public string? ArchivedBy { get; set; }
+    public DateTime? ArchivedAtUtc { get; set; }
+
     // Navigation
     public virtual PriceList? PriceList { get; set; }
     public virtual ICollection<PriceListItem> Items { get; set; } = new List<PriceListItem>();
+    public virtual ICollection<PriceListVersionAudit> AuditLogs { get; set; } = new List<PriceListVersionAudit>();
+}
+
+/// <summary>Immutable workflow transition history entry for a price list version.</summary>
+public class PriceListVersionAudit : BaseEntity
+{
+    public int PriceListVersionId { get; set; }
+    public string Action { get; set; } = string.Empty;      // SUBMIT, WITHDRAW, APPROVE, REJECT, ACTIVATE, CLOSE, ARCHIVE
+    public PriceListVersionStatus FromStatus { get; set; }
+    public PriceListVersionStatus ToStatus { get; set; }
+    public string? ActorUserId { get; set; }
+    public string? ActorName { get; set; }
+    public string? Reason { get; set; }
+    public DateTime OccurredAtUtc { get; set; } = DateTime.UtcNow;
+
+    // Navigation
+    public virtual PriceListVersion? PriceListVersion { get; set; }
 }
 
 /// <summary>

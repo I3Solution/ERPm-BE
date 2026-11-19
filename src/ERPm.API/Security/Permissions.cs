@@ -6,13 +6,14 @@ using Microsoft.AspNetCore.Mvc.Filters;
 namespace ERPm.API.Security;
 
 /// <summary>
-/// Declares the IAM action an endpoint needs. A value starting with ':' (for example ":view") is relative and
-/// is completed with the controller's <see cref="PermissionResourceAttribute"/>.
+/// Declares one or more IAM actions an endpoint accepts (any matching action allows access). A value starting with ':'
+/// (for example ":view") is relative and is completed with the controller's <see cref="PermissionResourceAttribute"/>.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, Inherited = true)]
-public sealed class RequirePermissionAttribute(string action) : Attribute
+public sealed class RequirePermissionAttribute(string action, params string[] alternatives) : Attribute
 {
     public string Action { get; } = action;
+    public string[] Actions { get; } = [action, .. alternatives];
 }
 
 /// <summary>Resource prefix (<c>module:resource</c>) for the relative permissions of a controller.</summary>
@@ -46,11 +47,24 @@ public sealed class PermissionFilter(IAuthorizationService authorization) : IAsy
         var required = endpoint?.Metadata.GetOrderedMetadata<RequirePermissionAttribute>().LastOrDefault();
         if (required != null)
         {
-            var action = Resolve(required.Action, endpoint!.Metadata.GetMetadata<PermissionResourceAttribute>());
+            var resource = endpoint!.Metadata.GetMetadata<PermissionResourceAttribute>();
             var principal = context.HttpContext.Principal();
-            var decision = action == null || principal == null ? PermissionDecision.Denied : principal.Evaluate(action);
-            if (!decision.Allowed) { context.Result = new ForbidResult(); return; }
-            context.HttpContext.Items[IamHttpContext.ScopeKey] = decision.Scope;
+            if (principal == null) { context.Result = new ForbidResult(); return; }
+
+            var allowed = false;
+            var scope = EffectiveDataScope.None;
+            foreach (var candidate in required.Actions)
+            {
+                var action = Resolve(candidate, resource);
+                if (action == null) continue;
+                var decision = principal.Evaluate(action);
+                if (!decision.Allowed) continue;
+                allowed = true;
+                scope = scope.Union(decision.Scope);
+            }
+
+            if (!allowed) { context.Result = new ForbidResult(); return; }
+            context.HttpContext.Items[IamHttpContext.ScopeKey] = scope;
             return;
         }
         var method = context.HttpContext.Request.Method;

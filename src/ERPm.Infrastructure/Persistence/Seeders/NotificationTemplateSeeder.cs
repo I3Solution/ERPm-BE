@@ -308,6 +308,126 @@ public static class NotificationTemplateSeeder
             },
             new()
             {
+                Code = "SD_PRICELIST_SUBMITTED",
+                Name = "Phiên bản bảng giá chờ duyệt",
+                Category = NotificationCategory.SD,
+                DefaultSeverity = NotificationSeverity.INFO,
+                SupportedChannels = [NotificationChannel.InApp],
+                TitleTemplate = "Phiên bản bảng giá {pricelist_code}/{version_code} chờ duyệt",
+                BodyTemplate = "Phiên bản {version_code} của bảng giá {pricelist_name} ({pricelist_code}) đã được gửi duyệt.",
+                ActionUrlPattern = "/sales/price-lists",
+                Translations = new Dictionary<string, NotificationTemplateTranslation>
+                {
+                    ["vi"] = new()
+                    {
+                        Title = "Phiên bản bảng giá {pricelist_code}/{version_code} chờ duyệt",
+                        Body = "Phiên bản {version_code} của bảng giá {pricelist_name} ({pricelist_code}) đã được gửi duyệt."
+                    },
+                    ["en"] = new()
+                    {
+                        Title = "Price list version {pricelist_code}/{version_code} pending approval",
+                        Body = "Version {version_code} of price list {pricelist_name} ({pricelist_code}) has been submitted for approval."
+                    }
+                }
+            },
+            new()
+            {
+                Code = "SD_PRICELIST_APPROVED",
+                Name = "Phiên bản bảng giá đã được duyệt",
+                Category = NotificationCategory.SD,
+                DefaultSeverity = NotificationSeverity.SUCCESS,
+                SupportedChannels = [NotificationChannel.InApp],
+                TitleTemplate = "Phiên bản bảng giá {pricelist_code}/{version_code} đã duyệt",
+                BodyTemplate = "Phiên bản {version_code} của bảng giá {pricelist_name} ({pricelist_code}) đã được phê duyệt và sẵn sàng kích hoạt.",
+                ActionUrlPattern = "/sales/price-lists",
+                Translations = new Dictionary<string, NotificationTemplateTranslation>
+                {
+                    ["vi"] = new()
+                    {
+                        Title = "Phiên bản bảng giá {pricelist_code}/{version_code} đã duyệt",
+                        Body = "Phiên bản {version_code} của bảng giá {pricelist_name} ({pricelist_code}) đã được phê duyệt và sẵn sàng kích hoạt."
+                    },
+                    ["en"] = new()
+                    {
+                        Title = "Price list version {pricelist_code}/{version_code} approved",
+                        Body = "Version {version_code} of price list {pricelist_name} ({pricelist_code}) has been approved and is ready to activate."
+                    }
+                }
+            },
+            new()
+            {
+                Code = "SD_PRICELIST_REJECTED",
+                Name = "Phiên bản bảng giá bị từ chối",
+                Category = NotificationCategory.SD,
+                DefaultSeverity = NotificationSeverity.WARNING,
+                SupportedChannels = [NotificationChannel.InApp],
+                TitleTemplate = "Phiên bản bảng giá {pricelist_code}/{version_code} bị từ chối",
+                BodyTemplate = "Phiên bản {version_code} của bảng giá {pricelist_name} ({pricelist_code}) đã bị từ chối. Lý do: {reason}",
+                ActionUrlPattern = "/sales/price-lists",
+                Translations = new Dictionary<string, NotificationTemplateTranslation>
+                {
+                    ["vi"] = new()
+                    {
+                        Title = "Phiên bản bảng giá {pricelist_code}/{version_code} bị từ chối",
+                        Body = "Phiên bản {version_code} của bảng giá {pricelist_name} ({pricelist_code}) đã bị từ chối. Lý do: {reason}"
+                    },
+                    ["en"] = new()
+                    {
+                        Title = "Price list version {pricelist_code}/{version_code} rejected",
+                        Body = "Version {version_code} of price list {pricelist_name} ({pricelist_code}) was rejected. Reason: {reason}"
+                    }
+                }
+            },
+            new()
+            {
+                Code = "SD_PRICELIST_ACTIVATED",
+                Name = "Phiên bản bảng giá đã kích hoạt",
+                Category = NotificationCategory.SD,
+                DefaultSeverity = NotificationSeverity.SUCCESS,
+                SupportedChannels = [NotificationChannel.InApp],
+                TitleTemplate = "Phiên bản bảng giá {pricelist_code}/{version_code} đang áp dụng",
+                BodyTemplate = "Phiên bản {version_code} của bảng giá {pricelist_name} ({pricelist_code}) đã được kích hoạt.",
+                ActionUrlPattern = "/sales/price-lists",
+                Translations = new Dictionary<string, NotificationTemplateTranslation>
+                {
+                    ["vi"] = new()
+                    {
+                        Title = "Phiên bản bảng giá {pricelist_code}/{version_code} đang áp dụng",
+                        Body = "Phiên bản {version_code} của bảng giá {pricelist_name} ({pricelist_code}) đã được kích hoạt."
+                    },
+                    ["en"] = new()
+                    {
+                        Title = "Price list version {pricelist_code}/{version_code} activated",
+                        Body = "Version {version_code} of price list {pricelist_name} ({pricelist_code}) has been activated."
+                    }
+                }
+            },
+            new()
+            {
+                Code = "SD_PRICELIST_CLOSED",
+                Name = "Phiên bản bảng giá đã đóng sớm",
+                Category = NotificationCategory.SD,
+                DefaultSeverity = NotificationSeverity.WARNING,
+                SupportedChannels = [NotificationChannel.InApp],
+                TitleTemplate = "Phiên bản bảng giá {pricelist_code}/{version_code} đã đóng",
+                BodyTemplate = "Phiên bản {version_code} của bảng giá {pricelist_name} ({pricelist_code}) đã đóng sớm. Lý do: {reason}",
+                ActionUrlPattern = "/sales/price-lists",
+                Translations = new Dictionary<string, NotificationTemplateTranslation>
+                {
+                    ["vi"] = new()
+                    {
+                        Title = "Phiên bản bảng giá {pricelist_code}/{version_code} đã đóng",
+                        Body = "Phiên bản {version_code} của bảng giá {pricelist_name} ({pricelist_code}) đã đóng sớm. Lý do: {reason}"
+                    },
+                    ["en"] = new()
+                    {
+                        Title = "Price list version {pricelist_code}/{version_code} closed",
+                        Body = "Version {version_code} of price list {pricelist_name} ({pricelist_code}) was closed early. Reason: {reason}"
+                    }
+                }
+            },
+            new()
+            {
                 Code = "SYS_ROLE_CHANGED",
                 Name = "Thay đổi phân quyền tài khoản",
                 Category = NotificationCategory.SYS,
