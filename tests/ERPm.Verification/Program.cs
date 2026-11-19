@@ -935,8 +935,9 @@ try
     var summaryRow = summaryList.Items.Single(o => o.Id == manyLines.Id);
     Check(fullRow.Items.Count == 40 && summaryRow.Items.Count == 0 && summaryRow.OrderNumber == fullRow.OrderNumber && summaryRow.TotalAmount == fullRow.TotalAmount && summaryRow.CustomerName == fullRow.CustomerName && summaryList.TotalCount == fullList.TotalCount,
         "an order list asked for as a summary keeps every column but carries no lines");
-    var fullBytes = JsonSerializer.SerializeToUtf8Bytes(fullList).Length; var summaryBytes = JsonSerializer.SerializeToUtf8Bytes(summaryList).Length;
-    Check(summaryBytes < fullBytes / 2, $"the summary list is much smaller than the full list ({summaryBytes} against {fullBytes} bytes)");
+    // Compared on the 40-line order itself, so other orders created earlier in this run do not move the ratio.
+    var fullBytes = JsonSerializer.SerializeToUtf8Bytes(fullRow).Length; var summaryBytes = JsonSerializer.SerializeToUtf8Bytes(summaryRow).Length;
+    Check(summaryBytes < fullBytes / 2, $"the summary row is much smaller than the full row ({summaryBytes} against {fullBytes} bytes)");
     Console.WriteLine($"MEASURE order list payload: full {fullBytes} bytes, summary {summaryBytes} bytes, {fullList.Items.Count} rows");
     var today = DateTime.UtcNow.Date;
     var inRange = await orders.GetPagedAsync(new BaseFilterQuery { PageSize = 200, Summary = true, From = today, To = today });
