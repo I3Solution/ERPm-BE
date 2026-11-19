@@ -49,3 +49,37 @@ public class StockReceiptItemRequest
     public decimal Quantity { get; set; }
     public decimal UnitPrice { get; set; }
 }
+
+/// <summary>A warehouse a selling branch may ship sales orders from.</summary>
+public class ServingWarehouseDto
+{
+    public int WarehouseId { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public int BranchId { get; set; }                      // Branch that owns the warehouse
+    public string? BranchName { get; set; }
+    public bool IsDefault { get; set; }
+    /// <summary>False when the branch has no list and ships from its own warehouses.</summary>
+    public bool IsConfigured { get; set; }
+}
+
+public class ServingWarehouseLine
+{
+    public int WarehouseId { get; set; }
+    public bool IsDefault { get; set; }
+}
+
+/// <summary>Replaces the branch's whole list. An empty list goes back to the branch's own warehouses.</summary>
+public class UpdateServingWarehousesRequest
+{
+    public List<ServingWarehouseLine> Warehouses { get; set; } = new();
+}
+
+/// <summary>Stock of one item in one warehouse: available is on hand less what orders hold.</summary>
+public class StockAvailabilityDto
+{
+    public int ItemId { get; set; }
+    public decimal QuantityOnHand { get; set; }
+    public decimal QuantityReserved { get; set; }
+    public decimal QuantityAvailable { get; set; }
+}

@@ -2,7 +2,9 @@ using ERPm.API.Security;
 using ERPm.API.Controllers.Base;
 using ERPm.Application.Common;
 using ERPm.Application.Common.Crud;
+using ERPm.Application.DTOs.Inventory;
 using ERPm.Application.DTOs.Sales;
+using ERPm.Application.Features.Inventory;
 using ERPm.Application.Features.Sales;
 using ERPm.Domain.Entities.Sales;
 using Microsoft.AspNetCore.Mvc;
@@ -20,9 +22,22 @@ public class SalesOrdersController : BaseCrudController<SalesOrder, SalesOrderDt
     private readonly IOrderWorkflow<SalesOrderDto> _workflow;
     private readonly IOrderApproval<SalesOrderDto> _approval;
     private readonly ISalesInvoiceService _invoicing;
-    public SalesOrdersController(IBaseCrudService<SalesOrder, SalesOrderDto, CreateSalesOrderRequest, UpdateSalesOrderRequest> service, IOrderWorkflow<SalesOrderDto> workflow, IOrderApproval<SalesOrderDto> approval, ISalesInvoiceService invoicing)
+    private readonly IStockService _stock;
+    public SalesOrdersController(IBaseCrudService<SalesOrder, SalesOrderDto, CreateSalesOrderRequest, UpdateSalesOrderRequest> service, IOrderWorkflow<SalesOrderDto> workflow, IOrderApproval<SalesOrderDto> approval, ISalesInvoiceService invoicing, IStockService stock)
         : base(service)
-    { _workflow = workflow; _approval = approval; _invoicing = invoicing; }
+    { _workflow = workflow; _approval = approval; _invoicing = invoicing; _stock = stock; }
+
+    /// <summary>Warehouses the order's branch may ship from, default first.</summary>
+    [RequirePermission(":view")]
+    [HttpGet("serving-warehouses")]
+    public async Task<ActionResult<ApiResponse<List<ServingWarehouseDto>>>> GetServingWarehouses([FromQuery] int branchId, CancellationToken cancellationToken)
+        => Ok(ApiResponse<List<ServingWarehouseDto>>.Ok(await _stock.GetServingWarehousesAsync(branchId, cancellationToken)));
+
+    /// <summary>Available stock of the given items in a warehouse serving the branch.</summary>
+    [RequirePermission(":view")]
+    [HttpGet("availability")]
+    public async Task<ActionResult<ApiResponse<List<StockAvailabilityDto>>>> GetAvailability([FromQuery] int branchId, [FromQuery] int warehouseId, [FromQuery] int[] itemIds, CancellationToken cancellationToken)
+        => Ok(ApiResponse<List<StockAvailabilityDto>>.Ok(await _stock.GetAvailabilityAsync(branchId, warehouseId, itemIds, cancellationToken)));
 
     /// <summary>
     /// Custom domain action: Confirms a sales order by its internal integer ID.

@@ -94,7 +94,13 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
             }
             var warehouse = await context.Warehouses.SingleOrDefaultAsync(w => w.Id == request.WarehouseId && w.IsActive && w.Branch!.IsActive, cancellationToken);
             Require(warehouse != null, "error.inventory.warehouse", 404);
-            Require(request.BranchId == null || request.BranchId == warehouse!.BranchId, "error.inventory.branch_mismatch");
+            // An order may ship from a serving warehouse of another branch of its company; a direct sale ships from its own branch.
+            var sellingBranchId = request.BranchId ?? warehouse!.BranchId;
+            if (sellingBranchId != warehouse!.BranchId)
+            {
+                Require(salesOrderId != null, "error.inventory.branch_mismatch");
+                await ServingWarehouses.RequireAsync(context, sellingBranchId, warehouse.Id, cancellationToken);
+            }
             var itemIds = request.Items.Select(i => i.ItemId).Distinct().Order().ToArray();
             foreach (var itemId in itemIds) await posting.LockSharedAsync($"item:{itemId}", cancellationToken);
             foreach (var itemId in itemIds) await posting.LockAsync($"stock:{warehouse!.Id}:{itemId}", cancellationToken);
@@ -108,7 +114,7 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
             var invoice = new SalesInvoice
             {
                 RequestId = request.RequestId, RequestHash = hash,
-                InvoiceNumber = await posting.NumberAsync("HD", cancellationToken), BranchId = warehouse!.BranchId, DepartmentId = request.DepartmentId,
+                InvoiceNumber = await posting.NumberAsync("HD", cancellationToken), BranchId = sellingBranchId, DepartmentId = request.DepartmentId,
                 WarehouseId = warehouse.Id, CustomerId = request.CustomerId, PaymentMethod = request.PaymentMethod,
                 CashFundId = request.CashFundId, BankAccountId = request.BankAccountId,
                 CustomerName = request.CustomerName.Trim(), DiscountAmount = request.DiscountAmount, Notes = request.Notes, Status = VoucherStatus.Posted, SalesOrderId = salesOrderId,
@@ -193,42 +199,54 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
                 PaymentMethod.Cash => "CASH",
                 _ => "DEBT"
             };
-            var revenueRule = await engine.ResolvePostingRuleAsync("SD", "SALES_REVENUE", warehouse.BranchId, dimensionKey, cancellationToken);
+            // Revenue, payment, receivable and VAT belong to the selling branch; the issue and its cost to the warehouse's branch.
+            var revenueRule = await engine.ResolvePostingRuleAsync("SD", "SALES_REVENUE", sellingBranchId, dimensionKey, cancellationToken);
             var journal = new JournalEntry
             {
                 VoucherNumber = await posting.NumberAsync("PKT", cancellationToken), VoucherType = "SALES_INVOICE",
-                BranchId = warehouse.BranchId, Description = invoice.InvoiceNumber, Status = VoucherStatus.Posted
+                BranchId = sellingBranchId, Description = invoice.InvoiceNumber, Status = VoucherStatus.Posted
             };
-            void Add(int accountId, decimal debit, decimal credit) => journal.Lines.Add(new JournalEntryLine
+            // Same branch: one entry as before. Another branch: the cost goes on its own balanced entry of that branch.
+            var costJournal = sellingBranchId == warehouse.BranchId ? journal : new JournalEntry
+            {
+                VoucherType = "STOCK_ISSUE", BranchId = warehouse.BranchId, Description = $"{invoice.InvoiceNumber} {issue.Code}", Status = VoucherStatus.Posted
+            };
+            void Add(int accountId, decimal debit, decimal credit, JournalEntry? target = null) => (target ?? journal).Lines.Add(new JournalEntryLine
             {
                 AccountId = accountId, DebitAmount = debit, CreditAmount = credit, PartnerId = customer?.Id, Description = invoice.InvoiceNumber
             });
             if (invoice.PaidAmount > 0)
             {
                 var paymentAccountId = request.PaymentMethod == PaymentMethod.BankTransfer
-                    ? await engine.ResolveBankAccountIdAsync(warehouse.BranchId, request.BankAccountId, cancellationToken)
-                    : await engine.ResolveCashAccountIdAsync(warehouse.BranchId, request.CashFundId, cancellationToken);
+                    ? await engine.ResolveBankAccountIdAsync(sellingBranchId, request.BankAccountId, cancellationToken)
+                    : await engine.ResolveCashAccountIdAsync(sellingBranchId, request.CashFundId, cancellationToken);
                 Add(paymentAccountId, invoice.PaidAmount, 0);
             }
             if (invoice.RemainingDebt > 0)
             {
-                var receivableAccountId = await engine.ResolveReceivableAccountIdAsync(warehouse.BranchId, customer?.Id, cancellationToken);
+                var receivableAccountId = await engine.ResolveReceivableAccountIdAsync(sellingBranchId, customer?.Id, cancellationToken);
                 Add(receivableAccountId, invoice.RemainingDebt, 0);
             }
             if (netAmount > 0) Add(revenueRule.CreditAccountId, 0, netAmount);
             if (invoice.TaxAmount > 0)
             {
-                var vatRule = await engine.ResolvePostingRuleAsync("SD", "SALES_VAT", warehouse.BranchId, null, cancellationToken);
+                var vatRule = await engine.ResolvePostingRuleAsync("SD", "SALES_VAT", sellingBranchId, null, cancellationToken);
                 Add(vatRule.CreditAccountId, 0, invoice.TaxAmount);
             }
             if (issue.TotalCostAmount > 0)
             {
                 var cogsRule = await engine.ResolvePostingRuleAsync("SD", "SALES_COGS", warehouse.BranchId, null, cancellationToken);
-                Add(cogsRule.DebitAccountId, issue.TotalCostAmount, 0);
-                Add(cogsRule.CreditAccountId, 0, issue.TotalCostAmount);
+                Add(cogsRule.DebitAccountId, issue.TotalCostAmount, 0, costJournal);
+                Add(cogsRule.CreditAccountId, 0, issue.TotalCostAmount, costJournal);
             }
             await engine.ValidateJournalAsync(journal, cancellationToken);
             invoice.JournalEntry = journal;
+            if (costJournal != journal && costJournal.Lines.Count > 0)
+            {
+                costJournal.VoucherNumber = await posting.NumberAsync("PKT", cancellationToken);
+                await engine.ValidateJournalAsync(costJournal, cancellationToken);
+                context.JournalEntries.Add(costJournal);
+            }
             context.SalesInvoices.Add(invoice);
             await context.SaveChangesAsync(cancellationToken);
             return Map(await LoadAsync(invoice.Id, cancellationToken));
