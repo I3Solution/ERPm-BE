@@ -16,6 +16,7 @@ public static class PermissionCatalog
     public const string Confirm = "confirm";
     public const string Cancel = "cancel";
     public const string ApproveCredit = "approve_credit";
+    public const string RejectCredit = "reject_credit";
     public const string Submit = "submit";
     public const string Withdraw = "withdraw";
     public const string Approve = "approve";
@@ -48,7 +49,7 @@ public static class PermissionCatalog
         ("wms:receipt", [Create]),
         ("sd:pricelist", PriceListVerbs),
         ("sd:quotation", [View, Create, Edit, Delete]),
-        ("sd:order", [View, Create, Edit, Delete, Confirm, ApproveCredit, Cancel]),
+        ("sd:order", [View, Create, Edit, Delete, Confirm, ApproveCredit, RejectCredit, Cancel]),
         ("sd:invoice", [View, Create, Cancel]),
         ("sd:return", [View, Create]),
         ("sd:report", [View]),

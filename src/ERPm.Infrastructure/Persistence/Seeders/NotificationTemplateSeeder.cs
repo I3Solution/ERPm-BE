@@ -116,6 +116,30 @@ public static class NotificationTemplateSeeder
             },
             new()
             {
+                Code = "SD_ORDER_CREDIT_REJECTED",
+                Name = "Đơn hàng bị từ chối duyệt công nợ",
+                Category = NotificationCategory.SD,
+                DefaultSeverity = NotificationSeverity.WARNING,
+                SupportedChannels = [NotificationChannel.InApp, NotificationChannel.PushMobile],
+                TitleTemplate = "Đơn hàng {order_code} bị từ chối duyệt công nợ",
+                BodyTemplate = "Đơn {order_code} của khách hàng {customer_name} bị từ chối duyệt vượt hạn mức và trả về nháp. Lý do: {reason}.",
+                ActionUrlPattern = "/sales/orders",
+                Translations = new Dictionary<string, NotificationTemplateTranslation>
+                {
+                    ["vi"] = new()
+                    {
+                        Title = "Đơn hàng {order_code} bị từ chối duyệt công nợ",
+                        Body = "Đơn {order_code} của khách hàng {customer_name} bị từ chối duyệt vượt hạn mức và trả về nháp. Lý do: {reason}."
+                    },
+                    ["en"] = new()
+                    {
+                        Title = "Order {order_code} credit rejected",
+                        Body = "Order {order_code} of customer {customer_name} was rejected beyond the credit limit and returned to draft. Reason: {reason}."
+                    }
+                }
+            },
+            new()
+            {
                 Code = "SD_ORDER_CANCELLED",
                 Name = "Đơn hàng bị hủy",
                 Category = NotificationCategory.SD,
