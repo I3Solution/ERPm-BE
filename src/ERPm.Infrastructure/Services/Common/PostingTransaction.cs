@@ -23,10 +23,14 @@ public sealed class PostingTransaction(ApplicationDbContext context)
         });
 
     public Task LockAsync(string key, CancellationToken ct) =>
-        context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", ct);
+        context.Database.IsRelational()
+            ? context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", ct)
+            : Task.CompletedTask;
 
     public Task LockSharedAsync(string key, CancellationToken ct) =>
-        context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock_shared(hashtextextended({key}, 0))", ct);
+        context.Database.IsRelational()
+            ? context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock_shared(hashtextextended({key}, 0))", ct)
+            : Task.CompletedTask;
 
     /// <summary>
     /// Receivables of a customer: unpaid posted invoices minus posted sales returns settled against the debt.

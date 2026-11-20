@@ -4,16 +4,24 @@ public class SalesOrderItemDto
 {
     public int Id { get; set; }
     public int ItemId { get; set; }
+    public int? UomId { get; set; }
     public string ItemCode { get; set; } = string.Empty;
     public string ItemName { get; set; } = string.Empty;
     public string? UnitName { get; set; }
     public decimal Quantity { get; set; }
+    public decimal OriginalPrice { get; set; }
     public decimal UnitPrice { get; set; }
+    public decimal DiscountPercent { get; set; }
+    public decimal FixedDiscountAmount { get; set; }
     public decimal DiscountAmount { get; set; }
     public decimal LineTotal { get; set; }
     public decimal VatRate { get; set; }
     public decimal TaxAmount { get; set; }
     public decimal InvoicedQuantity { get; set; }
+    public int? AppliedPriceListId { get; set; }
+    public string? AppliedPriceListName { get; set; }
+    public int? AppliedPriceListVersionId { get; set; }
+    public string? AppliedVersionCode { get; set; }
 }
 
 public class SalesOrderDto
@@ -55,6 +63,7 @@ public class SalesOrderDto
     public int? SalespersonId { get; set; }
     public string? SalespersonName { get; set; }
     public int? PriceListId { get; set; }
+    public string? PriceListName { get; set; }
 
     public List<SalesOrderItemDto> Items { get; set; } = new();
 }
@@ -62,14 +71,20 @@ public class SalesOrderDto
 public class CreateSalesOrderItemRequest
 {
     public int ItemId { get; set; }
+    public int? UomId { get; set; }
     public string ItemCode { get; set; } = string.Empty;
     public string ItemName { get; set; } = string.Empty;
     public string? UnitName { get; set; }
     public decimal Quantity { get; set; }
     public decimal UnitPrice { get; set; }
+    public decimal DiscountPercent { get; set; } = 0m;
+    public decimal FixedDiscountAmount { get; set; } = 0m;
     public decimal DiscountAmount { get; set; } = 0m;
     /// <summary>VAT percentage of the line (0 to 100). Entered on the line until items carry their own rate.</summary>
     public decimal VatRate { get; set; } = 0m;
+    public int? AppliedPriceListId { get; set; }
+    public int? AppliedPriceListVersionId { get; set; }
+    public bool IsPriceOverridden { get; set; } = false;
     public decimal LineTotal => (Quantity * UnitPrice) - DiscountAmount;
 }
 
@@ -97,6 +112,9 @@ public class CreateSalesOrderRequest
     public int? DeliveryAddressId { get; set; }
     public int? QuotationId { get; set; }
     public int? SalespersonId { get; set; }
+    public int? PriceListId { get; set; }
+    /// <summary>When true (or when PriceListId is specified), the server recalculates non-overridden lines from active price lists.</summary>
+    public bool ApplyPriceList { get; set; } = false;
 
     public List<CreateSalesOrderItemRequest> Items { get; set; } = new();
 }

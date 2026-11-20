@@ -75,6 +75,7 @@ public class SalesOrder : BaseAuditableEntity
     public virtual PartnerEntity? Customer { get; set; }
     public virtual SalesQuotation? Quotation { get; set; }
     public virtual Employee? Salesperson { get; set; }
+    public virtual PriceList? PriceList { get; set; }
     public virtual Warehouse? Warehouse { get; set; }
     public virtual ICollection<SalesOrderItem> Items { get; set; } = new List<SalesOrderItem>();
 }
@@ -97,17 +98,27 @@ public class SalesOrderItem : BaseEntity
 {
     public int SalesOrderId { get; set; }
     public int ItemId { get; set; }
+    public int? UomId { get; set; }
     public string ItemCode { get; set; } = string.Empty;
     public string ItemName { get; set; } = string.Empty;
     public string? UnitName { get; set; }
 
     public decimal Quantity { get; set; } = 0m;
+    public decimal OriginalPrice { get; set; } = 0m;       // Catalog price snapshot, decimal(18, 4)
     public decimal UnitPrice { get; set; } = 0m;
+    public decimal DiscountPercent { get; set; } = 0m;     // Applied percentage discount snapshot, decimal(18, 4)
+    public decimal FixedDiscountAmount { get; set; } = 0m; // Applied fixed discount per line snapshot, decimal(18, 4)
     public decimal DiscountAmount { get; set; } = 0m;
     public decimal LineTotal { get; set; } = 0m;           // Quantity x price minus the line discount, before VAT
     public decimal VatRate { get; set; } = 0m;             // VAT percentage of this line, 0 to 100
     public decimal TaxAmount { get; set; } = 0m;           // VAT of this line, decimal(18, 4)
     public decimal InvoicedQuantity { get; set; } = 0m;    // Quantity already invoiced, decimal(18, 4)
+
+    // Snapshot of the price list and version applied when the order line was priced.
+    public int? AppliedPriceListId { get; set; }
+    public string? AppliedPriceListName { get; set; }
+    public int? AppliedPriceListVersionId { get; set; }
+    public string? AppliedVersionCode { get; set; }
 
     // Navigation
     public virtual SalesOrder? SalesOrder { get; set; }

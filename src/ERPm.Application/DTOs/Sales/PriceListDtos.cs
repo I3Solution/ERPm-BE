@@ -20,6 +20,7 @@ public class PriceListItemDto
     public decimal UnitPrice { get; set; }
     public decimal MinQuantity { get; set; }
     public decimal DiscountPercent { get; set; }
+    public decimal DiscountAmount { get; set; }
 }
 
 public class PriceListDetailDto
@@ -43,9 +44,11 @@ public class PriceListDetailDto
 public class PriceListLineRequest
 {
     public int ItemId { get; set; }
+    public int? UomId { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal MinQuantity { get; set; }
     public decimal DiscountPercent { get; set; }
+    public decimal DiscountAmount { get; set; }
 }
 
 public class CreatePriceListRequest
@@ -70,11 +73,13 @@ public class UpdatePriceListRequest : CreatePriceListRequest
 public class CalculatePriceLineRequest
 {
     public int ItemId { get; set; }
+    public int? UomId { get; set; }
     public decimal Quantity { get; set; }
 }
 
 public class CalculatePriceRequest
 {
+    public int? PriceListId { get; set; }
     public int? CustomerId { get; set; }
     public int BranchId { get; set; }
     public DateTime? DocumentDate { get; set; }
@@ -84,6 +89,7 @@ public class CalculatePriceRequest
 public class CalculatePriceLineDto
 {
     public int ItemId { get; set; }
+    public int? UomId { get; set; }
     public int? AppliedPriceListId { get; set; }
     public string? AppliedPriceListName { get; set; }
     public int? AppliedPriceListVersionId { get; set; }
@@ -91,6 +97,7 @@ public class CalculatePriceLineDto
     public decimal OriginalPrice { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal DiscountPercent { get; set; }
+    public decimal FixedDiscountAmount { get; set; }
     public decimal DiscountAmount { get; set; }
     public decimal LineTotal { get; set; }
     public decimal VatRate { get; set; }
@@ -171,6 +178,7 @@ public class CreatePriceListItemRequest
     public decimal UnitPrice { get; set; }
     public decimal MinQuantity { get; set; }
     public decimal DiscountPercent { get; set; }
+    public decimal DiscountAmount { get; set; }
 }
 
 public class UpdatePriceListItemRequest
@@ -180,6 +188,7 @@ public class UpdatePriceListItemRequest
     public decimal UnitPrice { get; set; }
     public decimal MinQuantity { get; set; }
     public decimal DiscountPercent { get; set; }
+    public decimal DiscountAmount { get; set; }
 }
 
 public class ClonePriceListVersionRequest
