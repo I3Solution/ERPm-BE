@@ -3299,6 +3299,13 @@ namespace ERPm.Infrastructure.Persistence.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<decimal>("DiscountAmount")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasDefaultValue(0m)
+                        .HasColumnName("discount_amount");
+
                     b.Property<decimal>("DiscountPercent")
                         .HasPrecision(18, 4)
                         .HasColumnType("numeric(18,4)")
@@ -3353,7 +3360,7 @@ namespace ERPm.Infrastructure.Persistence.Migrations
 
                     b.ToTable("tbl_SD_PriceListItem", null, t =>
                         {
-                            t.HasCheckConstraint("CK_tbl_SD_PriceListItem_Values", "unit_price >= 0 AND min_quantity >= 0 AND discount_percent BETWEEN 0 AND 100");
+                            t.HasCheckConstraint("CK_tbl_SD_PriceListItem_Values", "unit_price >= 0 AND min_quantity >= 0 AND discount_percent BETWEEN 0 AND 100 AND discount_amount >= 0");
                         });
                 });
 
@@ -4130,14 +4137,46 @@ namespace ERPm.Infrastructure.Persistence.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("AppliedPriceListId")
+                        .HasColumnType("integer")
+                        .HasColumnName("applied_price_list_id");
+
+                    b.Property<string>("AppliedPriceListName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("applied_price_list_name");
+
+                    b.Property<int?>("AppliedPriceListVersionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("applied_price_list_version_id");
+
+                    b.Property<string>("AppliedVersionCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("applied_version_code");
+
                     b.Property<decimal>("DiscountAmount")
                         .HasPrecision(18, 4)
                         .HasColumnType("numeric(18,4)")
                         .HasColumnName("discount_amount");
 
+                    b.Property<decimal>("DiscountPercent")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasDefaultValue(0m)
+                        .HasColumnName("discount_percent");
+
                     b.Property<Guid>("ExternalId")
                         .HasColumnType("uuid")
                         .HasColumnName("external_id");
+
+                    b.Property<decimal>("FixedDiscountAmount")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasDefaultValue(0m)
+                        .HasColumnName("fixed_discount_amount");
 
                     b.Property<decimal>("InvoicedQuantity")
                         .HasPrecision(18, 4)
@@ -4165,6 +4204,13 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("numeric(18,4)")
                         .HasColumnName("line_total");
 
+                    b.Property<decimal>("OriginalPrice")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasDefaultValue(0m)
+                        .HasColumnName("original_price");
+
                     b.Property<decimal>("Quantity")
                         .HasPrecision(18, 4)
                         .HasColumnType("numeric(18,4)")
@@ -4188,6 +4234,10 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasPrecision(18, 4)
                         .HasColumnType("numeric(18,4)")
                         .HasColumnName("unit_price");
+
+                    b.Property<int?>("UomId")
+                        .HasColumnType("integer")
+                        .HasColumnName("uom_id");
 
                     b.Property<decimal>("VatRate")
                         .HasPrecision(5, 2)
@@ -6805,7 +6855,7 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_tbl_sale_order_tbl_hrm_department_department_id");
 
-                    b.HasOne("ERPm.Domain.Entities.Sales.PriceList", null)
+                    b.HasOne("ERPm.Domain.Entities.Sales.PriceList", "PriceList")
                         .WithMany()
                         .HasForeignKey("PriceListId")
                         .OnDelete(DeleteBehavior.SetNull)
@@ -6832,6 +6882,8 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     b.Navigation("Branch");
 
                     b.Navigation("Customer");
+
+                    b.Navigation("PriceList");
 
                     b.Navigation("Quotation");
 

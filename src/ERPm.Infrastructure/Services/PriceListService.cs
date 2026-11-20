@@ -149,7 +149,8 @@ public sealed class PriceListService(
         UnitName = item.Uom?.Name ?? item.Item?.BaseUom?.Name,
         UnitPrice = item.UnitPrice,
         MinQuantity = item.MinQuantity,
-        DiscountPercent = item.DiscountPercent
+        DiscountPercent = item.DiscountPercent,
+        DiscountAmount = item.DiscountAmount
     };
 
     private static PriceListVersionDto MapVersion(PriceListVersion version) => new()
@@ -203,9 +204,11 @@ public sealed class PriceListService(
                 Items = (request.Items ?? []).Select(l => new PriceListItem
                 {
                     ItemId = l.ItemId,
+                    UomId = l.UomId,
                     UnitPrice = l.UnitPrice,
                     MinQuantity = l.MinQuantity,
-                    DiscountPercent = l.DiscountPercent
+                    DiscountPercent = l.DiscountPercent,
+                    DiscountAmount = l.DiscountAmount
                 }).ToList()
             }
         }
@@ -272,6 +275,17 @@ public sealed class PriceListService(
         var documentDate = request.DocumentDate ?? DateTime.UtcNow;
         Require(documentDate.Kind == DateTimeKind.Utc, "error.validation.request");
 
+        if (request.PriceListId.HasValue)
+        {
+            var validExplicit = await Context.PriceLists.AnyAsync(
+                p => p.Id == request.PriceListId.Value
+                    && p.IsActive
+                    && p.Type == PriceListType.Sales
+                    && (p.BranchId == null || p.BranchId == request.BranchId),
+                ct);
+            Require(validExplicit, "error.validation.reference");
+        }
+
         int? customerListId = null;
         if (request.CustomerId.HasValue)
         {
@@ -283,9 +297,13 @@ public sealed class PriceListService(
 
         var itemIds = request.Items.Select(i => i.ItemId).Distinct().ToArray();
         var catalog = await Context.Items.Where(i => itemIds.Contains(i.Id) && i.IsActive)
-            .ToDictionaryAsync(i => i.Id, i => new { i.SalePrice, i.VatRate }, ct);
+            .ToDictionaryAsync(i => i.Id, i => new { i.SalePrice, i.VatRate, i.BaseUomId }, ct);
         Require(catalog.Count == itemIds.Length, "error.inventory.item");
         foreach (var item in catalog.Values) Require(item.VatRate is >= 0m and <= 100m, "error.validation.number");
+
+        var uomIds = request.Items.Where(i => i.UomId.HasValue).Select(i => i.UomId!.Value).Distinct().ToArray();
+        if (uomIds.Length > 0)
+            Require(await Context.UnitsOfMeasure.CountAsync(u => uomIds.Contains(u.Id) && u.IsActive, ct) == uomIds.Length, "error.validation.reference");
 
         var eligibleVersions = await Context.PriceListVersions
             .Where(v => v.Status == PriceListVersionStatus.Active
@@ -313,30 +331,43 @@ public sealed class PriceListService(
             .ToList();
         var versionIds = selectedVersions.Select(v => v.VersionId).ToArray();
         var lines = await Context.PriceListItems
-            .Where(l => versionIds.Contains(l.PriceListVersionId) && itemIds.Contains(l.ItemId) && l.UomId == null)
-            .Select(l => new { l.PriceListVersionId, l.ItemId, Tier = new PriceTier(l.MinQuantity, l.UnitPrice, l.DiscountPercent) })
+            .Where(l => versionIds.Contains(l.PriceListVersionId) && itemIds.Contains(l.ItemId))
+            .Select(l => new
+            {
+                l.PriceListVersionId,
+                l.ItemId,
+                l.UomId,
+                Tier = new PriceTier(l.MinQuantity, l.UnitPrice, l.DiscountPercent, l.DiscountAmount)
+            })
             .ToListAsync(ct);
 
         var response = new CalculatePriceResponse { DocumentDate = documentDate };
         foreach (var line in request.Items)
         {
-            var candidates = selectedVersions
-                .Select(v => new PriceCandidate(
-                    v.PriceListId,
-                    v.PriceListName,
-                    v.PriceListId == customerListId,
-                    v.BranchId != null,
-                    v.PriceListEffectiveFrom,
-                    lines.Where(l => l.PriceListVersionId == v.VersionId && l.ItemId == line.ItemId).Select(l => l.Tier).ToList(),
-                    v.VersionId,
-                    v.VersionCode,
-                    v.IsTaxInclusive))
-                .Where(c => c.Tiers.Count > 0);
             var item = catalog[line.ItemId];
+            var candidates = selectedVersions
+                .Select(v =>
+                {
+                    var versionItemLines = lines.Where(l => l.PriceListVersionId == v.VersionId && l.ItemId == line.ItemId).ToList();
+                    var matchingTiers = MatchTiersForUom(versionItemLines.Select(l => (l.UomId, l.Tier)), line.UomId, item.BaseUomId);
+                    return new PriceCandidate(
+                        v.PriceListId,
+                        v.PriceListName,
+                        v.PriceListId == customerListId,
+                        v.BranchId != null,
+                        v.PriceListEffectiveFrom,
+                        matchingTiers,
+                        v.VersionId,
+                        v.VersionCode,
+                        v.IsTaxInclusive,
+                        IsExplicit: request.PriceListId.HasValue && v.PriceListId == request.PriceListId.Value);
+                })
+                .Where(c => c.Tiers.Count > 0);
             var result = PricingEngine.Price(item.SalePrice, line.Quantity, candidates, item.VatRate);
             response.Items.Add(new CalculatePriceLineDto
             {
                 ItemId = line.ItemId,
+                UomId = line.UomId,
                 AppliedPriceListId = result.AppliedPriceListId,
                 AppliedPriceListName = result.AppliedPriceListName,
                 AppliedPriceListVersionId = result.AppliedPriceListVersionId,
@@ -344,6 +375,7 @@ public sealed class PriceListService(
                 OriginalPrice = result.OriginalPrice,
                 UnitPrice = result.UnitPrice,
                 DiscountPercent = result.DiscountPercent,
+                FixedDiscountAmount = result.FixedDiscountAmount,
                 DiscountAmount = result.DiscountAmount,
                 LineTotal = result.LineTotal,
                 VatRate = result.VatRate,
@@ -353,6 +385,27 @@ public sealed class PriceListService(
             });
         }
         return response;
+    }
+
+    private static List<PriceTier> MatchTiersForUom(IEnumerable<(int? UomId, PriceTier Tier)> entries, int? requestedUomId, int? baseUomId)
+    {
+        var list = entries.ToList();
+        if (list.Count == 0) return [];
+
+        if (requestedUomId.HasValue)
+        {
+            var exact = list.Where(e => e.UomId == requestedUomId.Value).Select(e => e.Tier).ToList();
+            if (exact.Count > 0) return exact;
+            if (baseUomId.HasValue && requestedUomId.Value == baseUomId.Value)
+                return list.Where(e => e.UomId == null).Select(e => e.Tier).ToList();
+            return [];
+        }
+
+        var baseNull = list.Where(e => e.UomId == null).Select(e => e.Tier).ToList();
+        if (baseNull.Count > 0) return baseNull;
+        if (baseUomId.HasValue)
+            return list.Where(e => e.UomId == baseUomId.Value).Select(e => e.Tier).ToList();
+        return [];
     }
 
     public async Task<List<PriceListVersionDto>> GetVersionsAsync(int priceListId, CancellationToken ct = default)
@@ -445,9 +498,11 @@ public sealed class PriceListService(
                 Items = lines.Select(l => new PriceListItem
                 {
                     ItemId = l.ItemId,
+                    UomId = l.UomId,
                     UnitPrice = l.UnitPrice,
                     MinQuantity = l.MinQuantity,
-                    DiscountPercent = l.DiscountPercent
+                    DiscountPercent = l.DiscountPercent,
+                    DiscountAmount = l.DiscountAmount
                 }).ToList()
             };
 
@@ -748,7 +803,7 @@ public sealed class PriceListService(
 
     public async Task<PriceListItemDto> AddVersionItemAsync(int priceListId, int versionId, CreatePriceListItemRequest request, CancellationToken ct = default)
     {
-        ValidateLineValues(request.UnitPrice, request.MinQuantity, request.DiscountPercent);
+        ValidateLineValues(request.UnitPrice, request.MinQuantity, request.DiscountPercent, request.DiscountAmount);
 
         var lineId = await RunInLockAsync(priceListId, async () =>
         {
@@ -764,7 +819,8 @@ public sealed class PriceListService(
                 UomId = request.UomId,
                 UnitPrice = request.UnitPrice,
                 MinQuantity = request.MinQuantity,
-                DiscountPercent = request.DiscountPercent
+                DiscountPercent = request.DiscountPercent,
+                DiscountAmount = request.DiscountAmount
             };
 
             Context.PriceListItems.Add(line);
@@ -779,7 +835,7 @@ public sealed class PriceListService(
 
     public async Task<PriceListItemDto> UpdateVersionItemAsync(int priceListId, int versionId, int itemId, UpdatePriceListItemRequest request, CancellationToken ct = default)
     {
-        ValidateLineValues(request.UnitPrice, request.MinQuantity, request.DiscountPercent);
+        ValidateLineValues(request.UnitPrice, request.MinQuantity, request.DiscountPercent, request.DiscountAmount);
 
         await RunInLockAsync(priceListId, async () =>
         {
@@ -796,6 +852,7 @@ public sealed class PriceListService(
             line.UnitPrice = request.UnitPrice;
             line.MinQuantity = request.MinQuantity;
             line.DiscountPercent = request.DiscountPercent;
+            line.DiscountAmount = request.DiscountAmount;
             version.LastModifiedAtUtc = DateTime.UtcNow;
             return true;
         }, ct);
@@ -845,7 +902,8 @@ public sealed class PriceListService(
                     UomId = i.UomId,
                     UnitPrice = i.UnitPrice,
                     MinQuantity = i.MinQuantity,
-                    DiscountPercent = i.DiscountPercent
+                    DiscountPercent = i.DiscountPercent,
+                    DiscountAmount = i.DiscountAmount
                 }).ToList()
             };
             Context.PriceListVersions.Add(clone);
@@ -1120,22 +1178,26 @@ public sealed class PriceListService(
         return version;
     }
 
-    private static void ValidateLineValues(decimal unitPrice, decimal minQuantity, decimal discountPercent)
+    private static void ValidateLineValues(decimal unitPrice, decimal minQuantity, decimal discountPercent, decimal discountAmount = 0m)
     {
         ValidateNumber(unitPrice);
         ValidateNumber(minQuantity);
         ValidateNumber(discountPercent);
         Require(discountPercent <= 100, "error.validation.number");
+        ValidateNumber(discountAmount);
     }
 
     private async Task ValidateLinesAsync(IReadOnlyCollection<PriceListLineRequest> lines, CancellationToken ct)
     {
         Require(lines.Count <= MaxLines, "error.validation.request");
-        foreach (var line in lines) ValidateLineValues(line.UnitPrice, line.MinQuantity, line.DiscountPercent);
-        Require(lines.Select(l => (l.ItemId, l.MinQuantity)).Distinct().Count() == lines.Count, "error.validation.request");
+        foreach (var line in lines) ValidateLineValues(line.UnitPrice, line.MinQuantity, line.DiscountPercent, line.DiscountAmount);
+        Require(lines.Select(l => (l.ItemId, l.UomId, l.MinQuantity)).Distinct().Count() == lines.Count, "error.validation.request");
         var itemIds = lines.Select(l => l.ItemId).Distinct().ToArray();
         if (itemIds.Length > 0)
             Require(await Context.Items.CountAsync(i => itemIds.Contains(i.Id) && i.IsActive, ct) == itemIds.Length, "error.inventory.item");
+        var uomIds = lines.Where(l => l.UomId.HasValue).Select(l => l.UomId!.Value).Distinct().ToArray();
+        if (uomIds.Length > 0)
+            Require(await Context.UnitsOfMeasure.CountAsync(u => uomIds.Contains(u.Id) && u.IsActive, ct) == uomIds.Length, "error.validation.reference");
     }
 
     private async Task EnsureItemAndUomValidAsync(int itemId, int? uomId, CancellationToken ct)

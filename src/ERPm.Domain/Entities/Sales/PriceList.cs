@@ -110,6 +110,7 @@ public class PriceListItem : BaseEntity
     public decimal UnitPrice { get; set; } = 0m;           // decimal(18, 4)
     public decimal MinQuantity { get; set; } = 0m;         // Tier threshold, decimal(18, 4)
     public decimal DiscountPercent { get; set; } = 0m;     // 0..100, decimal(18, 4)
+    public decimal DiscountAmount { get; set; } = 0m;      // Fixed discount per line, decimal(18, 4)
 
     // Navigation
     public virtual PriceListVersion? PriceListVersion { get; set; }

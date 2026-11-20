@@ -21,9 +21,9 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
     private static readonly string[] CommittedStatuses = [SalesOrderStatus.Confirmed, SalesOrderStatus.Processing];
 
     // A list row needs no lines: they are what makes the order list heavy, so a summary request does not load them.
-    protected override IQueryable<SalesOrder> PrepareSummaryQuery(IQueryable<SalesOrder> query) => query.Include(o => o.Salesperson).Include(o => o.Quotation);
-    protected override IQueryable<SalesOrder> PrepareQuery(IQueryable<SalesOrder> query) => query.Include(o => o.Items).Include(o => o.Salesperson).Include(o => o.Quotation).Include(o => o.Warehouse);
-    protected override Task<SalesOrder?> FindEntityAsync(int id, CancellationToken ct) => Context.Set<SalesOrder>().Include(o => o.Items).Include(o => o.Salesperson).Include(o => o.Quotation).Include(o => o.Warehouse).SingleOrDefaultAsync(o => o.Id == id, ct);
+    protected override IQueryable<SalesOrder> PrepareSummaryQuery(IQueryable<SalesOrder> query) => query.Include(o => o.Salesperson).Include(o => o.Quotation).Include(o => o.PriceList);
+    protected override IQueryable<SalesOrder> PrepareQuery(IQueryable<SalesOrder> query) => query.Include(o => o.Items).Include(o => o.Salesperson).Include(o => o.Quotation).Include(o => o.Warehouse).Include(o => o.PriceList);
+    protected override Task<SalesOrder?> FindEntityAsync(int id, CancellationToken ct) => Context.Set<SalesOrder>().Include(o => o.Items).Include(o => o.Salesperson).Include(o => o.Quotation).Include(o => o.Warehouse).Include(o => o.PriceList).SingleOrDefaultAsync(o => o.Id == id, ct);
     protected override IQueryable<SalesOrder> ApplyFilters(IQueryable<SalesOrder> query, BaseFilterQuery filter)
     {
         query = base.ApplyFilters(query, filter);
@@ -38,11 +38,14 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
         Status = o.Status, CreditCheckStatus = o.CreditCheckStatus, ReservationStatus = o.ReservationStatus, CreditApprovalReason = o.CreditApprovalReason, CreditApprovedBy = o.CreditApprovedBy, CreditApprovedAtUtc = o.CreditApprovedAtUtc, Notes = o.Notes,
         ExpectedDeliveryDate = o.ExpectedDeliveryDate, DeliveryAddress = o.DeliveryAddress, DeliveryAddressId = o.DeliveryAddressId,
         DeliveryRecipientName = o.DeliveryRecipientName, DeliveryPhone = o.DeliveryPhone, DeliveryAddressText = o.DeliveryAddressText, QuotationId = o.QuotationId, QuotationNumber = o.Quotation?.QuotationNumber,
-        SalespersonId = o.SalespersonId, SalespersonName = o.Salesperson?.FullName, PriceListId = o.PriceListId,
+        SalespersonId = o.SalespersonId, SalespersonName = o.Salesperson?.FullName, PriceListId = o.PriceListId, PriceListName = o.PriceList?.Name,
         Items = o.Items.OrderBy(i => i.Id).Select(i => new SalesOrderItemDto
         {
-            Id = i.Id, ItemId = i.ItemId, ItemCode = i.ItemCode, ItemName = i.ItemName, UnitName = i.UnitName, Quantity = i.Quantity,
-            UnitPrice = i.UnitPrice, DiscountAmount = i.DiscountAmount, LineTotal = i.LineTotal, VatRate = i.VatRate, TaxAmount = i.TaxAmount, InvoicedQuantity = i.InvoicedQuantity
+            Id = i.Id, ItemId = i.ItemId, UomId = i.UomId, ItemCode = i.ItemCode, ItemName = i.ItemName, UnitName = i.UnitName, Quantity = i.Quantity,
+            OriginalPrice = i.OriginalPrice, UnitPrice = i.UnitPrice, DiscountPercent = i.DiscountPercent, FixedDiscountAmount = i.FixedDiscountAmount,
+            DiscountAmount = i.DiscountAmount, LineTotal = i.LineTotal, VatRate = i.VatRate, TaxAmount = i.TaxAmount, InvoicedQuantity = i.InvoicedQuantity,
+            AppliedPriceListId = i.AppliedPriceListId, AppliedPriceListName = i.AppliedPriceListName,
+            AppliedPriceListVersionId = i.AppliedPriceListVersionId, AppliedVersionCode = i.AppliedVersionCode
         }).ToList()
     };
     // The branch name is looked up apart: see BranchNames.
@@ -333,22 +336,141 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
         Require(request.DeliveryAddress == null || request.DeliveryAddress.Length <= 500, "error.validation.request");
         var partner = request.CustomerId.HasValue ? await Context.Partners.SingleOrDefaultAsync(p => p.Id == request.CustomerId && p.IsActive, ct) : null;
         Require(!request.CustomerId.HasValue || partner != null && partner.PartnerType.HasFlag(PartnerType.Customer), "error.sales.customer");
+        if (request.PriceListId.HasValue)
+        {
+            var validPriceList = await Context.PriceLists.AnyAsync(
+                p => p.Id == request.PriceListId.Value
+                    && p.IsActive
+                    && p.Type == PriceListType.Sales
+                    && (p.BranchId == null || p.BranchId == request.BranchId),
+                ct);
+            Require(validPriceList, "error.validation.reference");
+        }
+        if (request.OrderDate.HasValue)
+        {
+            Require(request.OrderDate.Value.Kind == DateTimeKind.Utc, "error.validation.request");
+            entity.OrderDate = request.OrderDate.Value;
+        }
         var ids = request.Items.Select(i => i.ItemId).Distinct().ToArray();
         var items = await Context.Items.Include(i => i.BaseUom).Where(i => ids.Contains(i.Id) && i.IsActive).ToDictionaryAsync(i => i.Id, ct);
         Require(items.Count == ids.Length, "error.inventory.item");
-        entity.Items = request.Items.Select(line =>
+        var uomIds = request.Items.Where(i => i.UomId.HasValue).Select(i => i.UomId!.Value).Distinct().ToArray();
+        var uoms = uomIds.Length > 0
+            ? await Context.UnitsOfMeasure.Where(u => uomIds.Contains(u.Id) && u.IsActive).ToDictionaryAsync(u => u.Id, ct)
+            : new Dictionary<int, UnitOfMeasure>();
+        Require(uoms.Count == uomIds.Length, "error.validation.reference");
+
+        var shouldCalculate = request.PriceListId.HasValue
+            || request.ApplyPriceList
+            || request.Items.Any(l => !l.IsPriceOverridden && l.AppliedPriceListId.HasValue);
+        CalculatePriceResponse? calculated = null;
+        if (shouldCalculate)
         {
-            ValidateNumber(line.Quantity, true); ValidateNumber(line.UnitPrice);
+            foreach (var line in request.Items) ValidateNumber(line.Quantity, true);
+            var pricingService = new PriceListService(Context, posting, currentUser, iam, notificationEngine);
+            calculated = await pricingService.CalculateAsync(new CalculatePriceRequest
+            {
+                PriceListId = request.PriceListId,
+                CustomerId = partner?.Id,
+                BranchId = request.BranchId,
+                DocumentDate = entity.OrderDate,
+                Items = request.Items.Select(l => new CalculatePriceLineRequest
+                {
+                    ItemId = l.ItemId,
+                    UomId = l.UomId,
+                    Quantity = l.Quantity
+                }).ToList()
+            }, ct);
+        }
+
+        entity.Items = request.Items.Select((line, index) =>
+        {
+            ValidateNumber(line.Quantity, true);
+            var item = items[line.ItemId];
+            var unitName = line.UomId.HasValue ? uoms[line.UomId.Value].Name : item.BaseUom?.Name;
+            if (calculated != null && !line.IsPriceOverridden)
+            {
+                var calc = calculated.Items[index];
+                if (calc.AppliedPriceListId.HasValue)
+                {
+                    var vatRate = line.VatRate != 0m ? line.VatRate : calc.VatRate;
+                    return new SalesOrderItem
+                    {
+                        ItemId = item.Id,
+                        UomId = line.UomId,
+                        ItemCode = item.Code,
+                        ItemName = item.Name,
+                        UnitName = unitName,
+                        Quantity = line.Quantity,
+                        OriginalPrice = calc.OriginalPrice,
+                        UnitPrice = calc.UnitPrice,
+                        DiscountPercent = calc.DiscountPercent,
+                        FixedDiscountAmount = calc.FixedDiscountAmount,
+                        DiscountAmount = calc.DiscountAmount,
+                        LineTotal = calc.LineTotal,
+                        VatRate = vatRate,
+                        TaxAmount = Round(calc.LineTotal * vatRate / 100m),
+                        AppliedPriceListId = calc.AppliedPriceListId,
+                        AppliedPriceListName = calc.AppliedPriceListName,
+                        AppliedPriceListVersionId = calc.AppliedPriceListVersionId,
+                        AppliedVersionCode = calc.AppliedVersionCode
+                    };
+                }
+
+                var fallbackUnitPrice = line.UnitPrice > 0m ? line.UnitPrice : calc.UnitPrice;
+                var fallbackDiscount = line.UnitPrice > 0m ? line.DiscountAmount : 0m;
+                ValidateNumber(fallbackUnitPrice); ValidateNumber(fallbackDiscount);
+                var fallbackAmount = Round(line.Quantity * fallbackUnitPrice) - fallbackDiscount;
+                Require(fallbackAmount >= 0, "error.sales.discount");
+                var fallbackVatRate = line.VatRate != 0m ? line.VatRate : calc.VatRate;
+                return new SalesOrderItem
+                {
+                    ItemId = item.Id,
+                    UomId = line.UomId,
+                    ItemCode = item.Code,
+                    ItemName = item.Name,
+                    UnitName = unitName,
+                    Quantity = line.Quantity,
+                    OriginalPrice = calc.OriginalPrice,
+                    UnitPrice = fallbackUnitPrice,
+                    DiscountPercent = 0m,
+                    FixedDiscountAmount = 0m,
+                    DiscountAmount = fallbackDiscount,
+                    LineTotal = fallbackAmount,
+                    VatRate = fallbackVatRate,
+                    TaxAmount = Round(fallbackAmount * fallbackVatRate / 100m)
+                };
+            }
+
+            ValidateNumber(line.UnitPrice);
+            ValidateNumber(line.DiscountPercent);
+            Require(line.DiscountPercent <= 100m, "error.validation.number");
+            ValidateNumber(line.FixedDiscountAmount);
             var discount = line.DiscountAmount; ValidateNumber(discount);
             var amount = Round(line.Quantity * line.UnitPrice) - discount;
             Require(amount >= 0, "error.sales.discount");
-            var item = items[line.ItemId];
             // VAT is worked out per line on the amount after the line discount and rounded to 4 decimals.
-            return new SalesOrderItem { ItemId = item.Id, ItemCode = item.Code, ItemName = item.Name, UnitName = item.BaseUom?.Name, Quantity = line.Quantity, UnitPrice = line.UnitPrice, DiscountAmount = discount, LineTotal = amount,
-                VatRate = line.VatRate, TaxAmount = Round(amount * line.VatRate / 100m) };
+            return new SalesOrderItem
+            {
+                ItemId = item.Id,
+                UomId = line.UomId,
+                ItemCode = item.Code,
+                ItemName = item.Name,
+                UnitName = unitName,
+                Quantity = line.Quantity,
+                OriginalPrice = item.SalePrice,
+                UnitPrice = line.UnitPrice,
+                DiscountPercent = line.DiscountPercent,
+                FixedDiscountAmount = line.FixedDiscountAmount,
+                DiscountAmount = discount,
+                LineTotal = amount,
+                VatRate = line.VatRate,
+                TaxAmount = Round(amount * line.VatRate / 100m)
+            };
         }).ToList();
         if (request.WarehouseId is int warehouseId) await ServingWarehouses.RequireAsync(Context, request.BranchId, warehouseId, ct);
         entity.WarehouseId = request.WarehouseId;
+        entity.PriceListId = request.PriceListId;
         entity.BranchId = request.BranchId; entity.DepartmentId = request.DepartmentId; entity.CustomerId = partner?.Id; entity.CustomerName = partner?.Name ?? request.CustomerName.Trim();
         entity.ExpectedDeliveryDate = request.ExpectedDeliveryDate; entity.QuotationId = request.QuotationId; entity.SalespersonId = request.SalespersonId;
         entity.DeliveryAddress = string.IsNullOrWhiteSpace(request.DeliveryAddress) ? partner?.Address : request.DeliveryAddress.Trim();
@@ -361,6 +483,5 @@ public sealed class SalesOrderService(ApplicationDbContext context, PostingTrans
         Require(request.TaxAmount == 0 || request.TaxAmount == lineTax, "error.validation.request");
         entity.TaxAmount = lineTax; entity.TotalAmount = entity.SubTotal - request.DiscountAmount + lineTax;
         ValidateNumber(entity.TotalAmount, true); entity.Notes = request.Notes;
-        if (request.OrderDate.HasValue) { Require(request.OrderDate.Value.Kind == DateTimeKind.Utc, "error.validation.request"); entity.OrderDate = request.OrderDate.Value; }
     }
 }

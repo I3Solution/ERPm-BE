@@ -851,6 +851,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.Property(e => e.UnitPrice).HasPrecision(18, 4);
             entity.Property(e => e.MinQuantity).HasPrecision(18, 4);
             entity.Property(e => e.DiscountPercent).HasPrecision(18, 4);
+            entity.Property(e => e.DiscountAmount).HasPrecision(18, 4).HasDefaultValue(0m);
 
             // Explicit constraint name: the generated one exceeds the PostgreSQL 63 character identifier limit.
             entity.HasOne(e => e.PriceListVersion)
@@ -874,7 +875,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
                 .IsUnique()
                 .AreNullsDistinct(false)
                 .HasDatabaseName("ix_tbl_sd_price_list_item_version_item_uom_min_quantity");
-            entity.ToTable(t => t.HasCheckConstraint("CK_tbl_SD_PriceListItem_Values", "unit_price >= 0 AND min_quantity >= 0 AND discount_percent BETWEEN 0 AND 100"));
+            entity.ToTable(t => t.HasCheckConstraint("CK_tbl_SD_PriceListItem_Values", "unit_price >= 0 AND min_quantity >= 0 AND discount_percent BETWEEN 0 AND 100 AND discount_amount >= 0"));
         });
 
         // 5.0b SALE - Quotations
@@ -1018,7 +1019,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.Property(e => e.DeliveryAddressText).HasMaxLength(800);
             entity.HasOne(e => e.Salesperson).WithMany().HasForeignKey(e => e.SalespersonId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Quotation).WithMany().HasForeignKey(e => e.QuotationId).OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne<PriceList>().WithMany().HasForeignKey(e => e.PriceListId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.PriceList).WithMany().HasForeignKey(e => e.PriceListId).OnDelete(DeleteBehavior.SetNull);
             entity.HasOne(e => e.Warehouse).WithMany().HasForeignKey(e => e.WarehouseId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<PartnerDeliveryAddress>().WithMany().HasForeignKey(e => e.DeliveryAddressId).OnDelete(DeleteBehavior.SetNull);
             entity.HasIndex(e => e.DeliveryAddressId);
@@ -1055,12 +1056,17 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.Property(e => e.UnitName).HasMaxLength(50);
 
             entity.Property(e => e.Quantity).HasPrecision(18, 4);
+            entity.Property(e => e.OriginalPrice).HasPrecision(18, 4).HasDefaultValue(0m);
             entity.Property(e => e.UnitPrice).HasPrecision(18, 4);
+            entity.Property(e => e.DiscountPercent).HasPrecision(18, 4).HasDefaultValue(0m);
+            entity.Property(e => e.FixedDiscountAmount).HasPrecision(18, 4).HasDefaultValue(0m);
             entity.Property(e => e.DiscountAmount).HasPrecision(18, 4);
             entity.Property(e => e.LineTotal).HasPrecision(18, 4);
             entity.Property(e => e.VatRate).HasPrecision(5, 2);
             entity.Property(e => e.TaxAmount).HasPrecision(18, 4);
             entity.Property(e => e.InvoicedQuantity).HasPrecision(18, 4);
+            entity.Property(e => e.AppliedPriceListName).HasMaxLength(200);
+            entity.Property(e => e.AppliedVersionCode).HasMaxLength(50);
 
             entity.HasOne(e => e.SalesOrder)
                 .WithMany(o => o.Items)
