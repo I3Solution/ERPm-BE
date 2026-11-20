@@ -273,6 +273,24 @@ public static class TreasuryChecks
         ctx.Check(cashEntity.CurrentBalance == 700_000m, "Reversing receipt restores CashFund CurrentBalance");
         ctx.Check(reversalJournal != null, "Reversing receipt creates a reversal JournalEntry with ReversesJournalEntryId");
 
+        // Credit exposure counts the unallocated part of posted customer receipts; a reversed receipt counts no more.
+        ctx.Check(await posting.ReceivablesAsync(partner.Id, default) == 500_000m, "receivables are the open invoice debt when no receipt is left");
+        ReceiptAllocationInput[] Part(int invoiceId, decimal amount) => [new() { SalesInvoiceId = invoiceId, AllocatedAmount = amount }];
+        var unallocated = await receipts.CreateReceiptVoucherAsync(new CreateReceiptVoucherRequest
+        {
+            BranchId = branch.Id, PaymentMethod = TreasuryPaymentMethod.Cash, CashFundId = cashFund.Id, PartnerId = partner.Id, PayerName = partner.Name,
+            Amount = 100_000m, ReceiptType = ReceiptType.CustomerPayment, Allocations = [.. Part(inv2.Id, 30_000m)]
+        });
+        var advance = await receipts.CreateReceiptVoucherAsync(new CreateReceiptVoucherRequest
+        {
+            BranchId = branch.Id, PaymentMethod = TreasuryPaymentMethod.Cash, CashFundId = cashFund.Id, PartnerId = partner.Id, PayerName = partner.Name,
+            Amount = 50_000m, ReceiptType = ReceiptType.AdvanceFromCustomer
+        });
+        ctx.Check(await posting.ReceivablesAsync(partner.Id, default) == 350_000m, "an unallocated receipt part and an advance lower the customer's credit exposure");
+        await receipts.ReverseReceiptVoucherAsync(unallocated.Id, new ReverseVoucherRequest { Reason = "exposure test" });
+        await receipts.ReverseReceiptVoucherAsync(advance.Id, new ReverseVoucherRequest { Reason = "exposure test" });
+        ctx.Check(await posting.ReceivablesAsync(partner.Id, default) == 500_000m, "reversed receipts no longer lower the exposure");
+
         // 8. Spec alignment checks: embedded JournalEntry, PagedResult, FIFO allocation, BankToBank, AccountService
         ctx.Check(receipt.JournalEntry != null && receipt.JournalEntry.Lines.Count == 2 && receipt.JournalEntry.TotalDebit == 350_000m,
             "ReceiptVoucherDto embeds JournalEntry with balanced lines");

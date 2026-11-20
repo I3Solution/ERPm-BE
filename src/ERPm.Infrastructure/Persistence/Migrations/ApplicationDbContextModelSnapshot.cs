@@ -3864,6 +3864,11 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("sales_invoice_id");
 
+                    b.Property<decimal>("TaxAmount")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasColumnName("tax_amount");
+
                     b.Property<string>("UnitName")
                         .HasColumnType("text")
                         .HasColumnName("unit_name");
@@ -3872,6 +3877,11 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                         .HasPrecision(18, 4)
                         .HasColumnType("numeric(18,4)")
                         .HasColumnName("unit_price");
+
+                    b.Property<decimal>("VatRate")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)")
+                        .HasColumnName("vat_rate");
 
                     b.HasKey("Id")
                         .HasName("pk_tbl_sale_invoice_item");

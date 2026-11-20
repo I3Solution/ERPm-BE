@@ -199,13 +199,15 @@ public sealed class SalesReturnService(ApplicationDbContext context, PostingTran
         foreach (var group in request.Items.GroupBy(l => l.InvoiceItemId!.Value))
             Require(returned.GetValueOrDefault(group.Key) + group.Sum(l => l.Quantity) <= invoiceItems[group.Key].Quantity, "error.sd.return_quantity_exceeds_invoiced", 409);
 
-        var share = invoice.SubTotal == 0 ? 1m : invoice.TotalAmount / invoice.SubTotal;
+        // Header discount (and header VAT of a direct sale) is shared by amount; per-line VAT of an order invoice stays with its line.
+        var lineTax = invoice.Items.Sum(i => i.TaxAmount);
+        var share = invoice.SubTotal == 0 ? 1m : (invoice.TotalAmount - lineTax) / invoice.SubTotal;
         return request.Items.Select(l =>
         {
             var source = invoiceItems[l.InvoiceItemId!.Value];
             var item = items[l.ItemId];
             var goods = item.ItemType == ItemType.Goods;
-            var refund = Round(source.Amount * share * l.Quantity / source.Quantity);
+            var refund = Round((source.Amount * share + source.TaxAmount) * l.Quantity / source.Quantity);
             var line = new SalesReturnItem
             {
                 InvoiceItemId = source.Id, ItemId = item.Id, ItemCode = item.Code, ItemName = item.Name, UnitName = item.BaseUom?.Name,

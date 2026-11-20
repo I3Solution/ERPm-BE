@@ -29,7 +29,9 @@ public sealed class PostingTransaction(ApplicationDbContext context)
         context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock_shared(hashtextextended({key}, 0))", ct);
 
     /// <summary>
-    /// Receivables of a customer: unpaid posted invoices minus posted sales returns settled against the debt.
+    /// Receivables of a customer: unpaid posted invoices minus posted sales returns settled against the debt, minus the
+    /// part of posted customer receipts (payments, advances) not allocated to an invoice. Cancelled receipts give their
+    /// allocations back to the invoices, so they are left out entirely.
     /// </summary>
     public async Task<decimal> ReceivablesAsync(int customerId, CancellationToken ct)
     {
@@ -37,7 +39,12 @@ public sealed class PostingTransaction(ApplicationDbContext context)
             .Where(i => !i.IsDeleted && i.Status == VoucherStatus.Posted && i.CustomerId == customerId).SumAsync(i => i.RemainingDebt, ct);
         var credited = await context.SalesReturns.IgnoreQueryFilters()
             .Where(r => !r.IsDeleted && r.Status == VoucherStatus.Posted && r.CustomerId == customerId && r.RefundMethod == RefundMethod.ReduceDebt).SumAsync(r => r.TotalRefundAmount, ct);
-        return invoiced - credited;
+        var receipts = context.ReceiptVouchers.IgnoreQueryFilters().Where(v => !v.IsDeleted && v.Status == VoucherStatus.Posted && v.PartnerId == customerId &&
+            (v.ReceiptType == ReceiptType.CustomerPayment || v.ReceiptType == ReceiptType.AdvanceFromCustomer));
+        var received = await receipts.SumAsync(v => v.Amount, ct);
+        var allocated = await context.ReceiptVoucherAllocations.IgnoreQueryFilters()
+            .Where(a => receipts.Select(v => v.Id).Contains(a.ReceiptVoucherId)).SumAsync(a => a.AllocatedAmount, ct);
+        return invoiced - credited - (received - allocated);
     }
 
     /// <summary>Next value of the shared document number sequence.</summary>
