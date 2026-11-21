@@ -1320,6 +1320,11 @@ try
     // The editor offers only the active warehouses of the unit's company, so company B's warehouse is not a choice.
     var hnOptions = (await stock.GetServingPolicyAsync(pHn.Id)).Options!.Value.EnumerateArray().Select(o => o.GetProperty("warehouseId").GetInt32()).ToList();
     Check(hnOptions.Contains(k1.Id) && hnOptions.Contains(k2.Id) && !hnOptions.Contains(kB.Id), "the policy view lists only warehouses of the unit's company as choices");
+    // The root group is not a settings unit (contract: Company or Branch); only the S27.1 API may still write its list.
+    Check((await db.Branches.SingleAsync(b => b.Id == branch.Id)).OrgUnitType == OrgUnitType.Group, "the verification root is the group unit");
+    await Reject(async () => await stock.GetServingPolicyAsync(branch.Id), "error.branch_setting.not_found");
+    await Reject(async () => await stock.SaveServingPolicyAsync(branch.Id, Policy("own_warehouses"), "\"x\""), "error.branch_setting.not_found");
+    await Reject(async () => await stock.PreviewServingPolicyAsync(branch.Id, Policy("own_warehouses"), "\"x\""), "error.branch_setting.not_found");
 
     // Orders of the shop holding stock in K2 protect K2 from being removed from company A's list.
     db.StockBalances.Add(new StockBalance { WarehouseId = k2.Id, ItemId = hubItem.Id, QuantityOnHand = 10, AverageCostPrice = 2, InventoryValue = 20 });

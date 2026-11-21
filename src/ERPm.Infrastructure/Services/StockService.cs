@@ -122,7 +122,8 @@ public class StockService : IStockService
     public async Task<SettingViewDto> GetServingPolicyAsync(int branchId, CancellationToken cancellationToken = default)
     {
         await RequireReadableAsync(branchId, cancellationToken);
-        PostingTransaction.Require(_user.CanAt(SettingView, branchId), "error.branch_setting.not_found", 404);
+        PostingTransaction.Require(_user.CanAt(SettingView, branchId) && await _context.Branches.AnyAsync(b => b.Id == branchId
+            && (b.OrgUnitType == OrgUnitType.Company || b.OrgUnitType == OrgUnitType.Branch), cancellationToken), "error.branch_setting.not_found", 404);
         return View(await ServingWarehouses.LoadAsync(_context, branchId, cancellationToken), branchId);
     }
 
@@ -245,8 +246,10 @@ public class StockService : IStockService
         var reason = string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim();
         if (!legacy) PostingTransaction.Require(reason is { Length: <= 500 }, "error.branch_setting.reason_required");
 
-        var target = await _context.Branches.AnyAsync(b => b.Id == branchId && b.IsActive
-            && b.OrgUnitType != OrgUnitType.Warehouse, ct);   // A single-company install keeps its list on the root group, as in S27.1.
+        // Branch Settings apply to companies and branches only; the S27.1 API still lets a single-unit install keep its list on the root group.
+        var target = await _context.Branches.AnyAsync(b => b.Id == branchId && b.IsActive && (legacy
+            ? b.OrgUnitType != OrgUnitType.Warehouse
+            : b.OrgUnitType == OrgUnitType.Company || b.OrgUnitType == OrgUnitType.Branch), ct);
         PostingTransaction.Require(target, "error.branch_setting.not_found", 404);
         PostingTransaction.Require(CanEditAt(branchId), "error.access.denied", 403);
         if (!legacy) PostingTransaction.Require(!string.IsNullOrWhiteSpace(ifMatch), "error.branch_setting.revision_required", 428);
