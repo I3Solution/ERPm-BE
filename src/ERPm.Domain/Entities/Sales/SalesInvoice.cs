@@ -78,6 +78,9 @@ public class SalesInvoiceItem : BaseEntity
     public decimal DiscountPercent { get; set; } = 0m;
     public decimal Amount { get; set; } = 0m;              // Net line total after discount
     public decimal CostPrice { get; set; } = 0m;           // Unit cost at time of sale for COGS
+    // Per-line VAT copied from the sales order; 0 for a direct sale, whose VAT is on the header.
+    public decimal VatRate { get; set; } = 0m;
+    public decimal TaxAmount { get; set; } = 0m;
 
     // Navigation
     public virtual SalesInvoice? SalesInvoice { get; set; }

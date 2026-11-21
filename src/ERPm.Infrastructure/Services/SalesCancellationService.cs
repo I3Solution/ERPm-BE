@@ -26,8 +26,8 @@ public partial class SalesInvoiceService
             Require(!await context.SalesReturns.IgnoreQueryFilters().AnyAsync(r => !r.IsDeleted && r.InvoiceId == id && r.Status == VoucherStatus.Posted, cancellationToken), "error.sd.invoice_has_returns", 409);
             Require(invoice.JournalEntry != null, "error.accounting.accounts_missing", 409);
             var goods = invoice.Items.Where(i => i.CostPrice > 0 || invoice.StockIssue != null).GroupBy(i => i.ItemId).OrderBy(g => g.Key);
-            foreach (var group in goods) await posting.LockAsync($"stock:{invoice.WarehouseId}:{group.Key}", cancellationToken);
             if (invoice.CustomerId.HasValue) await posting.LockAsync($"partner:{invoice.CustomerId}", cancellationToken);
+            foreach (var group in goods) await posting.LockAsync($"stock:{invoice.WarehouseId}:{group.Key}", cancellationToken);
             var stockItems = invoice.StockIssueId.HasValue
                 ? await context.StockIssueItems.Where(i => i.StockIssueId == invoice.StockIssueId).ToListAsync(cancellationToken) : [];
             foreach (var group in stockItems.GroupBy(i => i.ItemId))

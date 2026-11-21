@@ -82,4 +82,7 @@ public class SalesInvoiceItemDto
     public decimal Quantity { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal Amount { get; set; }
+    /// <summary>Per-line VAT of an invoice raised from an order; 0 when the VAT is on the header.</summary>
+    public decimal VatRate { get; set; }
+    public decimal TaxAmount { get; set; }
 }

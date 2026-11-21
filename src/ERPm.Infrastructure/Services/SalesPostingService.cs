@@ -81,9 +81,15 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
         return result;
     }
 
-    /// <summary>Posts an invoice inside the caller's transaction. <paramref name="salesOrderId"/> marks an invoice raised from an order, whose agreed prices are kept.</summary>
-    private async Task<SalesInvoiceDto> PostInvoiceAsync(CreateSalesInvoiceRequest request, string hash, int? salesOrderId, CancellationToken cancellationToken)
+    /// <summary>
+    /// Posts an invoice inside the caller's transaction. <paramref name="salesOrderId"/> marks an invoice raised from an order, whose agreed prices are kept;
+    /// <paramref name="orderLines"/> (same order as <c>request.Items</c>) then carry the per-line VAT agreed on the order instead of a header rate.
+    /// </summary>
+    private async Task<SalesInvoiceDto> PostInvoiceAsync(CreateSalesInvoiceRequest request, string hash, int? salesOrderId, CancellationToken cancellationToken,
+        IReadOnlyList<SalesOrderItem>? orderLines = null)
         {
+            // A retried transaction runs this again; notices of a rolled-back attempt must not be sent.
+            lowStockNotices.Clear();
             await posting.LockAsync($"sale-request:{request.RequestId}", cancellationToken);
             var existing = await context.SalesInvoices.IgnoreQueryFilters().FirstOrDefaultAsync(i => i.RequestId == request.RequestId, cancellationToken);
             if (existing != null)
@@ -101,10 +107,11 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
                 Require(salesOrderId != null, "error.inventory.branch_mismatch");
                 await ServingWarehouses.RequireAsync(context, sellingBranchId, warehouse.Id, cancellationToken);
             }
+            // Lock order everywhere: partner before item and stock keys, so concurrent postings cannot deadlock.
+            if (request.CustomerId.HasValue) await posting.LockAsync($"partner:{request.CustomerId}", cancellationToken);
             var itemIds = request.Items.Select(i => i.ItemId).Distinct().Order().ToArray();
             foreach (var itemId in itemIds) await posting.LockSharedAsync($"item:{itemId}", cancellationToken);
             foreach (var itemId in itemIds) await posting.LockAsync($"stock:{warehouse!.Id}:{itemId}", cancellationToken);
-            if (request.CustomerId.HasValue) await posting.LockAsync($"partner:{request.CustomerId}", cancellationToken);
             var items = await context.Items.Include(i => i.BaseUom).Where(i => itemIds.Contains(i.Id) && i.IsActive).ToDictionaryAsync(i => i.Id, cancellationToken);
             Require(items.Count == itemIds.Length && items.Values.All(i => i.ItemType != ItemType.Combo), "error.inventory.item");
             var balances = await context.StockBalances.Where(b => b.WarehouseId == warehouse!.Id && itemIds.Contains(b.ItemId)).ToDictionaryAsync(b => b.ItemId, cancellationToken);
@@ -125,8 +132,9 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
                 Code = await posting.NumberAsync("PXK", cancellationToken), BranchId = warehouse.BranchId, DepartmentId = request.DepartmentId,
                 WarehouseId = warehouse.Id, CustomerId = request.CustomerId, Status = VoucherStatus.Posted, Reason = invoice.InvoiceNumber
             };
-            foreach (var line in request.Items)
+            for (var index = 0; index < request.Items.Count; index++)
             {
+                var line = request.Items[index];
                 var item = items[line.ItemId];
                 // An order carries the price agreed with the customer (price list, quotation), which may differ from the catalogue price.
                 Require(salesOrderId != null || user == null || user.IsSystem || user.IsAdmin || line.UnitPrice == item.SalePrice, "error.sales.price_override", 403);
@@ -137,7 +145,8 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
                 invoice.Items.Add(new SalesInvoiceItem
                 {
                     ItemId = item.Id, ItemCode = item.Code, ItemName = item.Name, UnitName = item.BaseUom?.Name,
-                    Quantity = line.Quantity, UnitPrice = line.UnitPrice, DiscountPercent = line.DiscountPercent, Amount = amount, CostPrice = cost, CostAmount = costAmount
+                    Quantity = line.Quantity, UnitPrice = line.UnitPrice, DiscountPercent = line.DiscountPercent, Amount = amount, CostPrice = cost, CostAmount = costAmount,
+                    VatRate = orderLines?[index].VatRate ?? 0m, TaxAmount = orderLines?[index].TaxAmount ?? 0m
                 });
                 if (item.ItemType == ItemType.Goods)
                 {
@@ -159,10 +168,20 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
             invoice.SubTotal = invoice.Items.Sum(i => i.Amount);
             Require(request.DiscountAmount <= invoice.SubTotal, "error.sales.discount");
             var netAmount = invoice.SubTotal - request.DiscountAmount;
-            invoice.TaxRate = request.TaxRate;
-            invoice.TaxAmount = request.TaxAmount > 0
-                ? request.TaxAmount
-                : (request.TaxRate > 0 ? Round(netAmount * request.TaxRate / 100m) : 0m);
+            if (orderLines != null)
+            {
+                // Order VAT is per line on the amount after the line discount; the header shows the rate only when all lines share one.
+                var rates = invoice.Items.Select(i => i.VatRate).Distinct().ToList();
+                invoice.TaxRate = rates.Count == 1 ? rates[0] : 0m;
+                invoice.TaxAmount = invoice.Items.Sum(i => i.TaxAmount);
+            }
+            else
+            {
+                // The VAT follows the rate; a client may echo the amount but cannot set a different figure.
+                invoice.TaxRate = request.TaxRate;
+                invoice.TaxAmount = request.TaxRate > 0 ? Round(netAmount * request.TaxRate / 100m) : 0m;
+                Require(request.TaxAmount == 0 || request.TaxAmount == invoice.TaxAmount, "error.validation.request");
+            }
             invoice.TotalAmount = netAmount + invoice.TaxAmount;
             ValidateNumber(invoice.TotalAmount, true);
             Require(request.PaymentMethod != PaymentMethod.Debt || request.PaidAmount == 0, "error.validation.payment_method");
@@ -267,7 +286,7 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
         {
             Id = l.Id, ItemId = l.ItemId, ItemCode = string.IsNullOrEmpty(l.ItemCode) ? l.Item?.Code ?? "" : l.ItemCode,
             ItemName = string.IsNullOrEmpty(l.ItemName) ? l.Item?.Name ?? "" : l.ItemName,
-            Quantity = l.Quantity, UnitPrice = l.UnitPrice, Amount = l.Amount
+            Quantity = l.Quantity, UnitPrice = l.UnitPrice, Amount = l.Amount, VatRate = l.VatRate, TaxAmount = l.TaxAmount
         }).ToList()
     };
 }

@@ -1144,8 +1144,26 @@ try
 
     var draftOnly = await InvOrder(rich.Id, 1, 100);
     await Reject(async () => await seller3.CreateInvoiceFromOrderAsync(draftOnly.Id, FromOrder()), "error.sd.order_invalid_status_for_action");
-    var taxed = await orders.ConfirmAsync((await InvOrder(rich.Id, 1, 100, tax: 10)).Id, default);
-    await Reject(async () => await seller3.CreateInvoiceFromOrderAsync(taxed.Id, FromOrder()), "error.sd.order_tax_not_supported");
+    // An order with VAT is invoiced with its per-line VAT: 2 x 100 - 10 line discount = 190, VAT 10% = 19, header discount 5, total 204.
+    var taxed = await orders.ConfirmAsync((await InvOrder(rich.Id, 2, 100, lineDiscount: 10, discount: 5, tax: 10)).Id, default);
+    var taxedInvoice = await seller3.CreateInvoiceFromOrderAsync(taxed.Id, FromOrder(PaymentMethod.Cash, 204));
+    Check(taxed.TotalAmount == 204 && taxedInvoice.TotalAmount == taxed.TotalAmount && taxedInvoice.TaxAmount == 19 && taxedInvoice.TaxRate == 10
+        && taxedInvoice.Items.Single() is { VatRate: 10, TaxAmount: 19 }, "an order with VAT is invoiced at the order total with its per-line VAT");
+    var taxedJournalId = await db.SalesInvoices.Where(i => i.Id == taxedInvoice.Id).Select(i => i.JournalEntryId).SingleAsync();
+    var taxedLines = await db.JournalEntryLines.AsNoTracking().Where(l => l.JournalEntryId == taxedJournalId).ToListAsync();
+    var vatAccountId = (await new ERPm.Infrastructure.Services.Accounting.DynamicPostingEngine(db).ResolvePostingRuleAsync("SD", "SALES_VAT", branch.Id, null, default)).CreditAccountId;
+    Check(taxedLines.Sum(l => l.DebitAmount) == taxedLines.Sum(l => l.CreditAmount) && taxedLines.Where(l => l.AccountId == vatAccountId).Sum(l => l.CreditAmount) == 19,
+        "the VAT order invoice journal balances and credits VAT with the line VAT");
+    var taxedReturn = await new SalesReturnService(db, new PostingTransaction(db)).CreateAsync(new CreateSalesReturnRequest
+    {
+        InvoiceId = taxedInvoice.Id, BranchId = branch.Id, WarehouseId = warehouse.Id, RefundMethod = (int)RefundMethod.Cash, Reason = "VAT return",
+        Items = [new() { InvoiceItemId = taxedInvoice.Items.Single().Id, ItemId = inv.Id, Quantity = 1 }]
+    });
+    Check(taxedReturn.TotalRefundAmount == 102, "returning half a VAT order line refunds half its net amount and half its VAT");
+    // A direct sale computes VAT from the rate; the client may echo that figure but not send another one.
+    CreateSalesInvoiceRequest Taxed(decimal tax) => new() { RequestId = Guid.NewGuid(), WarehouseId = warehouse.Id, PaymentMethod = PaymentMethod.Cash, PaidAmount = 110, TaxRate = 10, TaxAmount = tax, Items = [new() { ItemId = inv.Id, Quantity = 1, UnitPrice = 100 }] };
+    await Reject(async () => await Sales(db).CreateInvoiceAsync(Taxed(1)), "error.validation.request");
+    Check((await Sales(db).CreateInvoiceAsync(Taxed(10))).TotalAmount == 110 && (await Sales(db).CreateInvoiceAsync(Taxed(0))).TaxAmount == 10, "a direct sale takes its VAT from the rate");
     // An approved credit is honoured when the order is invoiced; an order that was never approved is still held to the limit.
     await db.StockBalances.Where(b => b.ItemId == inv.Id).ExecuteUpdateAsync(b => b.SetProperty(x => x.QuantityOnHand, 100m));
     var approvedPartner = new Partner { Code = "APPR", Name = "Approved", CreditLimit = 0, PartnerType = PartnerType.Customer };

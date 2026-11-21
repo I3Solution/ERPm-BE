@@ -24,7 +24,6 @@ public partial class SalesInvoiceService
             var order = await context.SalesOrders.Include(o => o.Items).SingleOrDefaultAsync(o => o.Id == orderId, cancellationToken);
             Require(order != null, "error.order.not_found", 404);
             Require(order!.Status is SalesOrderStatus.Confirmed or SalesOrderStatus.Processing && order.Items.All(i => i.InvoicedQuantity == 0), "error.sd.order_invalid_status_for_action", 409);
-            Require(order.TaxAmount == 0, "error.sd.order_tax_not_supported", 409);
             // The goods leave the warehouse the order holds them in. An order made before S27.1 names none: the caller picks one.
             Require(order.WarehouseId == null || request.WarehouseId is 0 || request.WarehouseId == order.WarehouseId, "error.sd.warehouse_not_serving", 409);
             var warehouseId = order.WarehouseId ?? request.WarehouseId;
@@ -41,9 +40,11 @@ public partial class SalesInvoiceService
             };
             Require(invoiceRequest.Notes!.Length <= 500, "error.validation.request");
 
+            // The customer is locked before the stock keys the release takes, the same order every posting path uses.
+            if (order.CustomerId.HasValue) await posting.LockAsync($"partner:{order.CustomerId}", cancellationToken);
             // The order's own reservation would otherwise count against the stock it is about to take.
             await new OrderStockReservations(context, posting).ReleaseAsync(order, cancellationToken);
-            var posted = await PostInvoiceAsync(invoiceRequest, Hash(invoiceRequest), order.Id, cancellationToken);
+            var posted = await PostInvoiceAsync(invoiceRequest, Hash(invoiceRequest), order.Id, cancellationToken, order.Items.ToList());
 
             foreach (var line in order.Items) line.InvoicedQuantity = line.Quantity;
             var from = order.Status;
