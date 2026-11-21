@@ -39,9 +39,9 @@ public sealed class StockReceiptPostingService(ApplicationDbContext context, Pos
             Require(warehouse != null, "error.inventory.warehouse", 404);
             Require(request.BranchId == null || request.BranchId == warehouse!.BranchId, "error.inventory.branch_mismatch");
             var ids = request.Items.Select(i => i.ItemId).Distinct().Order().ToArray();
+            if (request.SupplierId.HasValue) await posting.LockAsync($"partner:{request.SupplierId}", ct);
             foreach (var id in ids) await posting.LockSharedAsync($"item:{id}", ct);
             foreach (var id in ids) await posting.LockAsync($"stock:{warehouse!.Id}:{id}", ct);
-            if (request.SupplierId.HasValue) await posting.LockAsync($"partner:{request.SupplierId}", ct);
             var items = await context.Items.Where(i => ids.Contains(i.Id) && i.IsActive && i.ItemType == ItemType.Goods).ToListAsync(ct);
             Require(items.Count == ids.Length, "error.inventory.item");
             var supplier = request.SupplierId.HasValue ? await context.Partners.SingleOrDefaultAsync(p => p.Id == request.SupplierId && p.IsActive, ct) : null;

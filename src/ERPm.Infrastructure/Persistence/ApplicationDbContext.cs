@@ -750,6 +750,8 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.Property(e => e.Amount).HasPrecision(18, 4);
             entity.Property(e => e.CostPrice).HasPrecision(18, 4);
             entity.Property(e => e.CostAmount).HasPrecision(18, 4);
+            entity.Property(e => e.VatRate).HasPrecision(5, 2);
+            entity.Property(e => e.TaxAmount).HasPrecision(18, 4);
 
             entity.HasOne(e => e.SalesInvoice)
                 .WithMany(i => i.Items)
