@@ -52,6 +52,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<PartnerDeliveryAddress> PartnerDeliveryAddresses => Set<PartnerDeliveryAddress>();
     public DbSet<Warehouse> Warehouses => Set<Warehouse>();
     public DbSet<BranchServingWarehouse> BranchServingWarehouses => Set<BranchServingWarehouse>();
+    public DbSet<BranchWarehousePolicy> BranchWarehousePolicies => Set<BranchWarehousePolicy>();
     public DbSet<StockBalance> StockBalances => Set<StockBalance>();
     public DbSet<StockReceipt> StockReceipts => Set<StockReceipt>();
     public DbSet<StockReceiptItem> StockReceiptItems => Set<StockReceiptItem>();
@@ -556,6 +557,16 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.HasOne(e => e.Warehouse).WithMany().HasForeignKey(e => e.WarehouseId).OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => new { e.BranchId, e.WarehouseId }).IsUnique().HasFilter("is_deleted = false");
             entity.HasIndex(e => e.BranchId).IsUnique().HasFilter("is_default = true AND is_deleted = false").HasDatabaseName("ux_branch_serving_warehouse_default");
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<BranchWarehousePolicy>(entity =>
+        {
+            entity.ToTable("tbl_WMS_BranchWarehousePolicy");
+            ConfigureDualKeyAuditable(entity);
+            entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+            // Going back to inheritance soft-deletes the row, so only one live row per unit.
+            entity.HasIndex(e => e.BranchId).IsUnique().HasFilter("is_deleted = false");
             entity.HasQueryFilter(e => !e.IsDeleted);
         });
 

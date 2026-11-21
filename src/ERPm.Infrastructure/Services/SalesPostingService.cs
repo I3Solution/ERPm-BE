@@ -86,7 +86,7 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
     /// <paramref name="orderLines"/> (same order as <c>request.Items</c>) then carry the per-line VAT agreed on the order instead of a header rate.
     /// </summary>
     private async Task<SalesInvoiceDto> PostInvoiceAsync(CreateSalesInvoiceRequest request, string hash, int? salesOrderId, CancellationToken cancellationToken,
-        IReadOnlyList<SalesOrderItem>? orderLines = null)
+        IReadOnlyList<SalesOrderItem>? orderLines = null, bool warehouseHeld = false)
         {
             // A retried transaction runs this again; notices of a rolled-back attempt must not be sent.
             lowStockNotices.Clear();
@@ -105,7 +105,12 @@ public partial class SalesInvoiceService(ApplicationDbContext context, IBranchSe
             if (sellingBranchId != warehouse!.BranchId)
             {
                 Require(salesOrderId != null, "error.inventory.branch_mismatch");
-                await ServingWarehouses.RequireAsync(context, sellingBranchId, warehouse.Id, cancellationToken);
+                // An order that held its stock there keeps that warehouse whatever the policy says now; only the company must match.
+                if (warehouseHeld)
+                    Require(await context.Branches.IgnoreQueryFilters().Where(b => b.Id == sellingBranchId || b.Id == warehouse.BranchId)
+                        .Select(b => b.CompanyId).Distinct().CountAsync(cancellationToken) == 1, "error.sd.warehouse_not_serving", 409);
+                else
+                    await ServingWarehouses.RequireAsync(context, sellingBranchId, warehouse.Id, cancellationToken);
             }
             // Lock order everywhere: partner before item and stock keys, so concurrent postings cannot deadlock.
             if (request.CustomerId.HasValue) await posting.LockAsync($"partner:{request.CustomerId}", cancellationToken);

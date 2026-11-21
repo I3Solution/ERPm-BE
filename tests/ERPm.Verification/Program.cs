@@ -1251,6 +1251,118 @@ try
         && costEntry.BranchId == hub.Id && costEntry.Lines.Sum(l => l.DebitAmount) == 6 && costEntry.Lines.Sum(l => l.CreditAmount) == 6, "revenue is booked at A and the cost of goods at B, each entry balanced");
     await Reject(async () => await Sales(db).CreateInvoiceAsync(new CreateSalesInvoiceRequest { RequestId = Guid.NewGuid(), BranchId = branch.Id, WarehouseId = hubWh.Id, PaidAmount = 100, Items = [new() { ItemId = hubItem.Id, Quantity = 1, UnitPrice = 100 }] }), "error.inventory.branch_mismatch");
     Check((await stock.UpdateServingWarehousesAsync(branch.Id, Serving())) is [{ IsConfigured: false } back] && back.WarehouseId == warehouse.Id, "an empty list sends the branch back to its ownDefault warehouses");
+    // S27.8: the serving warehouse policy is inherited down the company tree; S27.1 lists keep their effect after the backfill.
+    var coA = db.Branches.Add(new Branch { Code = "PCO_A", Name = "Policy company A", OrgUnitType = OrgUnitType.Company }).Entity;
+    var coB = db.Branches.Add(new Branch { Code = "PCO_B", Name = "Policy company B", OrgUnitType = OrgUnitType.Company }).Entity;
+    await db.SaveChangesAsync();
+    coA.CompanyId = coA.Id; coB.CompanyId = coB.Id;
+    var pHn = db.Branches.Add(new Branch { Code = "P_HN", Name = "Policy HN", ParentId = coA.Id, CompanyId = coA.Id }).Entity;
+    await db.SaveChangesAsync();
+    var pShop = db.Branches.Add(new Branch { Code = "P_SHOP", Name = "Policy shop", ParentId = pHn.Id, CompanyId = coA.Id }).Entity;
+    var bShop = db.Branches.Add(new Branch { Code = "P_BSHOP", Name = "Company B shop", ParentId = coB.Id, CompanyId = coB.Id }).Entity;
+    await db.SaveChangesAsync();
+    var k1 = db.Warehouses.Add(new Warehouse { Code = "P_K1", Name = "K1", BranchId = coA.Id }).Entity;
+    var k2 = db.Warehouses.Add(new Warehouse { Code = "P_K2", Name = "K2", BranchId = pHn.Id }).Entity;
+    var kOff = db.Warehouses.Add(new Warehouse { Code = "P_KOFF", Name = "K off", BranchId = coA.Id, IsActive = false }).Entity;
+    var kShop = db.Warehouses.Add(new Warehouse { Code = "P_KSHOP", Name = "K shop", BranchId = pShop.Id }).Entity;
+    var kB = db.Warehouses.Add(new Warehouse { Code = "P_KB", Name = "K company B", BranchId = bShop.Id }).Entity;
+    await db.SaveChangesAsync();
+    // An S27.1 list on company A whose default warehouse was later disabled: S27.1 dropped it and took the lowest ID.
+    db.BranchServingWarehouses.AddRange(new BranchServingWarehouse { BranchId = coA.Id, WarehouseId = k1.Id }, new BranchServingWarehouse { BranchId = coA.Id, WarehouseId = k2.Id },
+        new BranchServingWarehouse { BranchId = coA.Id, WarehouseId = kOff.Id, IsDefault = true });
+    await db.SaveChangesAsync();
+    await db.Database.ExecuteSqlRawAsync(ERPm.Infrastructure.Persistence.Migrations.AddBranchWarehousePolicy.BackfillSql);
+    db.ChangeTracker.Clear();
+    var policies = await db.BranchWarehousePolicies.AsNoTracking().ToDictionaryAsync(p => p.BranchId, p => p.Mode);
+    Check((await stock.GetServingWarehousesAsync(coA.Id)).Select(w => (w.WarehouseId, w.IsDefault)).SequenceEqual([(k1.Id, true), (k2.Id, false)])
+        && policies[coA.Id] == WarehousePolicyMode.FixedList && !await db.BranchServingWarehouses.AnyAsync(s => s.WarehouseId == kOff.Id),
+        "backfill turns an S27.1 list into a fixed list with the same warehouses and default");
+    Check(policies[pHn.Id] == WarehousePolicyMode.OwnWarehouses && policies[pShop.Id] == WarehousePolicyMode.OwnWarehouses && !policies.ContainsKey(bShop.Id)
+        && (await stock.GetServingWarehousesAsync(pShop.Id)) is [{ IsDefault: true, IsConfigured: false } shopOwn] && shopOwn.WarehouseId == kShop.Id,
+        "backfill keeps units below a list on their own warehouses instead of inheriting it");
+
+    UpdateServingWarehousesRequest Policy(string mode, params (int Id, bool IsDefault)[] lines) => new()
+    { Mode = mode, Reason = "verification", Warehouses = lines.Select(l => new ServingWarehouseLine { WarehouseId = l.Id, IsDefault = l.IsDefault }).ToList() };
+    await stock.SaveServingPolicyAsync(pHn.Id, Policy("inherit"));
+    var shopView = await stock.SaveServingPolicyAsync(pShop.Id, Policy("inherit"));
+    Check(shopView.Local.Mode == "inherit" && shopView.Effective.Source.Kind == "ancestor" && shopView.Effective.Source.BranchId == coA.Id
+        && shopView.Effective.Warehouses.Select(w => w.WarehouseId).SequenceEqual([k1.Id, k2.Id]) && shopView.Effective.DefaultWarehouseId == k1.Id,
+        "a shop inheriting through HN uses company A's list and default");
+    await stock.SaveServingPolicyAsync(pHn.Id, Policy("own_warehouses"));
+    Check((await stock.GetServingPolicyAsync(pShop.Id, false)).Effective is { Mode: "own_warehouses", Source.Kind: "ancestor" } hnOwn && hnOwn.Source.BranchId == pHn.Id
+        && hnOwn.Warehouses.Single().WarehouseId == kShop.Id, "HN's own-warehouses mode makes the shop ship from the shop's own warehouses");
+    await stock.SaveServingPolicyAsync(pHn.Id, Policy("inherit"));
+    Check((await stock.GetServingWarehousesAsync(pShop.Id)).Select(w => w.WarehouseId).SequenceEqual([k1.Id, k2.Id]), "HN back to inherit gives the shop company A's list again");
+    Check((await stock.GetServingPolicyAsync(bShop.Id, false)).Effective is { Source.Kind: "module_fallback" } bView && bView.Warehouses.Single().WarehouseId == kB.Id,
+        "company B is not touched by company A's policy");
+    await Reject(async () => await stock.SaveServingPolicyAsync(pHn.Id, new UpdateServingWarehousesRequest { Mode = "inherit" }), "error.branch_setting.reason_required");
+    await Reject(async () => await stock.SaveServingPolicyAsync(pHn.Id, Policy("bogus")), "error.branch_setting.invalid_value");
+    await Reject(async () => await stock.SaveServingPolicyAsync(pHn.Id, Policy("fixed_list", (k1.Id, true), (k2.Id, true))), "error.branch_setting.invalid_value");
+    await Reject(async () => await stock.SaveServingPolicyAsync(pHn.Id, Policy("own_warehouses", (k1.Id, true))), "error.branch_setting.invalid_value");
+    await Reject(async () => await stock.SaveServingPolicyAsync(pHn.Id, Policy("fixed_list", (kB.Id, true))), "error.sd.warehouse_not_serving");
+
+    // Orders of the shop holding stock in K2 protect K2 from being removed from company A's list.
+    db.StockBalances.Add(new StockBalance { WarehouseId = k2.Id, ItemId = hubItem.Id, QuantityOnHand = 10, AverageCostPrice = 2, InventoryValue = 20 });
+    await db.SaveChangesAsync();
+    async Task<SalesOrderDto> ShopOrder(int warehouseId) => await orders.CreateAsync(new CreateSalesOrderRequest
+    { BranchId = pShop.Id, CustomerId = rich.Id, WarehouseId = warehouseId, Items = [new() { ItemId = hubItem.Id, Quantity = 1, UnitPrice = 100 }] });
+    var raceOrder = await ShopOrder(k2.Id);
+    // A policy save racing an order confirmation: one wins, and no order holds stock outside its branch's list.
+    async Task<bool> RaceSave()
+    {
+        await using var c = Db(user);
+        try { await new StockService(c, new BranchService(c), Receipts(c)).SaveServingPolicyAsync(coA.Id, Policy("fixed_list", (k1.Id, true))); return true; }
+        catch (BusinessException e) when (e.Code == "error.branch_setting.active_reservations") { return false; }
+    }
+    async Task<bool> RaceHold()
+    {
+        await using var c = Db(user);
+        try { await new SalesOrderService(c, new PostingTransaction(c)).ConfirmAsync(raceOrder.Id, default); return true; }
+        catch (BusinessException e) when (e.Code == "error.sd.warehouse_not_serving") { return false; }
+    }
+    var policyRace = await Task.WhenAll(RaceSave(), RaceHold());
+    db.ChangeTracker.Clear();
+    var shopList = (await stock.GetServingWarehousesAsync(pShop.Id)).Select(w => w.WarehouseId).ToList();
+    Check(policyRace.Count(won => won) == 1 && await db.StockReservations.AsNoTracking()
+        .Where(r => r.Status == ReservationRecordStatus.Active && r.SalesOrder!.BranchId == pShop.Id).AllAsync(r => shopList.Contains(r.WarehouseId)),
+        "a policy save racing an order confirmation leaves no stock held outside the list");
+    if (policyRace[0]) { await stock.SaveServingPolicyAsync(coA.Id, Policy("fixed_list", (k1.Id, true), (k2.Id, false))); await orders.ConfirmAsync(raceOrder.Id, default); }
+    var heldB = await orders.ConfirmAsync((await ShopOrder(k2.Id)).Id, default);
+    var blockedPreview = await stock.PreviewServingPolicyAsync(coA.Id, Policy("fixed_list", (k1.Id, true)));
+    Check(blockedPreview.Blocked && blockedPreview.Blockers.Single() is { Code: "error.branch_setting.active_reservations", Count: 2 }
+        && blockedPreview.Changes.Any(c => c.BranchId == pShop.Id && c.Before.WarehouseIds.Contains(k2.Id) && !c.After.WarehouseIds.Contains(k2.Id)),
+        "preview lists the shop as affected and the orders holding K2 as blockers");
+    await Reject(async () => await stock.SaveServingPolicyAsync(coA.Id, Policy("fixed_list", (k1.Id, true))), "error.branch_setting.active_reservations");
+    db.ChangeTracker.Clear();
+    await Reject(async () => await stock.UpdateServingWarehousesAsync(coA.Id, Serving((k1.Id, true))), "error.branch_setting.active_reservations");
+    db.ChangeTracker.Clear();
+    var moved = await stock.SaveServingPolicyAsync(coA.Id, Policy("fixed_list", (k1.Id, false), (k2.Id, true)));
+    Check(moved.Effective.DefaultWarehouseId == k2.Id && moved.Revision >= 2, "moving the default within the same list is allowed while orders hold stock");
+
+    // A disabled warehouse makes company A's list invalid: new orders are refused, held orders still invoice and cancel from K2.
+    await db.Warehouses.Where(w => w.Id == k1.Id).ExecuteUpdateAsync(w => w.SetProperty(x => x.IsActive, false));
+    await Reject(async () => await stock.GetServingWarehousesAsync(pShop.Id), "error.sd.warehouse_not_serving");
+    await Reject(async () => await ShopOrder(k2.Id), "error.sd.warehouse_not_serving");
+    Check((await stock.GetServingPolicyAsync(pShop.Id, false)).Effective is { Status: "invalid", ErrorCode: "error.sd.warehouse_not_serving", Warehouses.Count: 0 },
+        "an inherited list with a disabled warehouse is reported invalid");
+    var heldInvoice = await Sales(db).CreateInvoiceFromOrderAsync(raceOrder.Id, new CreateInvoiceFromOrderRequest { PaymentMethod = (int)PaymentMethod.Cash, TenderedAmount = 100 });
+    Check((await db.SalesInvoices.AsNoTracking().SingleAsync(i => i.Id == heldInvoice.Id)).WarehouseId == k2.Id && (await orders.GetByIdAsync(raceOrder.Id))!.Status == "Completed", "an order that held K2 is invoiced from K2 though the list is now invalid");
+    Check((await orders.CancelAsync(heldB.Id, "policy changed", default)).ReservationStatus == "Released", "an order that held K2 is cancelled and gives its stock back");
+    await db.Warehouses.Where(w => w.Id == k1.Id).ExecuteUpdateAsync(w => w.SetProperty(x => x.IsActive, true));
+
+    // Data scope: a user scoped to HN cannot read or change company A, nor change HN while the shop (outside the scope) inherits from it.
+    await using (var hnDb = Db(new TestUser(false, [pHn.Id])))
+    {
+        var hnStock = new StockService(hnDb, new BranchService(hnDb), Receipts(hnDb));
+        await Reject(async () => await hnStock.GetServingWarehousesAsync(coA.Id), "error.branch_setting.not_found");
+        await Reject(async () => await hnStock.GetServingPolicyAsync(pShop.Id, false), "error.branch_setting.not_found");
+        await Reject(async () => await hnStock.SaveServingPolicyAsync(coA.Id, Policy("own_warehouses")), "error.branch_setting.not_found");
+        await Reject(async () => await hnStock.SaveServingPolicyAsync(pHn.Id, Policy("own_warehouses")), "error.access.denied");
+        hnDb.ChangeTracker.Clear();
+        await Reject(async () => await hnStock.UpdateServingWarehousesAsync(pHn.Id, Serving((k2.Id, true))), "error.access.denied");
+        Check((await hnStock.GetServingPolicyAsync(pHn.Id, false)).Effective.Source is { Kind: "ancestor", BranchId: null, BranchName: null },
+            "the source unit is not named to a user who cannot see it");
+    }
     await orders.CancelAsync(legacyConfirmed.Id, "cleanup", default);
     (await db.Accounts.SingleAsync(a => a.Code == "511")).IsActive = false; await db.SaveChangesAsync();   // restore the state the next checks expect
     // Quotation notifications follow the customer's answer and the conversion, and only for changes that were saved.
