@@ -26,6 +26,7 @@ public static class PermissionCatalog
     public const string Archive = "archive";
     public const string Broadcast = "broadcast";
     public const string UnlimitedCredit = "unlimited-credit";
+    public const string ManageDefinition = "manage_definition";
 
     private static readonly string[] PriceListVerbs =
         [View, Create, Edit, Delete, Submit, Withdraw, Approve, Reject, Activate, Close, Archive];
@@ -33,6 +34,7 @@ public static class PermissionCatalog
     private static readonly (string Resource, string[] Verbs)[] Resources =
     [
         ("sys:branch", [View, Create, Edit, Delete]),
+        ("sys:branch-setting", [View, Edit, ManageDefinition]),
         ("sys:localization", [Edit]),
         ("sys:user", [View, Create, Edit]),
         ("sys:role", [View, Create, Edit, Delete]),

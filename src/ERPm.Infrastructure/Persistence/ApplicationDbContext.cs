@@ -52,6 +52,9 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<PartnerDeliveryAddress> PartnerDeliveryAddresses => Set<PartnerDeliveryAddress>();
     public DbSet<Warehouse> Warehouses => Set<Warehouse>();
     public DbSet<BranchServingWarehouse> BranchServingWarehouses => Set<BranchServingWarehouse>();
+    public DbSet<SettingDefinition> SettingDefinitions => Set<SettingDefinition>();
+    public DbSet<BranchSetting> BranchSettings => Set<BranchSetting>();
+    public DbSet<BranchSettingHistory> BranchSettingHistories => Set<BranchSettingHistory>();
     public DbSet<StockBalance> StockBalances => Set<StockBalance>();
     public DbSet<StockReceipt> StockReceipts => Set<StockReceipt>();
     public DbSet<StockReceiptItem> StockReceiptItems => Set<StockReceiptItem>();
@@ -298,6 +301,48 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
                 .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasIndex(e => new { e.LanguageCode, e.Key }).IsUnique();
+        });
+
+        // Branch settings with inheritance (Step 27)
+        modelBuilder.Entity<SettingDefinition>(entity =>
+        {
+            entity.ToTable("tbl_SYS_SettingDefinition");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.Key).HasColumnName("setting_key").HasMaxLength(96).IsRequired();
+            entity.HasAlternateKey(e => e.Key);
+            entity.Property(e => e.GroupKey).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ValueType).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.LabelsJson).HasColumnType("jsonb").IsRequired();
+            entity.Property(e => e.ConstraintsJson).HasColumnType("jsonb").IsRequired();
+            entity.Property(e => e.DefaultValueJson).HasColumnType("jsonb");
+            entity.Property(e => e.StorageKind).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.EditorKey).HasMaxLength(96);
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<BranchSetting>(entity =>
+        {
+            entity.ToTable("tbl_SYS_BranchSetting");
+            ConfigureDualKeyAuditable(entity);
+            entity.Property(e => e.SettingKey).HasMaxLength(96).IsRequired();
+            entity.Property(e => e.ValueJson).HasColumnType("jsonb").IsRequired();
+            entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Definition).WithMany().HasForeignKey(e => e.SettingKey).HasPrincipalKey(d => d.Key).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.BranchId, e.SettingKey }).IsUnique().HasFilter("is_deleted = false");
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<BranchSettingHistory>(entity =>
+        {
+            entity.ToTable("tbl_SYS_BranchSettingHistory");
+            ConfigureDualKeyEntity(entity);
+            entity.Property(e => e.SettingKey).HasMaxLength(96).IsRequired();
+            entity.Property(e => e.BeforeJson).HasColumnType("jsonb");
+            entity.Property(e => e.AfterJson).HasColumnType("jsonb");
+            entity.Property(e => e.ChangedBy).HasMaxLength(100);
+            entity.Property(e => e.Reason).HasMaxLength(500);
+            entity.HasOne(e => e.Branch).WithMany().HasForeignKey(e => e.BranchId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.BranchId, e.SettingKey, e.Id });
         });
 
         // 1.1 Enterprise Notification Engine (Step 21)
