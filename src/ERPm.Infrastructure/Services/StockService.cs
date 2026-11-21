@@ -211,7 +211,9 @@ public class StockService : IStockService
                     Source = source
                 },
             CanEdit = CanEditAt(branchId),
-            Etag = Etag(tree, branchId)
+            Etag = Etag(tree, branchId),
+            Options = JsonSerializer.SerializeToElement(tree.Warehouses.Values.OrderBy(w => w.Code).ThenBy(w => w.WarehouseId)
+                .Select(w => new { w.WarehouseId, w.Code, w.Name, w.BranchId, w.BranchName }), Json)
         };
     }
 
@@ -252,7 +254,10 @@ public class StockService : IStockService
 
         var tree = await ServingWarehouses.LoadAsync(_context, branchId, ct);
         if (!legacy) PostingTransaction.Require(ifMatch!.Trim() == Etag(tree, branchId), "error.branch_setting.stale_revision", 412);
-        PostingTransaction.Require(lines.All(l => tree.Warehouses.ContainsKey(l.WarehouseId)), "error.sd.warehouse_not_serving", 409);
+        // The settings contract treats a warehouse outside the company or inactive as an invalid value; the S27.1 API keeps its 409.
+        var known = lines.All(l => tree.Warehouses.ContainsKey(l.WarehouseId));
+        if (legacy) PostingTransaction.Require(known, "error.sd.warehouse_not_serving", 409);
+        else PostingTransaction.Require(known, "error.branch_setting.invalid_value");
         var beforeLocal = LocalJson(tree, branchId);
         var units = tree.Subtree(branchId).Where(id => tree.Nodes[id].IsActive || id == branchId).ToList();
         var before = units.ToDictionary(id => id, id => ServingWarehouses.Resolve(tree, id));

@@ -60,6 +60,8 @@ public class SettingViewDto
     public SettingEffectiveDto Effective { get; set; } = new();
     public bool CanEdit { get; set; }
     public string Etag { get; set; } = string.Empty;
+    /// <summary>Values an editor may choose from, for module keys whose choices depend on the unit (e.g. warehouses of its company).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public JsonElement? Options { get; set; }
 }
 
 public class SettingListDto
