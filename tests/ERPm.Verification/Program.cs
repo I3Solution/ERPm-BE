@@ -1389,6 +1389,8 @@ try
     await ERPm.Verification.NotificationChecks.RunDbChecksAsync(new(u => Db(u), Check, Reject));
     await ERPm.Verification.DynamicPostingChecks.RunDbChecksAsync(new(u => Db(u), Check, Reject));
     await ERPm.Verification.TreasuryChecks.RunDbChecksAsync(new(u => Db(u), Check, Reject));
+    ERPm.Verification.BranchSettingChecks.Pure(Check);
+    await ERPm.Verification.BranchSettingChecks.RunDbChecksAsync(new(u => Db(u), Check, Reject));
     await ERPm.Verification.AccountingReportChecks.RunDbChecksAsync(new(u => Db(u), Check));
     using var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
     var port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop();
@@ -1435,6 +1437,45 @@ try
         using var branchEditDenied = await http.PutAsJsonAsync($"/api/v1/branches/{allowedBranch.Id}", new { code = "X", name = "X", parentId = (int?)null, isActive = true });
         using var branchDeleteDenied = await http.DeleteAsync($"/api/v1/branches/{allowedBranch.Id}");
         Check(branchEditDenied.StatusCode == HttpStatusCode.Forbidden && branchDeleteDenied.StatusCode == HttpStatusCode.Forbidden, "viewer cannot edit or delete branches");
+        // Branch settings over HTTP: definition 201/409, ETag + If-Match (428/412), and permissions for the viewer (403).
+        {
+            var settingUrl = $"/api/v1/sys/branches/{allowedBranch.Id}/settings/http.check_flag";
+            using var viewerDefinition = await http.PostAsJsonAsync("/api/v1/sys/branch-setting-definitions", new { key = "http.check_flag", groupKey = "operations", valueType = "boolean", labels = new { vi = "Cờ", en = "Flag" }, defaultValue = true });
+            http.DefaultRequestHeaders.Authorization = new("Bearer", adminToken);
+            using var definitionCreated = await http.PostAsJsonAsync("/api/v1/sys/branch-setting-definitions", new { key = "http.check_flag", groupKey = "operations", valueType = "boolean", labels = new { vi = "Cờ", en = "Flag" }, defaultValue = true });
+            using var definitionDuplicate = await http.PostAsJsonAsync("/api/v1/sys/branch-setting-definitions", new { key = "http.check_flag", groupKey = "operations", valueType = "boolean", labels = new { vi = "Cờ", en = "Flag" }, defaultValue = true });
+            Check(viewerDefinition.StatusCode == HttpStatusCode.Forbidden && definitionCreated.StatusCode == HttpStatusCode.Created && definitionDuplicate.StatusCode == HttpStatusCode.Conflict,
+                "only manage_definition registers a key (201) and a duplicate key is 409");
+            using var settingRead = await http.GetAsync(settingUrl);
+            var etag = settingRead.Headers.ETag?.ToString();
+            using var noMatch = await http.PutAsJsonAsync(settingUrl, new { mode = "override", value = false });
+            using var staleRequest = new HttpRequestMessage(HttpMethod.Put, settingUrl) { Content = JsonContent.Create(new { mode = "override", value = false }) };
+            staleRequest.Headers.TryAddWithoutValidation("If-Match", "\"bs-0-stale\"");
+            using var stalePut = await http.SendAsync(staleRequest);
+            using var putRequest = new HttpRequestMessage(HttpMethod.Put, settingUrl) { Content = JsonContent.Create(new { mode = "override", value = false, reason = "HTTP check" }) };
+            putRequest.Headers.TryAddWithoutValidation("If-Match", etag);
+            using var saved = await http.SendAsync(putRequest);
+            using var savedPayload = JsonDocument.Parse(await saved.Content.ReadAsStringAsync());
+            var savedData = savedPayload.RootElement.GetProperty("data");
+            Check(settingRead.IsSuccessStatusCode && etag != null && noMatch.StatusCode == (HttpStatusCode)428 && stalePut.StatusCode == HttpStatusCode.PreconditionFailed
+                && saved.IsSuccessStatusCode && saved.Headers.ETag?.ToString() == savedData.GetProperty("etag").GetString() && saved.Headers.ETag?.ToString() != etag
+                && savedData.GetProperty("local").GetProperty("value").GetBoolean() == false,
+                "PUT needs If-Match (428), refuses a stale tag (412) and returns the saved false value with a new ETag");
+            using var stalePayload = JsonDocument.Parse(await stalePut.Content.ReadAsStringAsync());
+            Check(stalePayload.RootElement.GetProperty("errorCode").GetString() == "error.branch_setting.stale_revision", "stale If-Match reports error.branch_setting.stale_revision");
+            using var historyRead = await http.GetAsync(settingUrl + "/history?pageIndex=1&pageSize=5");
+            using var historyPayload = JsonDocument.Parse(await historyRead.Content.ReadAsStringAsync());
+            Check(historyPayload.RootElement.GetProperty("data").GetProperty("totalCount").GetInt32() == 1, "history endpoint returns the saved change");
+            http.DefaultRequestHeaders.Authorization = new("Bearer", viewerToken);
+            using var viewerRead = await http.GetAsync($"/api/v1/sys/branches/{allowedBranch.Id}/settings");
+            using var viewerPutRequest = new HttpRequestMessage(HttpMethod.Put, settingUrl) { Content = JsonContent.Create(new { mode = "inherit" }) };
+            viewerPutRequest.Headers.TryAddWithoutValidation("If-Match", saved.Headers.ETag?.ToString());
+            using var viewerPut = await http.SendAsync(viewerPutRequest);
+            using var viewerPreview = await http.PostAsJsonAsync(settingUrl + "/preview", new { mode = "inherit" });
+            using var viewerOther = await http.GetAsync($"/api/v1/sys/branches/{deniedBranch.Id}/settings");
+            Check(viewerRead.IsSuccessStatusCode && viewerPut.StatusCode == HttpStatusCode.Forbidden && viewerPreview.StatusCode == HttpStatusCode.Forbidden
+                && viewerOther.StatusCode == HttpStatusCode.NotFound, "viewer reads settings of its branch only and cannot preview or save (403)");
+        }
         // Sort query keys on the real HTTP binding: sort=field, sort=-field, sortBy+isAscending, and an unknown name is a 400.
         async Task<(HttpStatusCode Status, List<string> Names)> ListNames(string url, string field)
         {

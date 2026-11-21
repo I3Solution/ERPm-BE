@@ -74,6 +74,7 @@ public static class DependencyInjection
 
         // Register All Domain & Feature Services
         services.AddScoped<IBranchService, BranchService>();
+        services.AddScoped<IBranchSettingService, BranchSettingService>();
         services.AddScoped<ILocalizationService, LocalizationService>();
         services.AddScoped<IItemService, ItemService>();
         services.AddScoped<IStockService, StockService>();
