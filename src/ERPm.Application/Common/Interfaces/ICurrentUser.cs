@@ -11,4 +11,7 @@ public interface ICurrentUser
     bool HasUnrestrictedScope => false;
     int[] DepartmentIds => [];
     bool IncludeOwnRecords => false;
+
+    /// <summary>True when the caller holds <paramref name="action"/> with a data scope that covers the branch.</summary>
+    bool CanAt(string action, int branchId) => IsSystem || IsAdmin;
 }

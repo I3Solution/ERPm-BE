@@ -16,4 +16,6 @@ public sealed class CurrentUser(IHttpContextAccessor accessor) : ICurrentUser
     public bool HasUnrestrictedScope => accessor.HttpContext?.Scope()?.Unrestricted == true;
     public int[] DepartmentIds => accessor.HttpContext?.Scope()?.DepartmentIds.ToArray() ?? [];
     public bool IncludeOwnRecords => accessor.HttpContext?.Scope()?.OwnRecords == true;
+    public bool CanAt(string action, int branchId) => IsSystem || IsAdmin
+        || accessor.HttpContext?.Principal()?.Evaluate(action) is { Allowed: true } decision && decision.Scope.CoversBranch(branchId);
 }

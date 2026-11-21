@@ -1,6 +1,7 @@
 # ERPm-BE — Backend Status
 
 ## In-Progress
+- S27.6 Branch Settings (SYS): catalog, override, lịch sử, resolver và API — chờ tester. Xem [step log](steps/step-27-6-branch-settings.md).
 - Không có task BE mở; chờ chạy `--migrate` trên DB thực tế khi deploy các migration S25.
 
 ## Next Steps

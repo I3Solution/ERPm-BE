@@ -9,7 +9,7 @@ namespace ERPm.Domain.Services.Iam;
 public static class SystemRoles
 {
     private static readonly string[] ViewActions =
-        ["wms:*:view", "sd:*:view", "pur:*:view", "crm:*:view", "dashboard:*:view", "sys:branch:view"];
+        ["wms:*:view", "sd:*:view", "pur:*:view", "crm:*:view", "dashboard:*:view", "sys:branch:view", "sys:branch-setting:view"];
 
     // Operator writes that were open to the legacy "Write" policy (everything else was Admin only).
     private static readonly string[] OperatorActions =
