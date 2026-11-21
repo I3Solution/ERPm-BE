@@ -78,6 +78,7 @@ public static class DependencyInjection
         services.AddScoped<ILocalizationService, LocalizationService>();
         services.AddScoped<IItemService, ItemService>();
         services.AddScoped<IStockService, StockService>();
+        services.AddScoped<IBranchSettingModuleProvider, ServingWarehousePolicyProvider>();
         services.AddScoped<ISalesInvoiceService, SalesInvoiceService>();
         services.AddScoped<IPartnerService, PartnerService>();
         services.AddScoped<IPartnerDeliveryAddressService, PartnerDeliveryAddressService>();

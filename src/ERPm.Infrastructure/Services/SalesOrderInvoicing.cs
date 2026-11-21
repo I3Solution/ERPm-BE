@@ -43,8 +43,9 @@ public partial class SalesInvoiceService
             // The customer is locked before the stock keys the release takes, the same order every posting path uses.
             if (order.CustomerId.HasValue) await posting.LockAsync($"partner:{order.CustomerId}", cancellationToken);
             // The order's own reservation would otherwise count against the stock it is about to take.
+            var held = order.ReservationStatus == OrderReservationStatus.Reserved && order.WarehouseId == warehouseId;
             await new OrderStockReservations(context, posting).ReleaseAsync(order, cancellationToken);
-            var posted = await PostInvoiceAsync(invoiceRequest, Hash(invoiceRequest), order.Id, cancellationToken, order.Items.ToList());
+            var posted = await PostInvoiceAsync(invoiceRequest, Hash(invoiceRequest), order.Id, cancellationToken, order.Items.ToList(), held);
 
             foreach (var line in order.Items) line.InvoicedQuantity = line.Quantity;
             var from = order.Status;

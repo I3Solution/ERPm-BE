@@ -69,10 +69,15 @@ public class ServingWarehouseLine
     public bool IsDefault { get; set; }
 }
 
-/// <summary>Replaces the branch's whole list. An empty list goes back to the branch's own warehouses.</summary>
+/// <summary>
+/// Without <see cref="Mode"/> (legacy client) it replaces the branch's whole list and an empty list means the branch's own
+/// warehouses. With a mode (<c>fixed_list</c>, <c>own_warehouses</c>, <c>inherit</c>) a reason is required.
+/// </summary>
 public class UpdateServingWarehousesRequest
 {
+    public string? Mode { get; set; }
     public List<ServingWarehouseLine> Warehouses { get; set; } = new();
+    public string? Reason { get; set; }
 }
 
 /// <summary>Stock of one item in one warehouse: available is on hand less what orders hold.</summary>

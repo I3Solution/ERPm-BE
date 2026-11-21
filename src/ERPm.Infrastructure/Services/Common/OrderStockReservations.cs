@@ -21,6 +21,8 @@ internal sealed class OrderStockReservations(ApplicationDbContext context, Posti
         if (lines.Count == 0) { order.ReservationStatus = OrderReservationStatus.None; return; }
 
         // The order ships from one warehouse: the one picked while Draft, else the branch default (orders made before S27.1).
+        // The shared policy lock makes a concurrent policy save wait, or this see it, before any stock is held.
+        await posting.LockSharedAsync(await ServingWarehouses.LockKeyAsync(context, order.BranchId, ct), ct);
         order.WarehouseId = await ServingWarehouses.ResolveAsync(context, order.BranchId, order.WarehouseId, ct);
         int[] warehouseIds = [order.WarehouseId.Value];
         var goodsIds = goods.Order().ToArray();

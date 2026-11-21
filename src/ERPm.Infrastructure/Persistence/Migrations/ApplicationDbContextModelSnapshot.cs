@@ -2093,6 +2093,80 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     b.ToTable("tbl_WMS_BranchServingWarehouse", (string)null);
                 });
 
+            modelBuilder.Entity("ERPm.Domain.Entities.Inventory.BranchWarehousePolicy", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("BranchId")
+                        .HasColumnType("integer")
+                        .HasColumnName("branch_id");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("created_by");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at_utc");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("deleted_by");
+
+                    b.Property<Guid>("ExternalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("external_id");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
+                    b.Property<DateTime?>("LastModifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_modified_at_utc");
+
+                    b.Property<string>("LastModifiedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("last_modified_by");
+
+                    b.Property<int>("Mode")
+                        .HasColumnType("integer")
+                        .HasColumnName("mode");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("integer")
+                        .HasColumnName("revision");
+
+                    b.Property<int?>("TenantId")
+                        .HasColumnType("integer")
+                        .HasColumnName("tenant_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tbl_wms_branch_warehouse_policy");
+
+                    b.HasIndex("BranchId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_wms_branch_warehouse_policy_branch_id")
+                        .HasFilter("is_deleted = false");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tbl_wms_branch_warehouse_policy_external_id");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("ExternalId"), new[] { "Id", "IsDeleted" });
+
+                    b.ToTable("tbl_WMS_BranchWarehousePolicy", (string)null);
+                });
+
             modelBuilder.Entity("ERPm.Domain.Entities.Inventory.StockBalance", b =>
                 {
                     b.Property<int>("Id")
@@ -6692,6 +6766,18 @@ namespace ERPm.Infrastructure.Persistence.Migrations
                     b.Navigation("Branch");
 
                     b.Navigation("Warehouse");
+                });
+
+            modelBuilder.Entity("ERPm.Domain.Entities.Inventory.BranchWarehousePolicy", b =>
+                {
+                    b.HasOne("ERPm.Domain.Entities.System.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_tbl_wms_branch_warehouse_policy_tbl_sys_branch_branch_id");
+
+                    b.Navigation("Branch");
                 });
 
             modelBuilder.Entity("ERPm.Domain.Entities.Inventory.StockBalance", b =>
